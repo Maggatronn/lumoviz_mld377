@@ -1,0 +1,353 @@
+import { ParentCampaign } from '../components/dialogs/ParentCampaignDialog';
+
+/**
+ * Hardcoded campaigns for Spring 2026 Organizing Drive
+ * This data will eventually come from an API
+ */
+export const getDefaultCampaigns = (): ParentCampaign[] => {
+  const baseDate = '2025-11-18';
+  const pledgeEndDate = '2026-03-28';
+
+  return [
+    // Parent Campaign
+    {
+      id: 'parent_spring_2026',
+      name: 'Spring 2026 Organizing Drive',
+      description: 'Organization-wide campaign to build pledges and activate team members',
+      startDate: baseDate,
+      endDate: pledgeEndDate,
+      chapters: ['All Chapters'],
+      createdDate: new Date().toISOString(),
+      goalTypes: [
+        {
+          id: 'pledges',
+          name: 'Pledges',
+          description: 'Total pledges collected',
+          totalTarget: 1760,
+          unit: 'pledges',
+          dataSource: 'pledges',
+          level: 'organization'
+        },
+        {
+          id: 'team_members',
+          name: 'Team Members',
+          description: 'Team members moving others to action',
+          totalTarget: 132,
+          unit: 'members',
+          dataSource: 'manual',
+          level: 'organization'
+        },
+        {
+          id: 'membership_1on1s',
+          name: 'Membership One-on-One',
+          description: 'Membership recruitment conversations',
+          totalTarget: 500,
+          unit: '1:1s',
+          dataSource: 'meetings_membership',
+          level: 'organization'
+        },
+        {
+          id: 'leadership_1on1s',
+          name: 'Leadership Development One-on-One',
+          description: 'Leadership development conversations (Two-on-One)',
+          totalTarget: 200,
+          unit: '1:1s',
+          dataSource: 'meetings_leadership',
+          level: 'organization'
+        }
+      ],
+      milestones: [
+        {
+          id: 'milestone_jan31',
+          date: '2026-01-31',
+          description: 'Team Members Goal',
+          goalTypeTargets: {
+            'team_members': 132,
+            'pledges': 500
+          }
+        },
+        {
+          id: 'milestone_feb28',
+          date: '2026-02-28',
+          description: 'Mid-Campaign Check',
+          goalTypeTargets: {
+            'pledges': 1200
+          }
+        },
+        {
+          id: 'milestone_mar28',
+          date: '2026-03-28',
+          description: 'Final Goals',
+          goalTypeTargets: {
+            'pledges': 1760,
+            'membership_1on1s': 500,
+            'leadership_1on1s': 200
+          }
+        }
+      ]
+    },
+    // Durham Chapter
+    {
+      id: 'durham_spring_2026',
+      name: 'Durham - Spring 2026',
+      description: 'Durham chapter contribution to Spring 2026 Organizing Drive',
+      startDate: baseDate,
+      endDate: pledgeEndDate,
+      chapters: ['Durham For All'],
+      createdDate: new Date().toISOString(),
+      parentCampaignId: 'parent_spring_2026',
+      campaignType: 'child',
+      goalTypes: [
+        {
+          id: 'pledges',
+          name: 'Pledges',
+          description: 'Durham pledges',
+          totalTarget: 360,
+          unit: 'pledges'
+        },
+        {
+          id: 'team_members',
+          name: 'Team Members',
+          description: 'Durham team members',
+          totalTarget: 25,
+          unit: 'members'
+        },
+        {
+          id: 'membership_1on1s',
+          name: 'Membership One-on-One',
+          description: 'Durham membership recruitment conversations',
+          totalTarget: 100,
+          unit: '1:1s'
+        },
+        {
+          id: 'leadership_1on1s',
+          name: 'Leadership Development One-on-One',
+          description: 'Durham leadership development conversations',
+          totalTarget: 40,
+          unit: '1:1s'
+        }
+      ],
+      milestones: [
+        {
+          id: 'durham_jan31',
+          date: '2026-01-31',
+          description: 'Team Members Goal',
+          goalTypeTargets: {
+            'team_members': 25,
+            'pledges': 100,
+            'membership_1on1s': 30,
+            'leadership_1on1s': 12
+          }
+        },
+        {
+          id: 'durham_mar28',
+          date: '2026-03-28',
+          description: 'Final Goals',
+          goalTypeTargets: {
+            'pledges': 360,
+            'membership_1on1s': 100,
+            'leadership_1on1s': 40
+          }
+        }
+      ]
+    },
+    // Forsyth Chapter
+    {
+      id: 'forsyth_spring_2026',
+      name: 'Forsyth - Spring 2026',
+      description: 'Forsyth chapter contribution to Spring 2026 Organizing Drive',
+      startDate: baseDate,
+      endDate: pledgeEndDate,
+      chapters: ['Forsyth For All'],
+      createdDate: new Date().toISOString(),
+      parentCampaignId: 'parent_spring_2026',
+      campaignType: 'child',
+      goalTypes: [
+        {
+          id: 'pledges',
+          name: 'Pledges',
+          description: 'Forsyth pledges',
+          totalTarget: 800,
+          unit: 'pledges'
+        },
+        {
+          id: 'team_members',
+          name: 'Team Members',
+          description: 'Forsyth team members (8 teams of 10)',
+          totalTarget: 80,
+          unit: 'members'
+        },
+        {
+          id: 'membership_1on1s',
+          name: 'Membership One-on-One',
+          description: 'Forsyth membership recruitment conversations',
+          totalTarget: 200,
+          unit: '1:1s'
+        },
+        {
+          id: 'leadership_1on1s',
+          name: 'Leadership Development One-on-One',
+          description: 'Forsyth leadership development conversations',
+          totalTarget: 80,
+          unit: '1:1s'
+        }
+      ],
+      milestones: [
+        {
+          id: 'forsyth_jan31',
+          date: '2026-01-31',
+          description: 'Team Members Goal',
+          goalTypeTargets: {
+            'team_members': 80,
+            'pledges': 250,
+            'membership_1on1s': 60,
+            'leadership_1on1s': 24
+          }
+        },
+        {
+          id: 'forsyth_mar28',
+          date: '2026-03-28',
+          description: 'Final Goals',
+          goalTypeTargets: {
+            'pledges': 800,
+            'membership_1on1s': 200,
+            'leadership_1on1s': 80
+          }
+        }
+      ]
+    },
+    // New Hanover Chapter
+    {
+      id: 'new_hanover_spring_2026',
+      name: 'New Hanover - Spring 2026',
+      description: 'New Hanover chapter contribution to Spring 2026 Organizing Drive',
+      startDate: baseDate,
+      endDate: pledgeEndDate,
+      chapters: ['New Hanover For All'],
+      createdDate: new Date().toISOString(),
+      parentCampaignId: 'parent_spring_2026',
+      campaignType: 'child',
+      goalTypes: [
+        {
+          id: 'pledges',
+          name: 'Pledges',
+          description: 'New Hanover pledges',
+          totalTarget: 300,
+          unit: 'pledges'
+        },
+        {
+          id: 'team_members',
+          name: 'Team Members',
+          description: 'New Hanover team members',
+          totalTarget: 12,
+          unit: 'members'
+        },
+        {
+          id: 'membership_1on1s',
+          name: 'Membership One-on-One',
+          description: 'New Hanover membership recruitment conversations',
+          totalTarget: 80,
+          unit: '1:1s'
+        },
+        {
+          id: 'leadership_1on1s',
+          name: 'Leadership Development One-on-One',
+          description: 'New Hanover leadership development conversations',
+          totalTarget: 30,
+          unit: '1:1s'
+        }
+      ],
+      milestones: [
+        {
+          id: 'new_hanover_jan31',
+          date: '2026-01-31',
+          description: 'Team Members Goal',
+          goalTypeTargets: {
+            'team_members': 12,
+            'pledges': 80,
+            'membership_1on1s': 25,
+            'leadership_1on1s': 10
+          }
+        },
+        {
+          id: 'new_hanover_mar28',
+          date: '2026-03-28',
+          description: 'Final Goals',
+          goalTypeTargets: {
+            'pledges': 300,
+            'membership_1on1s': 80,
+            'leadership_1on1s': 30
+          }
+        }
+      ]
+    },
+    // Guilford Chapter
+    {
+      id: 'guilford_spring_2026',
+      name: 'Guilford - Spring 2026',
+      description: 'Guilford chapter contribution to Spring 2026 Organizing Drive',
+      startDate: baseDate,
+      endDate: pledgeEndDate,
+      chapters: ['Guilford For All'],
+      createdDate: new Date().toISOString(),
+      parentCampaignId: 'parent_spring_2026',
+      campaignType: 'child',
+      goalTypes: [
+        {
+          id: 'pledges',
+          name: 'Pledges',
+          description: 'Guilford pledges',
+          totalTarget: 300,
+          unit: 'pledges'
+        },
+        {
+          id: 'team_members',
+          name: 'Team Members',
+          description: 'Guilford team members',
+          totalTarget: 15,
+          unit: 'members'
+        },
+        {
+          id: 'membership_1on1s',
+          name: 'Membership One-on-One',
+          description: 'Guilford membership recruitment conversations',
+          totalTarget: 120,
+          unit: '1:1s'
+        },
+        {
+          id: 'leadership_1on1s',
+          name: 'Leadership Development One-on-One',
+          description: 'Guilford leadership development conversations',
+          totalTarget: 50,
+          unit: '1:1s'
+        }
+      ],
+      milestones: [
+        {
+          id: 'guilford_jan31',
+          date: '2026-01-31',
+          description: 'Team Members Goal',
+          goalTypeTargets: {
+            'team_members': 15,
+            'pledges': 70,
+            'membership_1on1s': 35,
+            'leadership_1on1s': 15
+          }
+        },
+        {
+          id: 'guilford_mar28',
+          date: '2026-03-28',
+          description: 'Final Goals',
+          goalTypeTargets: {
+            'pledges': 300,
+            'membership_1on1s': 120,
+            'leadership_1on1s': 50
+          }
+        }
+      ]
+    }
+  ];
+};
+
+// Default selected campaigns
+export const DEFAULT_SELECTED_CAMPAIGNS = ['parent_spring_2026'];

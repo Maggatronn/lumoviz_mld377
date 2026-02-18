@@ -1,0 +1,4462 @@
+import React, { useMemo, useState, useEffect } from 'react';
+import { format } from 'date-fns';
+import {
+  Box,
+  Typography,
+  Paper,
+  Card,
+  CardContent,
+  LinearProgress,
+  Chip,
+  List,
+  ListItem,
+  ListItemText,
+  IconButton,
+  Button,
+  Collapse,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  Checkbox,
+  FormControlLabel,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  Select,
+  MenuItem,
+  FormControl,
+  InputLabel,
+  TextField,
+  Tooltip,
+  Tabs,
+  Tab
+} from '@mui/material';
+import { 
+  addToList, 
+  updateListItem, 
+  removeFromList, 
+  saveOrganizerGoal,
+  fetchOrganizerGoals,
+  saveLeaderHierarchy,
+  removeLeaderHierarchy,
+  fetchLists,
+  createAction,
+  fetchActions
+} from '../../services/api';
+import {
+  Star as StarIcon,
+  EmojiEvents as TrophyIcon,
+  ExpandMore as ExpandMoreIcon,
+  ExpandLess as ExpandLessIcon,
+  Add as AddIcon,
+  CheckCircle as CheckCircleIcon,
+  People as PeopleIcon,
+  Delete as DeleteIcon,
+  Edit as EditIcon,
+  Groups as GroupsIcon,
+  InfoOutlined as InfoIcon,
+  FilterList as FilterListIcon,
+  Archive as ArchiveIcon,
+  Unarchive as UnarchiveIcon
+} from '@mui/icons-material';
+import { PledgeSubmission } from '../../services/api';
+import { ParentCampaign } from '../dialogs/ParentCampaignDialog';
+import AddTeamDialog from '../dialogs/AddTeamDialog';
+import EditTeamDialog from '../dialogs/EditTeamDialog';
+import CampaignActionDialog from '../dialogs/CampaignActionDialog';
+import teamsService from '../../services/teamsService';
+import { useChapterColors } from '../../contexts/ChapterColorContext';
+import { getLOEColor, LOE_LEVELS } from '../../theme/loeColors';
+import { GraphNode, GraphLink } from '../../types';
+import PeoplePanel from '../panels/PeoplePanel';
+import ActionListTable from '../ui/ActionListTable';
+import { OrganizerChip } from '../ui/OrganizerChip';
+import { getCanonicalOrganizerName } from '../../services/organizerMappingService';
+import { LeaderMetricsTable, LeaderProgress } from '../tables/LeaderMetricsTable';
+
+interface DashboardProps {
+  currentUserId: string | null;
+  currentUserInfo: any;
+  pledgeSubmissions: PledgeSubmission[];
+  parentCampaigns: ParentCampaign[];
+  // Network data for user's teams
+  nodes: GraphNode[];
+  links: GraphLink[];
+  userMap: Map<string, any>;
+  onNodeSelect?: (nodeId: string | null) => void;
+  onPersonDetailsOpen?: (personId: string) => void; // Open person details dialog
+  selectedChapter?: string;
+  currentDateRange?: { start: Date; end: Date } | null;
+  teamsData?: any[]; // Add teams data
+  peopleRecords?: any[]; // Add people records for conversations
+  onRefreshTeams?: () => Promise<void>; // Callback to refresh teams
+  allPeople?: any[]; // All people for team dialogs
+  organizers?: any[]; // Organizers for team dialogs
+  chapters?: string[]; // Available chapters
+  selectedActions?: string[]; // Selected actions from URL
+  onSelectedActionsChange?: (actions: string[]) => void; // Callback to update URL
+  actions?: ActionDefinition[]; // Actions from database
+  // Shared PeoplePanel data from MainApp
+  sharedAllContacts?: any[];
+  sharedCachedMeetings?: any[];
+  // Shared leader hierarchy from MainApp
+  leaderHierarchy?: any[];
+  onLeaderHierarchyChange?: () => void; // Callback to refresh hierarchy after changes
+  // Shared lists data from MainApp
+  listsData?: any[];
+  onListsDataChange?: () => void; // Callback to refresh lists after changes
+  // Shared organizer goals from MainApp
+  organizerGoals?: any[];
+  onOrganizerGoalsChange?: () => void; // Callback to refresh goals after changes
+  // Organizer mapping functionality
+  organizerMappings?: any[];
+  onFilterByOrganizer?: (name: string, vanId?: string) => void;
+  onEditOrganizerMapping?: (name: string, vanId?: string) => void;
+}
+
+// Action definitions interface
+export interface ActionDefinition {
+  action_id: string;
+  action_name: string;
+  goal_type: string;
+  description?: string;
+  fields: { key: string; label: string }[];
+  is_active: boolean;
+  has_goal?: boolean;
+}
+
+interface TurfPerson {
+  vanid: number;
+  firstName: string;
+  lastName: string;
+  desiredChange: string;
+  action: string; // action ID
+  fields: Record<string, boolean>; // dynamic boolean fields based on action
+  datePledged?: string;
+  list_id?: string; // BigQuery list ID for updates
+}
+
+interface MyLeader {
+  vanid: number;
+  name: string;
+}
+
+interface LeaderProgress {
+  id: string;
+  name: string;
+  pledgeCount: number;
+  pledgeGoal: number;
+  hasMetGoal: boolean;
+  subLeaders: LeaderProgress[];
+  isAutomatic?: boolean; // True if from team structure
+  memberStatus?: string; // Membership status
+  actionProgress?: { // Progress for each action type
+    [actionId: string]: {
+      count: number;
+      goal: number;
+      hasMetGoal: boolean;
+    }
+  };
+}
+
+interface ActionGoal {
+  actionId: string;
+  actionName: string;
+  current: number;
+  goal: number;
+  percentage: number;
+}
+
+const Dashboard: React.FC<DashboardProps> = ({
+  currentUserId,
+  currentUserInfo,
+  pledgeSubmissions,
+  parentCampaigns,
+  nodes,
+  links,
+  userMap,
+  onNodeSelect,
+  onPersonDetailsOpen,
+  selectedChapter = 'All Chapters',
+  currentDateRange = null,
+  teamsData = [],
+  peopleRecords = [],
+  onRefreshTeams,
+  allPeople = [],
+  organizers = [],
+  chapters = [],
+  selectedActions: selectedActionsProp = ['sign_pledge'],
+  onSelectedActionsChange,
+  actions: actionsProp = [],
+  sharedAllContacts = [],
+  sharedCachedMeetings = [],
+  leaderHierarchy: leaderHierarchyProp = [],
+  onLeaderHierarchyChange,
+  listsData: listsDataProp = [],
+  onListsDataChange,
+  organizerGoals: organizerGoalsProp = [],
+  onOrganizerGoalsChange,
+  organizerMappings = [],
+  onFilterByOrganizer,
+  onEditOrganizerMapping
+}) => {
+  const { updateChapterColor } = useChapterColors();
+  
+  // Normalize actions from database format to component format
+  const ACTIONS = React.useMemo(() => {
+    return actionsProp.map(action => ({
+      id: action.action_id,
+      name: action.action_name,
+      fields: action.fields || [],
+      goalType: action.goal_type as 'pledge' | 'team' | 'other',
+      has_goal: action.has_goal !== false // Default to true if not set
+    }));
+  }, [actionsProp]);
+  
+  // State for managing actions - MUST BE DECLARED BEFORE selectedActions memo
+  const [availableActions, setAvailableActions] = React.useState<any[]>([]);
+  const [loadingActions, setLoadingActions] = React.useState(false);
+  const [actionStatusFilter, setActionStatusFilter] = React.useState<'live' | 'archived'>('live');
+  const [showAddActionDialog, setShowAddActionDialog] = React.useState(false);
+  const [editingAction, setEditingAction] = React.useState<any>(null);
+  
+  // Goal setting state
+  const [showSetGoalDialog, setShowSetGoalDialog] = React.useState(false);
+  const [goalActionId, setGoalActionId] = React.useState<string>('');
+  const [goalValue, setGoalValue] = React.useState<number>(5);
+  const [organizerGoals, setOrganizerGoals] = React.useState<Record<string, number>>({});
+  
+  // Get live actions for the current organizer (replaces global selectedActions)
+  // These will be used in My Goals section
+  const currentOrganizerLiveActions = useMemo(() => {
+    return availableActions
+      .filter((a: any) => (a.status || 'live') === 'live')
+      .map((a: any) => a.action_id);
+  }, [availableActions]);
+  
+  // Map of organizer_vanid -> live action IDs
+  // This will be computed per leader in the My Leaders table
+  const [leaderActionsMap, setLeaderActionsMap] = React.useState<Record<string, string[]>>({});
+  
+  // Map of organizer_vanid -> { action_id -> goal_value }
+  // This stores each leader's personal goals for their actions
+  const [leaderGoalsMap, setLeaderGoalsMap] = React.useState<Record<string, Record<string, number>>>({});
+  
+  // State for managing turf
+  const [turfList, setTurfList] = React.useState<TurfPerson[]>([]);
+  const [reloadTrigger, setReloadTrigger] = React.useState(0);
+  const [showAddTurfDialog, setShowAddTurfDialog] = React.useState(false);
+  const [selectedActionForAdd, setSelectedActionForAdd] = React.useState<string>(''); // Action to add people to
+  // Dashboard tab state - sync with URL
+  const getDashboardTabFromURL = () => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get('dashboardTab') as 'lists' | 'people' | 'leaders' | 'actions' || 'people';
+  };
+  
+  const [turfTab, setTurfTab] = React.useState<'lists' | 'people' | 'leaders' | 'actions'>(getDashboardTabFromURL());
+  const [listStatusFilter, setListStatusFilter] = React.useState<'all' | 'complete' | 'in_progress'>('all'); // Filter for My Lists by status
+  
+  // Get organizer from URL or default to Courtney
+  const getOrganizerFromURL = () => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get('organizer') || '';
+  };
+
+  // Dynamically build organizer list from teams table names + organizer mappings
+  const dashboardOrganizers = React.useMemo(() => {
+    const organizerMap = new Map<string, string>(); // vanid -> name
+    
+    if (!teamsData || !Array.isArray(teamsData)) {
+      return [];
+    }
+    
+    // Extract all team member NAMES from teams table
+    const teamMemberNames = new Set<string>();
+    
+    teamsData.forEach(team => {
+      // Get team members from BigQuery data
+      if (team.bigQueryData?.teamMembers && Array.isArray(team.bigQueryData.teamMembers)) {
+        team.bigQueryData.teamMembers.forEach((name: string) => {
+          if (name && name.trim()) {
+            teamMemberNames.add(name.trim());
+          }
+        });
+      }
+      
+      // Get team lead
+      if (team.bigQueryData?.teamLead) {
+        teamMemberNames.add(team.bigQueryData.teamLead.trim());
+      }
+    });
+    
+    // For each name, resolve to canonical form and find VAN ID
+    teamMemberNames.forEach(name => {
+      // Step 1: Resolve to canonical name using mappings
+      const canonicalName = organizerMappings && organizerMappings.length > 0
+        ? getCanonicalOrganizerName(name, organizerMappings)
+        : name;
+      
+      // Step 2: Find VAN ID for this canonical name in userMap
+      const userEntry = Array.from(userMap.entries()).find(([id, info]) => {
+        const fullName = (info.fullName || `${info.firstname || ''} ${info.lastname || ''}`.trim()).toLowerCase();
+        const firstName = (info.firstname || '').toLowerCase();
+        const canonicalLower = canonicalName.toLowerCase();
+        
+        return fullName === canonicalLower || 
+               firstName === canonicalLower ||
+               fullName.includes(canonicalLower) ||
+               canonicalLower.includes(fullName);
+      });
+      
+      if (userEntry) {
+        const [vanid, info] = userEntry;
+        organizerMap.set(vanid, canonicalName);
+      }
+    });
+    
+    // Also add ALL organizers from the mapping table
+    if (organizerMappings && Array.isArray(organizerMappings)) {
+      organizerMappings.forEach(mapping => {
+        const vanid = mapping.primary_vanid;
+        const name = mapping.preferred_name;
+        
+        if (vanid && name && !organizerMap.has(vanid)) {
+          organizerMap.set(vanid, name);
+        }
+      });
+    }
+    
+    // Convert to array and sort
+    return Array.from(organizerMap.entries())
+      .map(([vanid, name]) => ({ vanid, name }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [teamsData, userMap, organizerMappings]);
+  
+  // Organizer selector for dashboard view
+  // Try to get organizer from: 1) URL, 2) localStorage, 3) nothing (empty)
+  const getInitialOrganizer = () => {
+    const urlOrganizer = getOrganizerFromURL();
+    if (urlOrganizer) return urlOrganizer;
+    
+    // Check localStorage for cached organizer
+    const cachedOrganizer = localStorage.getItem('dashboard_selected_organizer');
+    return cachedOrganizer || ''; // Default to empty string (no selection)
+  };
+  
+  const [selectedOrganizerId, setSelectedOrganizerId] = React.useState<string>(getInitialOrganizer());
+  const [selectedOrganizerInfo, setSelectedOrganizerInfo] = React.useState<any>(currentUserInfo);
+
+  // Update selected organizer when dropdown changes
+  React.useEffect(() => {
+    if (selectedOrganizerId) {
+      // First try to find in dashboardOrganizers list (most reliable)
+      const selectedOrg = dashboardOrganizers.find(org => org.vanid === selectedOrganizerId);
+      
+      if (selectedOrg) {
+        // Use the name from the dropdown (canonical name)
+        
+        // Try to get more info from userMap
+        const orgInfo = userMap.get(selectedOrganizerId);
+        setSelectedOrganizerInfo(orgInfo || { 
+          firstname: selectedOrg.name.split(' ')[0],
+          fullName: selectedOrg.name 
+        });
+        
+        // Set filter using the canonical name
+        // PeoplePanel will check if person.organizers array includes this name
+        setDashboardPeopleFilters((prev: any) => ({ 
+          ...prev, 
+          organizer: selectedOrg.name 
+        }));
+        
+      } else {
+      }
+    } else {
+      // Clear filter when no organizer selected
+      setDashboardPeopleFilters((prev: any) => ({ 
+        ...prev, 
+        organizer: '' 
+      }));
+    }
+  }, [selectedOrganizerId, userMap, currentUserInfo, dashboardOrganizers]);
+  
+  // Filters for Dashboard's My People PeoplePanel - pre-filtered by current user as organizer
+  const [dashboardPeopleFilters, setDashboardPeopleFilters] = React.useState<any>({
+    organizer: currentUserInfo?.fullName || currentUserInfo?.firstname || '',
+    chapter: '',
+    searchText: '',
+    loeStatus: [],
+    memberStatus: [],
+    lastContactFilter: 'all',
+    meetingCountFilter: 'all',
+    actionStatus: 'all'
+  });
+  
+  // Update organizer filter when user info loads
+  React.useEffect(() => {
+    const orgName = currentUserInfo?.fullName || currentUserInfo?.firstname || '';
+    if (orgName && !dashboardPeopleFilters.organizer) {
+      setDashboardPeopleFilters((prev: any) => ({ ...prev, organizer: orgName }));
+    }
+  }, [currentUserInfo]); // eslint-disable-line react-hooks/exhaustive-deps
+  const [showQuickAddDialog, setShowQuickAddDialog] = React.useState(false);
+  const [personToQuickAdd, setPersonToQuickAdd] = React.useState<any>(null);
+  const [quickAddActionId, setQuickAddActionId] = React.useState<string>('sign_pledge');
+  const [showMyPeopleFilters, setShowMyPeopleFilters] = React.useState(false);
+  
+  // State for managing leaders
+  const [leadersList, setLeadersList] = React.useState<MyLeader[]>([]);
+  // Leader hierarchy now comes from MainApp as a prop (leaderHierarchyProp)
+  const [showAddLeaderDialog, setShowAddLeaderDialog] = React.useState(false);
+  const [selectedParentLeader, setSelectedParentLeader] = React.useState<string | null>(null); // For Add Leader dialog
+  
+  // State for managing teams
+  const [showAddTeamDialog, setShowAddTeamDialog] = React.useState(false);
+  const [showEditTeamDialog, setShowEditTeamDialog] = React.useState(false);
+  const [teamToEdit, setTeamToEdit] = React.useState<any>(null);
+  
+  // Search state for dialogs
+  const [turfSearchText, setTurfSearchText] = React.useState('');
+  const [leaderSearchText, setLeaderSearchText] = React.useState('');
+  
+  // State for adding people to a leader's organizing list
+  const [showAddToLeaderListDialog, setShowAddToLeaderListDialog] = React.useState(false);
+  const [selectedLeaderForAdd, setSelectedLeaderForAdd] = React.useState<LeaderProgress | null>(null);
+  const [selectedActionForLeaderAdd, setSelectedActionForLeaderAdd] = React.useState<string>('sign_pledge');
+  const [leaderListSearchText, setLeaderListSearchText] = React.useState('');
+  const [leaderListReloadTrigger, setLeaderListReloadTrigger] = React.useState<{[key: string]: number}>({});
+
+  // Load lists for the SELECTED organizer (not just from MainApp prop)
+  React.useEffect(() => {
+    const loadListsForSelectedOrganizer = async () => {
+      if (!selectedOrganizerId) {
+        setTurfList([]);
+        return;
+      }
+      
+      try {
+        const lists = await fetchLists(selectedOrganizerId);
+        
+        // Convert to TurfPerson format
+        const turfPeople: TurfPerson[] = lists.map(item => ({
+          vanid: parseInt(item.vanid),
+          firstName: item.contact_name.split(' ')[0] || '',
+          lastName: item.contact_name.split(' ').slice(1).join(' ') || '',
+          desiredChange: item.desired_change || '',
+          action: item.action_id,
+          fields: item.progress || {},
+          datePledged: item.date_pledged,
+          list_id: item.list_id
+        }));
+        
+        setTurfList(turfPeople);
+      } catch (error) {
+        setTurfList([]);
+      }
+    };
+    
+    loadListsForSelectedOrganizer();
+  }, [selectedOrganizerId]); // Reload whenever the selected organizer changes
+
+  // Load available actions for the selected organizer
+  useEffect(() => {
+    const loadActions = async () => {
+      if (selectedOrganizerId) {
+        setLoadingActions(true);
+        try {
+          const actions = await fetchActions(selectedOrganizerId);
+          setAvailableActions(actions);
+          // Set default action to first available action
+          if (actions.length > 0 && !selectedActionForAdd) {
+            setSelectedActionForAdd(actions[0].action_id);
+          }
+        } catch (error) {
+          console.error('Error loading actions:', error);
+          setAvailableActions([]);
+        } finally {
+          setLoadingActions(false);
+        }
+      }
+    };
+    
+    loadActions();
+  }, [selectedOrganizerId, reloadTrigger]);
+  
+  // Load live actions and goals for all leaders (from both hierarchy AND teams)
+  // This creates maps of organizer_vanid -> live action IDs and organizer_vanid -> goals
+  useEffect(() => {
+    const loadLeaderActionsAndGoals = async () => {
+      // Get all unique leader VANIDs from TWO sources:
+      const leaderVanids = new Set<string>();
+      
+      // SOURCE 1: Leader hierarchy
+      if (leaderHierarchyProp && leaderHierarchyProp.length > 0) {
+        leaderHierarchyProp.forEach(entry => {
+          if (entry.leader_vanid) leaderVanids.add(entry.leader_vanid);
+        });
+      }
+      
+      // SOURCE 2: Team members (if user has a team, include team members as leaders)
+      const myTeam = teamsData?.find(team => {
+        const teamLead = team.bigQueryData?.teamLead;
+        if (!teamLead) return false;
+        
+        const organizerInfo = selectedOrganizerInfo || currentUserInfo;
+        const userFullName = organizerInfo?.fullName;
+        const userFirstName = organizerInfo?.firstname;
+        
+        return teamLead === userFullName || 
+               teamLead.toLowerCase() === userFullName?.toLowerCase() ||
+               teamLead.toLowerCase() === userFirstName?.toLowerCase();
+      });
+      
+      if (myTeam?.bigQueryData?.teamMembers && Array.isArray(myTeam.bigQueryData.teamMembers)) {
+        myTeam.bigQueryData.teamMembers.forEach((memberName: string) => {
+          // Find team member's VAN ID from peopleRecords or nodes
+          const person = peopleRecords?.find(p => 
+            p.name.toLowerCase() === memberName.toLowerCase()
+          );
+          const node = !person ? nodes.find(n => 
+            n.name?.toLowerCase() === memberName.toLowerCase()
+          ) : null;
+          
+          const memberId = person?.id || node?.id;
+          if (memberId) {
+            leaderVanids.add(memberId);
+          }
+        });
+      }
+      
+      if (leaderVanids.size === 0) return;
+      
+      console.log('[Dashboard] Loading actions for leaders:', {
+        selectedOrganizerId,
+        leaderVanids: Array.from(leaderVanids),
+        fromHierarchy: leaderHierarchyProp?.length || 0,
+        fromTeams: myTeam?.bigQueryData?.teamMembers?.length || 0,
+        courtneyIncluded: leaderVanids.has('101669044'),
+        ashlyIncluded: leaderVanids.has('101687480')
+      });
+      
+      // Fetch actions and goals for each leader
+      const actionsMap: Record<string, string[]> = {};
+      const goalsMap: Record<string, Record<string, number>> = {};
+      
+      await Promise.all(
+        Array.from(leaderVanids).map(async (vanid) => {
+          try {
+            // Fetch actions
+            const actions = await fetchActions(vanid);
+            console.log(`[Dashboard] Fetched actions for leader ${vanid}:`, {
+              totalActions: actions.length,
+              actions: actions.map((a: any) => ({
+                id: a.action_id,
+                name: a.action_name,
+                status: a.status,
+                organizer_vanid: a.organizer_vanid
+              }))
+            });
+            
+            // Filter to only live actions
+            const liveActions = actions
+              .filter((a: any) => (a.status || 'live') === 'live')
+              .map((a: any) => a.action_id);
+            actionsMap[vanid] = liveActions;
+            
+            console.log(`[Dashboard] Live actions for leader ${vanid}:`, liveActions);
+            
+            // Fetch goals
+            const goals = await fetchOrganizerGoals(vanid);
+            const goalsForOrganizer: Record<string, number> = {};
+            goals.forEach((goal: any) => {
+              goalsForOrganizer[goal.action_id] = goal.goal_value;
+            });
+            goalsMap[vanid] = goalsForOrganizer;
+          } catch (error) {
+            console.error(`[Dashboard] Error loading data for leader ${vanid}:`, error);
+            actionsMap[vanid] = [];
+            goalsMap[vanid] = {};
+          }
+        })
+      );
+      
+      console.log('[Dashboard] Final leaderActionsMap:', actionsMap);
+      console.log('[Dashboard] Final leaderGoalsMap:', goalsMap);
+      
+      setLeaderActionsMap(actionsMap);
+      setLeaderGoalsMap(goalsMap);
+    };
+    
+    loadLeaderActionsAndGoals();
+  }, [leaderHierarchyProp, reloadTrigger, teamsData, selectedOrganizerInfo, currentUserInfo, peopleRecords, nodes]);
+  
+  // Load organizer goals
+  useEffect(() => {
+    const loadGoals = async () => {
+      if (selectedOrganizerId) {
+        const goals = await fetchOrganizerGoals(selectedOrganizerId);
+        const goalsMap: Record<string, number> = {};
+        goals.forEach((goal: any) => {
+          goalsMap[goal.action_id] = goal.goal_value;
+        });
+        setOrganizerGoals(goalsMap);
+      }
+    };
+    
+    loadGoals();
+  }, [selectedOrganizerId, reloadTrigger]);
+
+  // Use leader hierarchy from MainApp prop
+  // Extract unique leaders for leadersList (backward compatibility)
+  React.useEffect(() => {
+    const uniqueLeaders = new Map<string, MyLeader>();
+    leaderHierarchyProp.forEach(entry => {
+      if (!uniqueLeaders.has(entry.leader_vanid)) {
+        uniqueLeaders.set(entry.leader_vanid, {
+          vanid: parseInt(entry.leader_vanid),
+          name: '' // Will be filled from peopleRecords
+        });
+      }
+    });
+    setLeadersList(Array.from(uniqueLeaders.values()));
+  }, [leaderHierarchyProp]);
+
+  // Save leaders to localStorage (keeping this for now - can move to DB later)
+  useEffect(() => {
+    if (currentUserId && leadersList.length > 0) {
+      localStorage.setItem(`leaders-${currentUserId}`, JSON.stringify(leadersList));
+    }
+  }, [leadersList, currentUserId]);
+
+  // Filter teams to show only those where the selected organizer is a member or lead
+  const myTeamsData = useMemo(() => {
+    if (!teamsData || !selectedOrganizerInfo) return [];
+    
+    const userFullName = selectedOrganizerInfo?.fullName;
+    const userFirstName = selectedOrganizerInfo?.firstname;
+    
+    return teamsData.filter(team => {
+      // Check if selected organizer is the team lead
+      const isLead = team.bigQueryData?.teamLead === userFullName || 
+                     team.bigQueryData?.teamLead === userFirstName;
+      
+      // Check if user is in team members
+      const isMember = team.bigQueryData?.teamMembers?.some((memberName: string) => {
+        const memberNameLower = memberName.toLowerCase();
+        const userFullNameLower = userFullName?.toLowerCase();
+        const userFirstNameLower = userFirstName?.toLowerCase();
+        
+        return memberNameLower === userFullNameLower ||
+               memberNameLower.includes(userFirstNameLower || '') ||
+               memberNameLower.split(' ')[0] === userFirstNameLower;
+      });
+      
+      return isLead || isMember;
+    });
+  }, [teamsData, selectedOrganizerInfo]);
+
+  // Find selected organizer's team (where they're the leader)
+  const myTeam = useMemo(() => {
+    if (!selectedOrganizerId || !teamsData) return null;
+    
+    const userFullName = selectedOrganizerInfo?.fullName || selectedOrganizerInfo?.firstname;
+    const firstName = selectedOrganizerInfo?.firstname;
+    
+    return teamsData.find(team => 
+      team.bigQueryData?.teamLead === userFullName ||
+      team.bigQueryData?.teamLead === firstName ||
+      (firstName && team.bigQueryData?.teamLead?.toLowerCase().includes(firstName.toLowerCase()))
+    );
+  }, [teamsData, selectedOrganizerId, selectedOrganizerInfo]);
+
+  // Selected organizer's chapter
+  const userChapter = selectedOrganizerInfo?.chapter || currentUserInfo?.chapter || 'Unknown';
+
+  // Helper: Get ALL VAN IDs for the selected organizer (primary + alternates from mapping table)
+  const getAllOrganizerVanIds = useMemo(() => {
+    if (!selectedOrganizerId || !organizerMappings) return [selectedOrganizerId];
+    
+    // Find the mapping for this organizer
+    const mapping = organizerMappings.find(m => m.primary_vanid === selectedOrganizerId);
+    
+    if (!mapping) return [selectedOrganizerId];
+    
+    // Return primary + all alternates
+    const allIds = [mapping.primary_vanid];
+    if (mapping.alternate_vanids && Array.isArray(mapping.alternate_vanids)) {
+      allIds.push(...mapping.alternate_vanids);
+    }
+    
+    return allIds;
+  }, [selectedOrganizerId, organizerMappings]);
+
+  // Helper: Get ALL name variations for the selected organizer
+  const getAllOrganizerNames = useMemo(() => {
+    if (!selectedOrganizerId || !organizerMappings) {
+      const organizerInfo = selectedOrganizerInfo || currentUserInfo;
+      return [
+        organizerInfo?.fullName,
+        organizerInfo?.firstname,
+        organizerInfo?.firstname && organizerInfo?.lastname 
+          ? `${organizerInfo.firstname} ${organizerInfo.lastname}`
+          : null
+      ].filter(Boolean);
+    }
+    
+    // Find the mapping for this organizer
+    const mapping = organizerMappings.find(m => m.primary_vanid === selectedOrganizerId);
+    
+    const names = [
+      selectedOrganizerInfo?.fullName,
+      selectedOrganizerInfo?.firstname,
+      mapping?.preferred_name
+    ].filter(Boolean);
+    
+    if (mapping?.name_variations && Array.isArray(mapping.name_variations)) {
+      names.push(...mapping.name_variations);
+    }
+    
+    return names;
+  }, [selectedOrganizerId, selectedOrganizerInfo, currentUserInfo, organizerMappings]);
+
+  // MY TURF: People organized by the selected organizer (pledges + manual additions)
+  const myTurf = useMemo(() => {
+    if (!selectedOrganizerId) return [];
+    
+    const allVanIds = getAllOrganizerVanIds;
+    const allNames = getAllOrganizerNames;
+    
+    const turfPeople: TurfPerson[] = [];
+    
+    // Import pledges as "Sign Pledge" actions
+    pledgeSubmissions.forEach(submission => {
+      if (submission.submissions && Array.isArray(submission.submissions)) {
+        submission.submissions.forEach(sub => {
+          const leaderStr = sub.leader?.toString().trim();
+          // Check against ALL VAN IDs and ALL name variations
+          const isMyPledge = allVanIds.includes(leaderStr) || 
+                            allNames.some(name => name && leaderStr === name);
+          
+          if (isMyPledge) {
+            // Check if already in manual turf list
+            const existingInList = turfList.find(t => t.vanid === sub.vanid && t.action === 'sign_pledge');
+            
+            turfPeople.push({
+              vanid: sub.vanid,
+              firstName: sub.first_name,
+              lastName: sub.last_name,
+              desiredChange: sub.desired_change,
+              action: 'sign_pledge',
+              fields: {
+                asked: existingInList?.fields?.asked ?? true, // Auto-mark as asked if pledged
+                signed: existingInList?.fields?.signed ?? true, // Auto-mark as signed if pledged
+                willGetOthers: existingInList?.fields?.willGetOthers ?? false
+              },
+              datePledged: submission.date_submitted
+            });
+          }
+        });
+      }
+    });
+    
+    // Merge with manual turf list (people added but not yet pledged/completed action)
+    turfList.forEach(turfPerson => {
+      if (!turfPeople.find(p => p.vanid === turfPerson.vanid && p.action === turfPerson.action)) {
+        turfPeople.push(turfPerson);
+      }
+    });
+    
+    // Debug logging - commented out for production
+    // console.log('[Dashboard] myTurf computed:', {
+    //   totalPeople: turfPeople.length,
+    //   actions: Array.from(new Set(turfPeople.map(p => p.action))),
+    //   turfListLength: turfList.length,
+    //   pledgeSubmissionsLength: pledgeSubmissions.length,
+    //   sample: turfPeople.slice(0, 3)
+    // });
+    
+    return turfPeople;
+  }, [pledgeSubmissions, selectedOrganizerId, turfList, getAllOrganizerVanIds, getAllOrganizerNames]);
+
+  // MY PEOPLE: People organized by the selected organizer (from peopleRecords/meetings)
+  const myPeople = useMemo(() => {
+    if (!selectedOrganizerId || !peopleRecords) return [];
+    
+    const allVanIds = getAllOrganizerVanIds;
+    const allNames = getAllOrganizerNames;
+    
+    // Filter people where I was the organizer
+    let filtered = peopleRecords
+      .filter(person => {
+        // Check if this person has any meetings where I was the organizer
+        if (!person.organizers || person.organizers.length === 0) return false;
+        
+        const isMyContact = person.organizers.some((organizer: string) => {
+          const orgStr = organizer?.toString().trim();
+          // Check against ALL VAN IDs and ALL name variations
+          const matchesVanId = allVanIds.includes(orgStr);
+          const matchesName = allNames.some(name => name && orgStr === name);
+          
+          return matchesVanId || matchesName;
+        });
+        
+        // Only filter by organizer - PeoplePanel handles other filters
+        return isMyContact;
+      })
+      .sort((a, b) => {
+        // Sort by most recent contact, descending
+        if (!a.mostRecentContact && !b.mostRecentContact) return 0;
+        if (!a.mostRecentContact) return 1;
+        if (!b.mostRecentContact) return -1;
+        return new Date(b.mostRecentContact).getTime() - new Date(a.mostRecentContact).getTime();
+      });
+    
+    return filtered;
+  }, [peopleRecords, selectedOrganizerId, getAllOrganizerVanIds, getAllOrganizerNames]);
+
+  // Auto-add Team Leaders from myPeople to leadersList
+  // DISABLED: This was auto-adding all Team Leaders, preventing manual addition
+  // Users should be able to manually add anyone, including Team Leaders
+  // React.useEffect(() => {
+  //   if (!myPeople || myPeople.length === 0) return;
+  //   
+  //   // Find all Team Leaders in myPeople
+  //   const teamLeaders = myPeople.filter(person => 
+  //     person.loeStatus === 'TeamLeader' || person.loeStatus === '02_TeamLeader'
+  //   );
+  //   
+  //   // Add any Team Leaders not already in leadersList
+  //   setLeadersList(prev => {
+  //     const leadersToAdd: MyLeader[] = [];
+  //     teamLeaders.forEach(leader => {
+  //       const alreadyExists = prev.some(l => l.vanid.toString() === leader.id);
+  //       if (!alreadyExists) {
+  //         leadersToAdd.push({
+  //           vanid: parseInt(leader.id),
+  //           name: leader.name
+  //         });
+  //       }
+  //     });
+  //     
+  //     // Only update if there are new leaders to add
+  //     return leadersToAdd.length > 0 ? [...prev, ...leadersToAdd] : prev;
+  //   });
+  // }, [myPeople]);
+
+  // People available for turf (broader than just meetings)
+  // Filter based on selectedActionForAdd - only exclude if they already have that specific action
+  const conversationPeopleForTurf = useMemo(() => {
+    if (!selectedOrganizerId || !peopleRecords) {
+      return [];
+    }
+    
+    // Don't filter out existing - allow adding same person to multiple actions
+    // Sort by: 1) Same chapter, 2) People with meetings, 3) Alphabetical
+    const filtered = peopleRecords
+      .sort((a, b) => {
+        // Priority 1: Same chapter
+        if (a.chapter === userChapter && b.chapter !== userChapter) return -1;
+        if (a.chapter !== userChapter && b.chapter === userChapter) return 1;
+        
+        // Priority 2: People with meetings
+        if (a.totalMeetings > 0 && b.totalMeetings === 0) return -1;
+        if (a.totalMeetings === 0 && b.totalMeetings > 0) return 1;
+        
+        // Otherwise alphabetical
+        return a.name.localeCompare(b.name);
+      });
+    
+    return filtered;
+  }, [peopleRecords, selectedOrganizerId, userChapter]);
+
+  // People available to add as leaders (not already in leaders list)
+  // Priority: 1) Team members, 2) Same chapter, 3) Anyone with meetings, 4) Everyone else
+  const conversationPeopleForLeaders = useMemo(() => {
+    if (!selectedOrganizerId || !peopleRecords) return [];
+    
+    const teamMemberNames = myTeam?.bigQueryData?.teamMembers || [];
+    
+    // Get all leader IDs that are currently in the hierarchy (from any source)
+    const existingLeaderIds = new Set<string>();
+    
+    // Add from leadersList (explicit hierarchy entries)
+    leadersList.forEach(l => existingLeaderIds.add(l.vanid.toString()));
+    
+    // Add team members (who are automatically tracked as leaders)
+    if (myTeam?.bigQueryData?.teamMembers) {
+      myTeam.bigQueryData.teamMembers.forEach((memberName: string) => {
+        const person = peopleRecords.find(p => p.name.toLowerCase() === memberName.toLowerCase());
+        if (person) {
+          existingLeaderIds.add(person.id);
+        }
+      });
+    }
+    
+    return peopleRecords
+      .filter(person => {
+        // Filter out people who are already tracked as leaders
+        return !existingLeaderIds.has(person.id);
+      })
+      .sort((a, b) => {
+        // Priority 1: Team members first
+        const aIsTeamMember = teamMemberNames.some((memberName: string) => {
+          const memberLastName = memberName.split(' ').pop()?.toLowerCase();
+          const aLastName = a.name.split(' ').pop()?.toLowerCase();
+          return memberLastName && aLastName && memberLastName === aLastName;
+        });
+        const bIsTeamMember = teamMemberNames.some((memberName: string) => {
+          const memberLastName = memberName.split(' ').pop()?.toLowerCase();
+          const bLastName = b.name.split(' ').pop()?.toLowerCase();
+          return memberLastName && bLastName && memberLastName === bLastName;
+        });
+        if (aIsTeamMember && !bIsTeamMember) return -1;
+        if (!aIsTeamMember && bIsTeamMember) return 1;
+        
+        // Priority 2: Same chapter
+        if (a.chapter === userChapter && b.chapter !== userChapter) return -1;
+        if (a.chapter !== userChapter && b.chapter === userChapter) return 1;
+        
+        // Priority 3: People with meetings
+        if (a.totalMeetings > 0 && b.totalMeetings === 0) return -1;
+        if (a.totalMeetings === 0 && b.totalMeetings > 0) return 1;
+        
+        // Otherwise alphabetical
+        return a.name.localeCompare(b.name);
+      });
+  }, [peopleRecords, leadersList, selectedOrganizerId, myTeam, userChapter]);
+
+  // Filter conversation people by search text
+  const filteredTurfPeople = useMemo(() => {
+    if (!turfSearchText) return conversationPeopleForTurf;
+    const searchLower = turfSearchText.toLowerCase();
+    return conversationPeopleForTurf.filter(person => 
+      person.name.toLowerCase().includes(searchLower) ||
+      person.chapter.toLowerCase().includes(searchLower)
+    );
+  }, [conversationPeopleForTurf, turfSearchText]);
+
+  const filteredLeaderPeople = useMemo(() => {
+    if (!leaderSearchText) return conversationPeopleForLeaders;
+    const searchLower = leaderSearchText.toLowerCase();
+    return conversationPeopleForLeaders.filter(person => 
+      person.name.toLowerCase().includes(searchLower) ||
+      person.chapter.toLowerCase().includes(searchLower)
+    );
+  }, [conversationPeopleForLeaders, leaderSearchText]);
+  
+  // People available to add to a leader's organizing list (DON'T filter out existing)
+  const conversationPeopleForLeaderList = useMemo(() => {
+    if (!peopleRecords || !selectedLeaderForAdd) {
+      return [];
+    }
+    
+    // Don't filter - allow adding the same person to multiple actions
+    const filtered = peopleRecords.sort((a, b) => {
+      // Priority 1: Same chapter
+      const aIsChapter = a.chapter === userChapter;
+      const bIsChapter = b.chapter === userChapter;
+      if (aIsChapter && !bIsChapter) return -1;
+      if (!aIsChapter && bIsChapter) return 1;
+      
+      // Otherwise alphabetical
+      return a.name.localeCompare(b.name);
+    });
+    
+    return filtered;
+  }, [peopleRecords, selectedLeaderForAdd, userChapter]);
+  
+  // Filtered people for Add to Leader List dialog (search filter)
+  const filteredPeopleForLeaderList = useMemo(() => {
+    if (!leaderListSearchText) return conversationPeopleForLeaderList;
+    
+    const searchLower = leaderListSearchText.toLowerCase();
+    return conversationPeopleForLeaderList.filter(person => 
+      person.name.toLowerCase().includes(searchLower)
+    );
+  }, [conversationPeopleForLeaderList, leaderListSearchText]);
+
+  const handleAddToTurf = async (person: any) => {
+    // Use the selected organizer's VAN ID (from the dashboard dropdown)
+    if (!selectedOrganizerId) return;
+    
+    const selectedAction = availableActions.find((a: any) => a.action_id === selectedActionForAdd);
+    if (!selectedAction) return;
+    
+    // Initialize fields for this action (all false)
+    const initialFields: Record<string, boolean> = {};
+    selectedAction.fields.forEach((field: any) => {
+      initialFields[field.key] = false;
+    });
+    
+    try {
+      // Add to database using the selected organizer's VAN ID
+      const success = await addToList({
+        organizer_vanid: selectedOrganizerId, // Use selected organizer, not current user
+        contact_vanid: parseInt(person.id),
+        contact_name: person.name,
+        action_id: selectedActionForAdd,
+        action: selectedAction.action_name,
+        desired_change: '',
+        progress: initialFields
+      });
+      
+      if (success) {
+        // Reload list from database for the selected organizer
+        const lists = await fetchLists(selectedOrganizerId);
+        const turfPeople: TurfPerson[] = lists.map(item => ({
+          vanid: parseInt(item.vanid),
+          firstName: item.contact_name.split(' ')[0] || '',
+          lastName: item.contact_name.split(' ').slice(1).join(' ') || '',
+          desiredChange: item.desired_change || '',
+          action: item.action_id,
+          fields: item.progress || {},
+          datePledged: item.date_pledged,
+          list_id: item.list_id
+        }));
+        setTurfList(turfPeople);
+        
+        // Close dialog and clear search
+        setShowAddTurfDialog(false);
+        setTurfSearchText('');
+      }
+    } catch (error) {
+      console.error('Error adding to turf:', error);
+      alert('Failed to add person to list. Please try again.');
+    }
+  };
+  
+  const handleOpenAddToLeaderList = (leader: LeaderProgress) => {
+    setSelectedLeaderForAdd(leader);
+    // Set default action to first available action
+    if (availableActions.length > 0) {
+      setSelectedActionForLeaderAdd(availableActions[0].action_id);
+    }
+    setLeaderListSearchText('');
+    setShowAddToLeaderListDialog(true);
+  };
+  
+  const handleAddToLeaderList = async (person: any) => {
+    if (!selectedLeaderForAdd) return;
+    
+    const selectedAction = availableActions.find((a: any) => a.action_id === selectedActionForLeaderAdd);
+    if (!selectedAction) return;
+    
+    // Initialize fields for this action (all false)
+    const initialFields: Record<string, boolean> = {};
+    selectedAction.fields.forEach((field: any) => {
+      initialFields[field.key] = false;
+    });
+    
+    try {
+      // Add to database with the leader as the organizer
+      const success = await addToList({
+        organizer_vanid: selectedLeaderForAdd.id,
+        contact_vanid: parseInt(person.id),
+        contact_name: person.name,
+        action_id: selectedActionForLeaderAdd,
+        action: selectedAction.action_name,
+        desired_change: '',
+        progress: initialFields
+      });
+      
+      if (success) {
+        // Close dialog and clear search
+        setShowAddToLeaderListDialog(false);
+        setLeaderListSearchText('');
+        
+        // Trigger reload for this leader's list
+        setLeaderListReloadTrigger(prev => ({
+          ...prev,
+          [selectedLeaderForAdd.id]: (prev[selectedLeaderForAdd.id] || 0) + 1
+        }));
+      }
+    } catch (error) {
+      console.error('Error adding to leader list:', error);
+      alert('Failed to add person to list. Please try again.');
+    }
+  };
+
+  const handleToggleTurfCheckbox = async (vanid: number, action: string, fieldKey: string) => {
+    // Find the person
+    const person = turfList.find(p => p.vanid === vanid && p.action === action);
+    if (!person || !person.list_id) return;
+    
+    const newValue = !person.fields[fieldKey];
+    
+    // Optimistic update
+    setTurfList(prev => prev.map(p => 
+      p.vanid === vanid && p.action === action
+        ? { 
+            ...p, 
+            fields: {
+              ...p.fields,
+              [fieldKey]: newValue
+            }
+          }
+        : p
+    ));
+    
+    // Save to database
+    try {
+      const updatedFields = { ...person.fields, [fieldKey]: newValue };
+      await updateListItem(person.list_id, {
+        progress: updatedFields,
+        is_completed: Object.values(updatedFields).every(v => v === true)
+      });
+    } catch (error) {
+      console.error('Error updating checkbox:', error);
+      // Revert on error
+      setTurfList(prev => prev.map(p => 
+        p.vanid === vanid && p.action === action
+          ? { ...p, fields: { ...p.fields, [fieldKey]: !newValue } }
+          : p
+      ));
+    }
+  };
+
+  const handleRemoveTurfPerson = async (vanid: number) => {
+    // Find all list entries for this person
+    const personsToRemove = turfList.filter(person => person.vanid === vanid);
+    
+    // Optimistic update
+    setTurfList(prev => prev.filter(person => person.vanid !== vanid));
+    
+    // Remove from database
+    try {
+      for (const person of personsToRemove) {
+        if (person.list_id) {
+          await removeFromList(person.list_id);
+        }
+      }
+    } catch (error) {
+      console.error('Error removing from list:', error);
+      // Trigger list reload in MainApp
+      if (onListsDataChange) {
+        onListsDataChange();
+      }
+    }
+  };
+
+  const handleQuickAddClick = (person: any, e: React.MouseEvent) => {
+    e.stopPropagation(); // Prevent row click from opening dialog
+    setPersonToQuickAdd(person);
+    setQuickAddActionId(currentOrganizerLiveActions[0] || 'sign_pledge');
+    setShowQuickAddDialog(true);
+  };
+
+  const handleQuickAddConfirm = async () => {
+    if (!personToQuickAdd || !selectedOrganizerId) return;
+    
+    const action = ACTIONS.find((a: any) => a.id === quickAddActionId);
+    if (!action) return;
+    
+    // Create initial fields object with all fields set to false
+    const initialFields: { [key: string]: boolean } = {};
+    action.fields.forEach((field: any) => {
+      initialFields[field.key] = false;
+    });
+    
+    try {
+      // Add to database using the SELECTED organizer's VAN ID
+      const success = await addToList({
+        organizer_vanid: selectedOrganizerId, // Use selected organizer from dashboard dropdown
+        contact_vanid: parseInt(personToQuickAdd.id),
+        contact_name: personToQuickAdd.name,
+        action_id: quickAddActionId,
+        action: action.name,
+        desired_change: personToQuickAdd.latestNotes || '',
+        progress: initialFields
+      });
+      
+      if (success) {
+        // Reload lists for the selected organizer
+        const lists = await fetchLists(selectedOrganizerId);
+        const turfPeople: TurfPerson[] = lists.map(item => ({
+          vanid: parseInt(item.vanid),
+          firstName: item.contact_name.split(' ')[0] || '',
+          lastName: item.contact_name.split(' ').slice(1).join(' ') || '',
+          desiredChange: item.desired_change || '',
+          action: item.action_id,
+          fields: item.progress || {},
+          datePledged: item.date_pledged,
+          list_id: item.list_id
+        }));
+        setTurfList(turfPeople);
+        
+        // Close dialog and switch to lists tab
+        setShowQuickAddDialog(false);
+        setPersonToQuickAdd(null);
+        setTurfTab('lists');
+      }
+    } catch (error) {
+      console.error('Error adding person to list:', error);
+      alert('Failed to add person to list. Please try again.');
+    }
+  };
+
+  const handleAddLeader = async (person: any) => {
+    if (!selectedOrganizerId) return;
+    
+    const newLeader: MyLeader = {
+      vanid: parseInt(person.id),
+      name: person.name
+    };
+    
+    try {
+      // Save to BigQuery hierarchy
+      // If "Direct report to me" is selected (selectedParentLeader is empty),
+      // set parent_leader_vanid to the selected organizer (you)
+      await saveLeaderHierarchy({
+        organizer_vanid: selectedOrganizerId,
+        leader_vanid: person.id,
+        parent_leader_vanid: selectedParentLeader && selectedParentLeader !== '' ? selectedParentLeader : selectedOrganizerId
+      });
+      
+      // Add to local state
+      setLeadersList(prev => [...prev, newLeader]);
+      
+      // Trigger hierarchy refresh in MainApp
+      if (onLeaderHierarchyChange) {
+        onLeaderHierarchyChange();
+      }
+      
+      // Close dialog and clear search
+      setShowAddLeaderDialog(false);
+      setLeaderSearchText('');
+      setSelectedParentLeader(null);
+    } catch (error) {
+      console.error('Error adding leader:', error);
+      alert('Failed to add leader. Please try again.');
+    }
+  };
+
+  const handleRemoveLeader = async (vanid: number) => {
+    if (!selectedOrganizerId) return;
+    
+    console.log('[handleRemoveLeader] Removing:', { selectedOrganizerId, vanid });
+    
+    try {
+      // Remove from BigQuery hierarchy
+      const result = await removeLeaderHierarchy(selectedOrganizerId, vanid.toString());
+      console.log('[handleRemoveLeader] Remove result:', result);
+      
+      // Remove from local state
+      setLeadersList(prev => prev.filter(leader => leader.vanid !== vanid));
+      
+      // Trigger hierarchy refresh in MainApp
+      if (onLeaderHierarchyChange) {
+        console.log('[handleRemoveLeader] Triggering hierarchy refresh');
+        onLeaderHierarchyChange();
+      }
+      
+      console.log('[handleRemoveLeader] Successfully removed leader');
+    } catch (error) {
+      console.error('[handleRemoveLeader] Error removing leader:', error);
+      alert('Failed to remove leader. Please try again.');
+    }
+  };
+
+  // Team management handlers
+  const handleAddTeam = async (newTeam: any) => {
+    try {
+      const result = await teamsService.createTeam({
+        teamName: newTeam.teamName,
+        teamLead: newTeam.teamLead.name,
+        chapter: newTeam.chapter,
+        teamMembers: newTeam.teamMembers.map((member: any) => member.name),
+        turf: newTeam.turf,
+        color: newTeam.color
+      });
+
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to create team');
+      }
+      
+      // Update chapter color if provided
+      if (newTeam.color && newTeam.chapter) {
+        updateChapterColor(newTeam.chapter, newTeam.color);
+      }
+      
+      setShowAddTeamDialog(false);
+      
+      // Refresh teams
+      if (onRefreshTeams) {
+        await onRefreshTeams();
+      }
+    } catch (error) {
+      console.error('Error creating team:', error);
+      throw error;
+    }
+  };
+
+  const handleEditTeam = (team: any) => {
+    setTeamToEdit(team);
+    setShowEditTeamDialog(true);
+  };
+
+  const handleSaveEditedTeam = async (updatedTeam: any) => {
+    try {
+      if (!teamToEdit) return;
+
+      const result = await teamsService.updateTeam(teamToEdit.id, {
+        teamName: updatedTeam.teamName,
+        teamLead: updatedTeam.teamLead,
+        chapter: updatedTeam.chapter,
+        teamMembers: updatedTeam.teamMembers,
+        turf: updatedTeam.turf,
+        color: updatedTeam.color,
+        version: updatedTeam.version,
+        dateCreated: updatedTeam.dateCreated
+      });
+
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to update team');
+      }
+      
+      // Update chapter color if changed
+      if (updatedTeam.color && updatedTeam.chapter) {
+        await updateChapterColor(updatedTeam.chapter, updatedTeam.color);
+      }
+      
+      setShowEditTeamDialog(false);
+      setTeamToEdit(null);
+      
+      // Refresh teams
+      if (onRefreshTeams) {
+        await onRefreshTeams();
+      }
+    } catch (error) {
+      console.error('Error updating team:', error);
+      throw error;
+    }
+  };
+
+  // MY LEADERS: Manually curated list with pledge progress
+  const myLeaders = useMemo(() => {
+    if (!selectedOrganizerId) return [];
+    
+    // Calculate pledge counts for each leader in the manual list
+    const calculateLeaderProgress = (leaderId: string, leaderNameFromList: string, depth: number = 0): LeaderProgress | null => {
+      if (depth > 3) return null; // Prevent infinite recursion
+      
+      // Try to find node, but use the stored name as fallback
+      const node = nodes.find(n => n.id === leaderId);
+      const leaderInfo = userMap.get(leaderId);
+      
+      // Use the name we already have from leadersList (most reliable)
+      const leaderName = leaderNameFromList || node?.name || leaderInfo?.name || `Contact ${leaderId}`;
+      
+      // Get membership status from peopleRecords
+      const leaderPerson = peopleRecords?.find(p => p.id === leaderId);
+      const memberStatus = leaderPerson?.memberStatus;
+      
+      const leaderFirstName = leaderInfo?.firstname || leaderName.split(' ')[0];
+      const leaderAlternateIds = leaderInfo?.alternateIds || [];
+      
+      // Build all possible name variations for matching
+      const nameParts = leaderName.split(' ');
+      const possibleMatches = [
+        leaderId,
+        leaderName.toLowerCase(),
+        leaderFirstName.toLowerCase(),
+        ...leaderAlternateIds.map((id: string) => id.toLowerCase()),
+        ...nameParts.map((part: string) => part.toLowerCase()) // Individual name parts
+      ];
+      
+      // SPECIAL: For team members, also check against team member names
+      let teamMemberName: string | null = null;
+      if (myTeam?.bigQueryData?.teamMembers) {
+        teamMemberName = myTeam.bigQueryData.teamMembers.find((memberName: string) => {
+          const memberLastName = memberName.split(' ').pop()?.toLowerCase();
+          const nodeLastName = leaderName.split(' ').pop()?.toLowerCase();
+          return memberLastName && nodeLastName && memberLastName === nodeLastName;
+        });
+        
+        if (teamMemberName) {
+          possibleMatches.push(teamMemberName.toLowerCase());
+          teamMemberName.split(' ').forEach((part: string) => possibleMatches.push(part.toLowerCase()));
+        }
+      }
+      
+      // Count pledges collected by this leader
+      let pledgeCount = 0;
+      const matchedPledges: any[] = []; // For debugging
+      
+      pledgeSubmissions.forEach(submission => {
+        if (submission.submissions && Array.isArray(submission.submissions)) {
+          submission.submissions.forEach(sub => {
+            const leaderStr = sub.leader?.toString().trim().toLowerCase();
+            
+            // Skip if no leader string
+            if (!leaderStr) return;
+            
+            // Use stricter matching - prioritize exact matches and full name matches
+            let matched = false;
+            
+            // 1. Exact match with leaderId
+            if (leaderStr === leaderId.toLowerCase()) {
+              matched = true;
+            }
+            // 2. Exact match with full name
+            else if (leaderStr === leaderName.toLowerCase()) {
+              matched = true;
+            }
+            // 3. Exact match with team member name (if applicable)
+            else if (teamMemberName && leaderStr === teamMemberName.toLowerCase()) {
+              matched = true;
+            }
+            // 4. Full name contains match (but require at least 2 parts to match)
+            else {
+              // Check if leader field contains both first and last name parts
+              const leaderNameParts = leaderName.toLowerCase().split(' ');
+              if (leaderNameParts.length >= 2) {
+                const firstName = leaderNameParts[0];
+                const lastName = leaderNameParts[leaderNameParts.length - 1];
+                
+                // Both first and last name must be in the leader string
+                if (leaderStr.includes(firstName) && leaderStr.includes(lastName)) {
+                  matched = true;
+                }
+              }
+            }
+            
+            if (matched) {
+              pledgeCount += 1;
+              matchedPledges.push({
+                person: `${sub.first_name} ${sub.last_name}`,
+                leaderField: sub.leader,
+                matchedAgainst: leaderName
+              });
+            }
+          });
+        }
+      });
+      
+      // Debug logging for specific leaders - commented out for production
+      // if (leaderName.toLowerCase().includes('ali') || leaderName.toLowerCase().includes('natalia')) {
+      //   console.log(`🔍 Pledge count for ${leaderName}:`, {
+      //     leaderId,
+      //     pledgeCount,
+      //     matchedPledges,
+      //     leaderNameParts: leaderName.split(' ')
+      //   });
+      // }
+      
+      // Build sub-leaders from TWO sources:
+      // 1. Explicit hierarchy from lumoviz_leader_hierarchy table
+      // 2. Team relationships (team lead → team members)
+      const subLeaders: LeaderProgress[] = [];
+      const processedSubLeaderIds = new Set<string>();
+      
+      if (depth < 3) { // Still limit depth to prevent infinite recursion
+        // SOURCE 1: Explicit hierarchy entries where parent_leader_vanid === this leaderId
+        const childHierarchyEntries = leaderHierarchyProp.filter(
+          entry => entry.parent_leader_vanid === leaderId
+        );
+        
+        childHierarchyEntries.forEach(entry => {
+          const subLeaderId = entry.leader_vanid;
+          if (processedSubLeaderIds.has(subLeaderId)) return;
+          processedSubLeaderIds.add(subLeaderId);
+          
+          // Look up sub-leader info
+          const subNode = nodes.find(n => n.id === subLeaderId);
+          const subInfo = userMap.get(subLeaderId);
+          const subPerson = peopleRecords?.find(p => p.id === subLeaderId);
+          
+          const subLeaderName = subPerson?.name || subInfo?.name || subNode?.name || `Contact ${subLeaderId}`;
+          
+          // Recursively calculate progress for this sub-leader
+          const subLeaderProgress = calculateLeaderProgress(subLeaderId, subLeaderName, depth + 1);
+          
+          if (subLeaderProgress) {
+            subLeaders.push(subLeaderProgress);
+          }
+        });
+        
+        // SOURCE 2: Team relationships - if this leader is a team lead, their team members are sub-leaders
+        const leaderTeams = teamsData.filter(team => {
+          const teamLead = team.bigQueryData?.teamLead;
+          if (!teamLead) return false;
+          
+          // Match by name or ID
+          return teamLead === leaderName || 
+                 teamLead.toLowerCase() === leaderName.toLowerCase() ||
+                 (leaderInfo?.fullName && teamLead === leaderInfo.fullName);
+        });
+        
+        leaderTeams.forEach(team => {
+          const teamMembers = team.bigQueryData?.teamMembers || [];
+          teamMembers.forEach((memberName: string) => {
+            // Find member's VAN ID
+            const memberEntry = Array.from(userMap.entries()).find(([id, info]) => {
+              const fullName = (info.fullName || `${info.firstname || ''} ${info.lastname || ''}`.trim()).toLowerCase();
+              return fullName === memberName.toLowerCase() || 
+                     (info.firstname || '').toLowerCase() === memberName.toLowerCase();
+            });
+            
+            if (memberEntry) {
+              const [memberVanId, memberInfo] = memberEntry;
+              const subLeaderId = memberVanId.toString();
+              
+              // Skip if already processed or if it's the leader themselves
+              if (processedSubLeaderIds.has(subLeaderId) || subLeaderId === leaderId) return;
+              processedSubLeaderIds.add(subLeaderId);
+              
+              // Recursively calculate progress for this team member
+              const subLeaderProgress = calculateLeaderProgress(subLeaderId, memberName, depth + 1);
+              if (subLeaderProgress) {
+                subLeaders.push(subLeaderProgress);
+              }
+            }
+          });
+        });
+      }
+      
+      // Calculate progress for each action type based on the leader's live actions
+      const actionProgress: { [actionId: string]: { count: number; goal: number; hasMetGoal: boolean } } = {};
+      
+      // Get this leader's live actions from the map
+      const leaderLiveActions = leaderActionsMap[leaderId] || [];
+      
+      console.log(`[myLeaders] Calculating action progress for ${leaderName} (${leaderId}):`, {
+        leaderLiveActions,
+        listsDataCount: listsDataProp?.length || 0
+      });
+      
+      leaderLiveActions.forEach(actionId => {
+        let actionCount = 0;
+        
+        // Find the action definition
+        const action = ACTIONS.find(a => a.id === actionId);
+        
+        // For Sign Pledge: use pledgeCount (already calculated above)
+        if (actionId === 'sign_pledge') {
+          actionCount = pledgeCount;
+          console.log(`[myLeaders] ${leaderName} - sign_pledge count:`, actionCount);
+        } else if (action) {
+          // For other actions: count from listsData (turf) for this leader
+          // Count completed items for this action where this leader is the organizer
+          if (listsDataProp && Array.isArray(listsDataProp)) {
+            const leaderListItems = listsDataProp.filter(item => 
+              item.organizer_vanid === leaderId && 
+              item.action_id === actionId
+            );
+            
+            console.log(`[myLeaders] ${leaderName} - ${actionId} list items:`, leaderListItems.length);
+            
+            leaderListItems.forEach(item => {
+              // Check if action is completed (all fields are true)
+              if (action.fields && action.fields.length > 0) {
+                const allFieldsCompleted = action.fields.every((field: any) => 
+                  item.progress?.[field.key] === true
+                );
+                if (allFieldsCompleted) {
+                  actionCount++;
+                }
+              } else {
+                // No fields defined, count as 1 if on list
+                actionCount++;
+              }
+            });
+            
+            console.log(`[myLeaders] ${leaderName} - ${actionId} completed count:`, actionCount);
+          }
+        }
+        
+        const actionGoal = 5; // Default goal
+        actionProgress[actionId] = {
+          count: actionCount,
+          goal: actionGoal,
+          hasMetGoal: actionCount >= actionGoal
+        };
+      });
+      
+      console.log(`[myLeaders] ${leaderName} final actionProgress:`, actionProgress);
+      
+      const result = {
+        id: leaderId,
+        name: leaderName,
+        pledgeCount,
+        pledgeGoal: 5,
+        hasMetGoal: pledgeCount >= 5,
+        subLeaders,
+        memberStatus,
+        actionProgress
+      };
+      
+      return result;
+    };
+    
+    const leaders: LeaderProgress[] = [];
+    const processedIds = new Set<string>();
+    
+    // SOURCE 1: Team Members (from teams BigQuery table)
+    // Team members are stored as names, so we need to find their VAN IDs
+    if (myTeam?.bigQueryData?.teamMembers && Array.isArray(myTeam.bigQueryData.teamMembers)) {
+      myTeam.bigQueryData.teamMembers.forEach((memberName: string) => {
+        // Find the person by exact name match in peopleRecords or nodes
+        const person = peopleRecords?.find(p => 
+          p.name.toLowerCase() === memberName.toLowerCase()
+        );
+        const node = !person ? nodes.find(n => 
+          n.name?.toLowerCase() === memberName.toLowerCase()
+        ) : null;
+        
+        const memberId = person?.id || node?.id;
+        
+        if (memberId && !processedIds.has(memberId)) {
+          const leaderProgress = calculateLeaderProgress(memberId, memberName);
+          if (leaderProgress) {
+            leaders.push({ ...leaderProgress, isAutomatic: true });
+            processedIds.add(memberId);
+          }
+        }
+      });
+    }
+    
+    // SOURCE 2: Leader Hierarchy (from lumoviz_leader_hierarchy BigQuery table)
+    // Show leaders where parent_leader_vanid === selectedOrganizerId (direct reports)
+    // OR where organizer_vanid === selectedOrganizerId AND no parent (top-level entries this person created)
+    leaderHierarchyProp.forEach(entry => {
+      const leaderId = entry.leader_vanid;
+      
+      // Include this leader if:
+      // 1. They report directly to the selected organizer (parent_leader_vanid === selectedOrganizerId)
+      // 2. OR this organizer created this entry and it has no parent (top-level)
+      const isDirectReport = entry.parent_leader_vanid === selectedOrganizerId;
+      const isTopLevelEntry = entry.organizer_vanid === selectedOrganizerId && !entry.parent_leader_vanid;
+      
+      if (!isDirectReport && !isTopLevelEntry) {
+        return;
+      }
+      
+      if (processedIds.has(leaderId)) return;
+      
+      // Find person info
+      const person = peopleRecords?.find(p => p.id === leaderId);
+      const node = nodes.find(n => n.id === leaderId);
+      const userInfo = userMap.get(leaderId);
+      
+      const leaderName = person?.name || node?.name || userInfo?.name || `Person ${leaderId}`;
+      
+      const leaderProgress = calculateLeaderProgress(leaderId, leaderName);
+      if (leaderProgress) {
+        leaders.push(leaderProgress);
+        processedIds.add(leaderId);
+      }
+    });
+    
+    // Debug logging - commented out for production
+    // console.log('📊 My Leaders (simplified):', {
+    //   teamMemberNamesCount: myTeam?.bigQueryData?.teamMembers?.length || 0,
+    //   hierarchyCount: leaderHierarchyProp.length,
+    //   totalLeaders: leaders.length,
+    //   leaders: leaders.map((l: any) => ({ name: l.name, id: l.id, pledgeCount: l.pledgeCount, isAutomatic: l.isAutomatic }))
+    // });
+    
+    console.log('[myLeaders] Final leaders list:', {
+      selectedOrganizerId,
+      leadersCount: leaders.length,
+      leaders: leaders.map(l => ({ 
+        id: l.id, 
+        name: l.name, 
+        hasActionsInMap: (leaderActionsMap[l.id]?.length || 0) > 0,
+        actionsInMap: leaderActionsMap[l.id] || []
+      }))
+    });
+    
+    return leaders;
+  }, [pledgeSubmissions, selectedOrganizerId, selectedOrganizerInfo, nodes, links, userMap, myTeam, teamsData, leadersList, peopleRecords, leaderHierarchyProp, leaderActionsMap, listsDataProp, ACTIONS]);
+
+  // Calculate selected organizer's pledge count (as the leader who collected them)
+  const userPledgeCount = useMemo(() => {
+    if (!selectedOrganizerId) return 0;
+    
+    const organizerInfo = selectedOrganizerInfo || currentUserInfo;
+    // Build possible name variations for matching
+    const userFullName = organizerInfo?.fullName;
+    const userFirstLast = organizerInfo?.firstname && organizerInfo?.lastname 
+      ? `${organizerInfo.firstname} ${organizerInfo.lastname}`
+      : null;
+    const userFirstName = organizerInfo?.firstname;
+    const alternateIds = organizerInfo?.alternateIds || [];
+    
+    let count = 0;
+    pledgeSubmissions.forEach(submission => {
+      // Check if submissions array exists
+      if (submission.submissions && Array.isArray(submission.submissions)) {
+        submission.submissions.forEach(sub => {
+          const leaderStr = sub.leader?.toString().trim();
+          
+          // Match by ID, full name, first+last name, first name only, or alternate IDs
+          const isMatch = leaderStr === currentUserId || 
+                         leaderStr === userFullName ||
+                         leaderStr === userFirstLast ||
+                         leaderStr === userFirstName ||
+                         alternateIds.includes(leaderStr);
+          
+          if (isMatch) {
+            count += 1;
+          }
+        });
+      }
+    });
+    
+    return count;
+  }, [pledgeSubmissions, selectedOrganizerId, selectedOrganizerInfo, currentUserInfo]);
+
+  // Calculate individual goals for each action (using live actions only)
+  const individualActionGoals = useMemo(() => {
+    // Filter to only show live actions
+    const liveActions = availableActions.filter((a: any) => a.status === 'live');
+    
+    return liveActions.map((action: any) => {
+      const goalFieldKey = action.goal_field_key || null;
+      
+      let completedCount = 0;
+      
+      // For Sign Pledge: use the calculated userPledgeCount from pledgeSubmissions
+      if (action.action_id === 'sign_pledge') {
+        // If goal field is specified, count people with that field = true
+        if (goalFieldKey) {
+          completedCount = turfList.filter((entry: any) => 
+            entry.action === 'sign_pledge' && 
+            entry.fields && 
+            entry.fields[goalFieldKey] === true
+          ).length;
+        } else {
+          // Default: use last field or userPledgeCount
+          completedCount = userPledgeCount;
+        }
+      }
+      // For other actions: count from turfList using the goal field
+      else {
+        const actionEntries = turfList.filter((entry: any) => entry.action === action.action_id);
+        
+        if (goalFieldKey) {
+          // Count entries where the goal field is true
+          completedCount = actionEntries.filter((entry: any) => 
+            entry.fields && entry.fields[goalFieldKey] === true
+          ).length;
+        } else {
+          // Default: use the last field in action.fields
+          const lastField = action.fields[action.fields.length - 1];
+          if (lastField) {
+            completedCount = actionEntries.filter((entry: any) => 
+              entry.fields && entry.fields[lastField.key] === true
+            ).length;
+          }
+        }
+      }
+      
+      // Use personal goal from organizerGoals, or default to 5
+      const goal = organizerGoals[action.action_id] || 5;
+      const percentage = goal > 0 ? (completedCount / goal) * 100 : 0;
+      const hasMetGoal = completedCount >= goal;
+      const hasGoal = action.has_goal !== false; // Default to true if not set
+      
+      return {
+        actionId: action.action_id,
+        actionName: action.action_name,
+        current: completedCount,
+        goal: goal,
+        percentage: Math.min(percentage, 100),
+        hasMetGoal,
+        hasGoal
+      };
+    });
+  }, [turfList, userPledgeCount, availableActions, organizerGoals]);
+
+  // Calculate conversion metrics for each action
+  const conversionMetrics = useMemo(() => {
+    return ACTIONS.map(action => {
+      const actionPeople = myTurf.filter(p => p.action === action.id);
+      const totalInTurf = actionPeople.length;
+      
+      // Calculate counts for each stage
+      const stageCounts: Record<string, number> = {};
+      const conversions: Array<{ from: string; to: string; rate: number; count: number; total: number }> = [];
+      
+      action.fields.forEach((field: any) => {
+        stageCounts[field.key] = actionPeople.filter(p => p.fields[field.key]).length;
+      });
+      
+      // Calculate conversion rates between sequential stages
+      for (let i = 0; i < action.fields.length - 1; i++) {
+        const fromField = action.fields[i];
+        const toField = action.fields[i + 1];
+        
+        const fromCount = stageCounts[fromField.key];
+        const toCount = stageCounts[toField.key];
+        const rate = fromCount > 0 ? (toCount / fromCount) * 100 : 0;
+        
+        conversions.push({
+          from: fromField.label,
+          to: toField.label,
+          rate: Math.round(rate),
+          count: toCount,
+          total: fromCount
+        });
+      }
+      
+      return {
+        actionId: action.id,
+        actionName: action.name,
+        totalInTurf,
+        stageCounts: action.fields.map(f => ({
+          key: f.key,
+          label: f.label,
+          count: stageCounts[f.key]
+        })),
+        conversions
+      };
+    });
+  }, [myTurf]);
+
+  // Goal for leadership summit eligibility
+  const pledgeGoal = 5;
+  const pledgeProgress = Math.min((userPledgeCount / pledgeGoal) * 100, 100);
+  const hasMetGoal = userPledgeCount >= pledgeGoal;
+
+  // Get user's chapter
+  // Find user's campaign(s)
+  const userCampaigns = useMemo(() => {
+    return parentCampaigns.filter(campaign => 
+      campaign.chapters.includes(userChapter) || 
+      campaign.chapters.includes('All Chapters')
+    );
+  }, [parentCampaigns, userChapter]);
+
+  // Calculate action goals for My Campaigns - showing federation and team progress (LIVE ACTIONS ONLY)
+  const actionGoals = useMemo(() => {
+    const goals: Record<string, ActionGoal[]> = {};
+    
+    // Filter to only live, non-personal actions (federation/chapter-wide only)
+    const liveActions = availableActions.filter((a: any) => {
+      if (a.status !== 'live') return false;
+      
+      // Exclude personal actions (actions with organizer_vanid and limited visibility)
+      // Include only federation-wide actions (no organizer_vanid OR visible to everyone)
+      const isFederationWide = !a.organizer_vanid || 
+                               !a.visible_to_organizers || 
+                               a.visible_to_organizers.length === 0;
+      
+      return isFederationWide;
+    });
+    
+    // For each campaign, calculate progress for each action
+    userCampaigns.forEach(campaign => {
+      const campaignGoals: ActionGoal[] = [];
+      
+      liveActions.forEach((action: any) => {
+        // Federation-wide count (from pledgeSubmissions)
+        let federationCount = 0;
+        
+        if (action.action_id === 'sign_pledge') {
+          // Count all pledges in the federation
+          pledgeSubmissions.forEach(submission => {
+            if (submission.submissions && Array.isArray(submission.submissions)) {
+              federationCount += submission.submissions.length;
+            }
+          });
+        }
+        
+        // Team-wide count (from myTeam members + their pledges)
+        let teamCount = 0;
+        if (myTeam?.bigQueryData?.teamMembers && action.action_id === 'sign_pledge') {
+          const teamMemberNames = myTeam.bigQueryData.teamMembers.map((name: string) => name.toLowerCase());
+          
+          pledgeSubmissions.forEach(submission => {
+            if (submission.submissions && Array.isArray(submission.submissions)) {
+              submission.submissions.forEach(sub => {
+                const leaderStr = sub.leader?.toString().trim().toLowerCase();
+                if (leaderStr && teamMemberNames.some((name: string) => leaderStr.includes(name) || name.includes(leaderStr))) {
+                  teamCount += 1;
+                }
+              });
+            }
+          });
+        }
+        
+        // Use federation count as the main metric, with team as secondary
+        // Goals are aspirational (e.g., 1000 pledges federation-wide)
+        const goal = action.action_id === 'sign_pledge' ? 1000 : 100;
+        
+        campaignGoals.push({
+          actionId: action.action_id,
+          actionName: action.action_name,
+          current: federationCount,
+          goal: goal,
+          percentage: goal > 0 ? (federationCount / goal) * 100 : 0
+        });
+      });
+      
+      goals[campaign.id] = campaignGoals;
+    });
+    
+    // Also add team-specific goals if user has a team
+    if (myTeam) {
+      const teamGoals: ActionGoal[] = [];
+      
+      liveActions.forEach((action: any) => {
+        let teamCount = 0;
+        
+        if (action.action_id === 'sign_pledge') {
+          // Count pledges from team members
+          if (myTeam.bigQueryData?.teamMembers) {
+            const teamMemberNames = myTeam.bigQueryData.teamMembers.map((name: string) => name.toLowerCase());
+            
+            pledgeSubmissions.forEach(submission => {
+              if (submission.submissions && Array.isArray(submission.submissions)) {
+                submission.submissions.forEach(sub => {
+                  const leaderStr = sub.leader?.toString().trim().toLowerCase();
+                  if (leaderStr && teamMemberNames.some((name: string) => leaderStr.includes(name) || name.includes(leaderStr))) {
+                    teamCount += 1;
+                  }
+                });
+              }
+            });
+          }
+        }
+        
+        // Team goals (smaller than federation-wide)
+        const goal = action.action_id === 'sign_pledge' ? 100 : 20;
+        
+        teamGoals.push({
+          actionId: action.action_id,
+          actionName: action.action_name,
+          current: teamCount,
+          goal: goal,
+          percentage: goal > 0 ? (teamCount / goal) * 100 : 0
+        });
+      });
+      
+      goals[myTeam.id] = teamGoals;
+    }
+    
+    return goals;
+  }, [userCampaigns, pledgeSubmissions, myTeam, availableActions]);
+
+  // Calculate overall campaign progress (average of all actions)
+  const campaignProgress = useMemo(() => {
+    const progress: Record<string, number> = {};
+    
+    userCampaigns.forEach(campaign => {
+      const goals = actionGoals[campaign.id] || [];
+      if (goals.length === 0) {
+        progress[campaign.id] = 0;
+      } else {
+        const avgPercentage = goals.reduce((sum, goal) => sum + goal.percentage, 0) / goals.length;
+        progress[campaign.id] = avgPercentage;
+      }
+    });
+    
+    return progress;
+  }, [userCampaigns, actionGoals]);
+
+  // Filter network to show organizing relationships
+  const userNodes = useMemo(() => {
+    if (!currentUserId) return [];
+    
+    const connectedNodeIds = new Set<string>();
+    connectedNodeIds.add(currentUserId); // Include me (Ashley)
+    
+    // Find people I organize (my direct reports)
+    const myDirectReports = new Set<string>();
+    links.forEach(link => {
+      const sourceId = typeof link.source === 'string' ? link.source : link.source.id;
+      const targetId = typeof link.target === 'string' ? link.target : link.target.id;
+      
+      if (sourceId === currentUserId) {
+        connectedNodeIds.add(targetId); // Add people I organize
+        myDirectReports.add(targetId);
+      }
+    });
+    
+    // Find people that my direct reports organize (2 levels deep)
+    myDirectReports.forEach(reportId => {
+      links.forEach(link => {
+        const sourceId = typeof link.source === 'string' ? link.source : link.source.id;
+        const targetId = typeof link.target === 'string' ? link.target : link.target.id;
+        
+        if (sourceId === reportId) {
+          connectedNodeIds.add(targetId); // Add people my reports organize
+        }
+      });
+    });
+    
+    return nodes.filter(node => connectedNodeIds.has(node.id));
+  }, [nodes, links, currentUserId]);
+
+  const userLinks = useMemo(() => {
+    if (!currentUserId) return [];
+    
+    const connectedNodeIds = new Set(userNodes.map(n => n.id));
+    
+    return links.filter(link => {
+      const sourceId = typeof link.source === 'string' ? link.source : link.source.id;
+      const targetId = typeof link.target === 'string' ? link.target : link.target.id;
+      return connectedNodeIds.has(sourceId) && connectedNodeIds.has(targetId);
+    });
+  }, [links, userNodes, currentUserId]);
+
+  if (!currentUserId) {
+    return (
+      <Box sx={{ p: 3, textAlign: 'center' }}>
+        <Typography variant="h6" color="text.secondary">
+          Please log in to view your dashboard
+        </Typography>
+      </Box>
+    );
+  }
+
+  // Show empty state if no organizer selected
+  if (!selectedOrganizerId) {
+    return (
+      <Box sx={{ p: 2, height: '100%', overflow: 'auto', bgcolor: '#fafafa' }}>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+            <Typography variant="h5" sx={{ fontWeight: 600, color: '#1976d2' }}>
+              My Dashboard
+            </Typography>
+            
+            {/* Organizer Selector */}
+            <FormControl size="small" sx={{ minWidth: 200 }}>
+              <Select
+                value={selectedOrganizerId}
+                onChange={(e) => {
+                  const newOrganizerId = e.target.value;
+                  setSelectedOrganizerId(newOrganizerId);
+                  
+                  // Cache in localStorage
+                  if (newOrganizerId) {
+                    localStorage.setItem('dashboard_selected_organizer', newOrganizerId);
+                  } else {
+                    localStorage.removeItem('dashboard_selected_organizer');
+                  }
+                  
+                  // Update URL
+                  const params = new URLSearchParams(window.location.search);
+                  if (newOrganizerId) {
+                    params.set('organizer', newOrganizerId);
+                  } else {
+                    params.delete('organizer');
+                  }
+                  window.history.pushState({}, '', `${window.location.pathname}?${params.toString()}`);
+                }}
+                displayEmpty
+                sx={{ 
+                  fontSize: '0.875rem',
+                  '& .MuiSelect-select': { py: 0.75 }
+                }}
+              >
+                <MenuItem value="" sx={{ fontSize: '0.875rem', fontStyle: 'italic', color: 'text.secondary' }}>
+                  Click your name to see your dashboard
+                </MenuItem>
+                {dashboardOrganizers.length > 0 && dashboardOrganizers.map(org => (
+                  <MenuItem key={org.vanid} value={org.vanid} sx={{ fontSize: '0.875rem' }}>
+                    {org.name}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          </Box>
+        </Box>
+        
+        {/* Empty state message */}
+        <Box sx={{ 
+          display: 'flex', 
+          flexDirection: 'column',
+          alignItems: 'center', 
+          justifyContent: 'center',
+          height: 'calc(100% - 100px)',
+          textAlign: 'center'
+        }}>
+          <Typography variant="h6" color="text.secondary" sx={{ mb: 1 }}>
+            Select your name from the dropdown above
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            Your selection will be saved for next time
+          </Typography>
+        </Box>
+      </Box>
+    );
+  }
+
+  return (
+    <Box sx={{ p: 2, height: '100%', overflow: 'auto', bgcolor: '#fafafa' }}>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+          <Typography variant="h5" sx={{ fontWeight: 600, color: '#1976d2' }}>
+            {selectedOrganizerInfo?.firstname || currentUserInfo?.firstname || 'My'} View
+          </Typography>
+          
+          {/* Organizer Selector */}
+          <FormControl size="small" sx={{ minWidth: 200 }}>
+            <Select
+              value={selectedOrganizerId}
+              onChange={(e) => {
+                const newOrganizerId = e.target.value;
+                setSelectedOrganizerId(newOrganizerId);
+                
+                // Find the organizer name for URL
+                const selectedOrg = dashboardOrganizers.find(org => org.vanid === newOrganizerId);
+                
+                // Cache in localStorage
+                if (newOrganizerId) {
+                  localStorage.setItem('dashboard_selected_organizer', newOrganizerId);
+                } else {
+                  localStorage.removeItem('dashboard_selected_organizer');
+                }
+                
+                // Update URL with organizer name and VAN ID
+                const params = new URLSearchParams(window.location.search);
+                if (newOrganizerId && selectedOrg) {
+                  params.set('organizer', newOrganizerId);
+                  params.set('organizerName', selectedOrg.name);
+                } else {
+                  params.delete('organizer');
+                  params.delete('organizerName');
+                }
+                window.history.pushState({}, '', `${window.location.pathname}?${params.toString()}`);
+              }}
+              displayEmpty
+              sx={{ 
+                fontSize: '0.875rem',
+                '& .MuiSelect-select': { py: 0.75 }
+              }}
+            >
+              <MenuItem value="" sx={{ fontSize: '0.875rem', fontStyle: 'italic', color: 'text.secondary' }}>
+                Click your name to see your dashboard
+              </MenuItem>
+              {dashboardOrganizers.length > 0 && dashboardOrganizers.map(org => (
+                <MenuItem key={org.vanid} value={org.vanid} sx={{ fontSize: '0.875rem' }}>
+                  {org.name} ({org.vanid})
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+        </Box>
+      </Box>
+
+      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.75 }}>
+        {/* Three Grouped Goal Cards */}
+        <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', alignItems: 'stretch' }}>
+          {/* Card 1: My Goals (all selected actions stacked) */}
+          <Card elevation={1} sx={{ flex: '1 1 250px', minWidth: '200px' }}>
+            <CardContent sx={{ p: 0.75, '&:last-child': { pb: 0.75 } }}>
+              <Typography variant="caption" sx={{ fontWeight: 600, color: '#1976d2', textTransform: 'uppercase', letterSpacing: 0.3, fontSize: '0.7rem', display: 'block', mb: 0.5 }}>
+                My Goals
+              </Typography>
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5, maxHeight: '200px', overflow: 'auto' }}>
+                {individualActionGoals.map(actionGoal => (
+                  <Box key={actionGoal.actionId}>
+                    {actionGoal.hasGoal ? (
+                      // Action has a goal - show barometer
+                      <>
+                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 0.25 }}>
+                          <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.6rem' }}>
+                            {actionGoal.actionName}
+                          </Typography>
+                          <Typography variant="caption" sx={{ fontWeight: 600, fontSize: '0.6rem' }}>
+                            {actionGoal.current} / {actionGoal.goal}
+                          </Typography>
+                        </Box>
+                        <LinearProgress
+                          variant="determinate"
+                          value={actionGoal.percentage}
+                          sx={{
+                            height: 6,
+                            borderRadius: 1,
+                            backgroundColor: '#e0e0e0',
+                            '& .MuiLinearProgress-bar': {
+                              backgroundColor: actionGoal.hasMetGoal ? '#4caf50' : '#1976d2'
+                            }
+                          }}
+                        />
+                      </>
+                    ) : (
+                      // Action doesn't have a goal - just show count
+                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.6rem' }}>
+                          {actionGoal.actionName}
+                        </Typography>
+                        <Typography variant="caption" sx={{ fontWeight: 600, fontSize: '0.6rem' }}>
+                          {actionGoal.current} {actionGoal.current === 1 ? 'item' : 'items'}
+                        </Typography>
+                      </Box>
+                    )}
+                  </Box>
+                ))}
+              </Box>
+            </CardContent>
+          </Card>
+          
+          {/* Card 2: My Leaders (only show if there are leaders) */}
+          {myLeaders.length > 0 && (() => {
+            // Calculate leader metrics
+            const totalLeaders = myLeaders.length;
+            const leadersAtGoal = myLeaders.filter(leader => {
+              // Check if leader has met at least one of their action goals
+              if (!leader.actionProgress) return false;
+              return Object.values(leader.actionProgress).some((progress: any) => progress.hasMetGoal);
+            }).length;
+            
+            // Calculate total aggregate across all actions for all leaders
+            const aggregateStats = myLeaders.reduce((acc, leader) => {
+              if (leader.actionProgress) {
+                Object.entries(leader.actionProgress).forEach(([actionId, progress]: [string, any]) => {
+                  if (!acc[actionId]) {
+                    acc[actionId] = { count: 0, goal: 0 };
+                  }
+                  acc[actionId].count += progress.count || 0;
+                  acc[actionId].goal += progress.goal || 0;
+                });
+              }
+              return acc;
+            }, {} as Record<string, { count: number; goal: number }>);
+            
+            const percentage = totalLeaders > 0 ? (leadersAtGoal / totalLeaders) * 100 : 0;
+            
+            return (
+              <Card elevation={1} sx={{ flex: '1 1 250px', minWidth: '200px' }}>
+                <CardContent sx={{ p: 0.75, '&:last-child': { pb: 0.75 } }}>
+                  <Typography variant="caption" sx={{ fontWeight: 600, color: '#1976d2', textTransform: 'uppercase', letterSpacing: 0.3, fontSize: '0.7rem', display: 'block', mb: 0.5 }}>
+                    My Leaders
+                  </Typography>
+                  
+                  {/* Leaders at Goal Summary */}
+                  <Box sx={{ mb: 1 }}>
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 0.25 }}>
+                      <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.6rem' }}>
+                        Leaders Hitting Goals
+                      </Typography>
+                      <Typography variant="caption" sx={{ fontWeight: 600, fontSize: '0.6rem', color: leadersAtGoal === totalLeaders ? '#4caf50' : 'inherit' }}>
+                        {leadersAtGoal} / {totalLeaders}
+                      </Typography>
+                    </Box>
+                    <LinearProgress
+                      variant="determinate"
+                      value={percentage}
+                      sx={{
+                        height: 6,
+                        borderRadius: 1,
+                        backgroundColor: '#e0e0e0',
+                        '& .MuiLinearProgress-bar': {
+                          backgroundColor: leadersAtGoal === totalLeaders ? '#4caf50' : '#1976d2'
+                        }
+                      }}
+                    />
+                  </Box>
+                  
+                  {/* Aggregate Action Stats */}
+                  <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5, maxHeight: '140px', overflow: 'auto' }}>
+                    {Object.entries(aggregateStats).map(([actionId, stats]) => {
+                      const action = ACTIONS.find((a: any) => a.id === actionId);
+                      if (!action) return null;
+                      
+                      const actionPercentage = stats.goal > 0 ? (stats.count / stats.goal) * 100 : 0;
+                      
+                      return (
+                        <Box key={actionId}>
+                          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.55rem' }}>
+                              {action.name}
+                            </Typography>
+                            <Typography variant="caption" sx={{ fontSize: '0.55rem', color: 'text.secondary' }}>
+                              {stats.count} / {stats.goal}
+                            </Typography>
+                          </Box>
+                        </Box>
+                      );
+                    })}
+                  </Box>
+                </CardContent>
+              </Card>
+            );
+          })()}
+          
+          {/* Card 3: My Team (filtered actions stacked) */}
+          {myTeam && (
+            <Card elevation={1} sx={{ flex: '1 1 250px', minWidth: '200px' }}>
+              <CardContent sx={{ p: 0.75, '&:last-child': { pb: 0.75 } }}>
+                <Typography variant="caption" sx={{ fontWeight: 600, color: '#1976d2', textTransform: 'uppercase', letterSpacing: 0.3, fontSize: '0.7rem', display: 'block', mb: 0.5 }}>
+                  {myTeam.teamName}
+                </Typography>
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5, maxHeight: '200px', overflow: 'auto' }}>
+                  {actionGoals[myTeam.id]?.map(goal => (
+                    <Box key={goal.actionId}>
+                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 0.25 }}>
+                        <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.6rem' }}>
+                          {goal.actionName}
+                        </Typography>
+                        <Typography variant="caption" sx={{ fontWeight: 600, fontSize: '0.6rem' }}>
+                          {goal.current.toLocaleString()}
+                        </Typography>
+                      </Box>
+                      <LinearProgress
+                        variant="determinate"
+                        value={Math.min(goal.percentage, 100)}
+                        sx={{
+                          height: 6,
+                          borderRadius: 1,
+                          backgroundColor: '#e0e0e0',
+                          '& .MuiLinearProgress-bar': {
+                            backgroundColor: goal.percentage >= 100 ? '#4caf50' : '#1976d2'
+                          }
+                        }}
+                      />
+                    </Box>
+                  ))}
+                </Box>
+              </CardContent>
+            </Card>
+          )}
+          
+          {/* Card 3: Full Federation (filtered actions stacked) - exclude team campaign */}
+          {userCampaigns.length > 0 && userCampaigns
+            .filter(campaign => campaign.id !== myTeam?.id) // Don't show team campaign here (already shown in Card 2)
+            .slice(0, 1) // Only show the first campaign
+            .map(campaign => {
+              const overallProgress = campaignProgress[campaign.id] || 0;
+              
+              return (
+                <Card key={campaign.id} elevation={1} sx={{ flex: '1 1 250px', minWidth: '200px' }}>
+                  <CardContent sx={{ p: 0.75, '&:last-child': { pb: 0.75 } }}>
+                    <Typography variant="caption" sx={{ fontWeight: 600, color: '#1976d2', textTransform: 'uppercase', letterSpacing: 0.3, fontSize: '0.7rem', display: 'block', mb: 0.5 }}>
+                      {campaign.name} ({Math.round(overallProgress)}%)
+                    </Typography>
+                    
+                    {/* Action Progress Bars - Vertical stacked (filtered by selected actions) */}
+                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5, maxHeight: '200px', overflow: 'auto' }}>
+                      {actionGoals[campaign.id]?.map(goal => (
+                        <Box key={goal.actionId}>
+                          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 0.25 }}>
+                            <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.6rem' }}>
+                              {goal.actionName}
+                            </Typography>
+                            <Typography variant="caption" sx={{ fontWeight: 600, fontSize: '0.6rem' }}>
+                              {goal.current.toLocaleString()}
+                            </Typography>
+                          </Box>
+                          <LinearProgress
+                            variant="determinate"
+                            value={Math.min(goal.percentage, 100)}
+                            sx={{
+                              height: 6,
+                              borderRadius: 1,
+                              backgroundColor: '#e0e0e0',
+                              '& .MuiLinearProgress-bar': {
+                                backgroundColor: goal.percentage >= 100 ? '#4caf50' : '#1976d2'
+                              }
+                            }}
+                          />
+                        </Box>
+                      ))}
+                    </Box>
+                  </CardContent>
+                </Card>
+              );
+            })}
+        </Box>
+
+        {/* Organizing Section */}
+        <Box>
+
+          <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
+          {/* Your People Card - Lists, People, and Leaders */}
+          <Box sx={{ flex: '1 1 450px', minWidth: '350px', display: 'flex' }}>
+            <Card elevation={1} sx={{ width: '100%', display: 'flex', flexDirection: 'column', height: 'calc(100vh - 280px)', minHeight: '600px' }}>
+              <CardContent sx={{ py: 1, px: 1.5, flexGrow: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+                  <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
+                    Your People
+                  </Typography>
+                  <Box sx={{ display: 'flex', gap: 1 }}>
+                    {turfTab === 'people' && (
+                      <IconButton
+                        size="small"
+                        onClick={() => setShowMyPeopleFilters(!showMyPeopleFilters)}
+                        sx={{ 
+                          color: showMyPeopleFilters || dashboardPeopleFilters.loeStatus.length > 0 || dashboardPeopleFilters.memberStatus.length > 0 || dashboardPeopleFilters.chapter || dashboardPeopleFilters.searchText || dashboardPeopleFilters.lastContactFilter !== 'all' || dashboardPeopleFilters.meetingCountFilter !== 'all' || dashboardPeopleFilters.actionStatus !== 'all'
+                            ? 'primary.main' 
+                            : 'text.secondary',
+                          position: 'relative'
+                        }}
+                      >
+                        <FilterListIcon fontSize="small" />
+                        {(dashboardPeopleFilters.loeStatus.length > 0 || dashboardPeopleFilters.memberStatus.length > 0 || dashboardPeopleFilters.chapter || dashboardPeopleFilters.searchText || dashboardPeopleFilters.lastContactFilter !== 'all' || dashboardPeopleFilters.meetingCountFilter !== 'all' || dashboardPeopleFilters.actionStatus !== 'all') && (
+                          <Box
+                            sx={{
+                              position: 'absolute',
+                              top: -4,
+                              right: -4,
+                              backgroundColor: 'primary.main',
+                              color: 'white',
+                              borderRadius: '50%',
+                              width: 16,
+                              height: 16,
+                              fontSize: '0.7rem',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              fontWeight: 'bold'
+                            }}
+                          >
+                            {[
+                              dashboardPeopleFilters.chapter,
+                              dashboardPeopleFilters.searchText,
+                              dashboardPeopleFilters.loeStatus.length > 0,
+                              dashboardPeopleFilters.memberStatus.length > 0,
+                              dashboardPeopleFilters.lastContactFilter !== 'all',
+                              dashboardPeopleFilters.meetingCountFilter !== 'all',
+                              dashboardPeopleFilters.actionStatus !== 'all'
+                            ].filter(Boolean).length}
+                          </Box>
+                        )}
+                      </IconButton>
+                    )}
+                    {turfTab === 'lists' && (
+                      <Button
+                        startIcon={<AddIcon />}
+                        size="small"
+                        variant="outlined"
+                        onClick={() => setShowAddTurfDialog(true)}
+                        disabled={conversationPeopleForTurf.length === 0}
+                      >
+                        Add
+                      </Button>
+                    )}
+                  </Box>
+                </Box>
+
+                {/* Tabs for My Lists, My People, and My Leaders */}
+                <Tabs 
+                  value={turfTab} 
+                  onChange={(_, newValue) => {
+                    setTurfTab(newValue);
+                    // Update URL
+                    const params = new URLSearchParams(window.location.search);
+                    params.set('dashboardTab', newValue);
+                    window.history.pushState({}, '', `${window.location.pathname}?${params.toString()}`);
+                  }}
+                  sx={{ 
+                    minHeight: 36,
+                    mb: 1,
+                    '& .MuiTab-root': { 
+                      minHeight: 36, 
+                      py: 0.5,
+                      fontSize: '0.8rem'
+                    }
+                  }}
+                >
+                  <Tab 
+                    label={
+                      (dashboardPeopleFilters.loeStatus.length > 0 || dashboardPeopleFilters.memberStatus.length > 0 || dashboardPeopleFilters.chapter || dashboardPeopleFilters.searchText || dashboardPeopleFilters.lastContactFilter !== 'all' || dashboardPeopleFilters.meetingCountFilter !== 'all' || dashboardPeopleFilters.actionStatus !== 'all')
+                        ? `My People (filtered)`
+                        : `My People`
+                    } 
+                    value="people" 
+                  />
+                  <Tab label={`My Leaders (${myLeaders.length})`} value="leaders" />
+                  <Tab label="My Lists" value="lists" />
+                  <Tab label="My Actions" value="actions" />
+                </Tabs>
+                
+                {/* Filter Chips for My People */}
+                {turfTab === 'people' && (
+                  <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mb: 1 }}>
+                    {dashboardPeopleFilters.chapter && (
+                      <Chip
+                        label={`Chapter: ${dashboardPeopleFilters.chapter}`}
+                        size="small"
+                        onDelete={() => setDashboardPeopleFilters((prev: any) => ({ ...prev, chapter: '' }))}
+                      />
+                    )}
+                    {dashboardPeopleFilters.searchText && (
+                      <Chip
+                        label={`Search: "${dashboardPeopleFilters.searchText}"`}
+                        size="small"
+                        onDelete={() => setDashboardPeopleFilters((prev: any) => ({ ...prev, searchText: '' }))}
+                      />
+                    )}
+                    {dashboardPeopleFilters.loeStatus.map((status: string) => (
+                      <Chip
+                        key={`loe-${status}`}
+                        label={`LOE: ${status.replace(/^\d+[_.]/, '')}`}
+                        size="small"
+                        onDelete={() => setDashboardPeopleFilters((prev: any) => ({ 
+                          ...prev, 
+                          loeStatus: prev.loeStatus.filter((s: string) => s !== status) 
+                        }))}
+                      />
+                    ))}
+                    {dashboardPeopleFilters.memberStatus.map((status: string) => (
+                      <Chip
+                        key={`member-${status}`}
+                        label={`Member: ${status}`}
+                        size="small"
+                        onDelete={() => setDashboardPeopleFilters((prev: any) => ({ 
+                          ...prev, 
+                          memberStatus: prev.memberStatus.filter((s: string) => s !== status) 
+                        }))}
+                        color={status === 'Active' ? 'success' : status === 'Lapsed' ? 'warning' : 'default'}
+                      />
+                    ))}
+                    {dashboardPeopleFilters.lastContactFilter !== 'all' && (
+                      <Chip
+                        label={`Last Contact: ${dashboardPeopleFilters.lastContactFilter}`}
+                        size="small"
+                        onDelete={() => setDashboardPeopleFilters((prev: any) => ({ ...prev, lastContactFilter: 'all' }))}
+                      />
+                    )}
+                    {dashboardPeopleFilters.meetingCountFilter !== 'all' && (
+                      <Chip
+                        label={`Meetings: ${dashboardPeopleFilters.meetingCountFilter}`}
+                        size="small"
+                        onDelete={() => setDashboardPeopleFilters((prev: any) => ({ ...prev, meetingCountFilter: 'all' }))}
+                      />
+                    )}
+                    {dashboardPeopleFilters.actionStatus !== 'all' && (
+                      <Chip
+                        label={`Action: ${dashboardPeopleFilters.actionStatus}`}
+                        size="small"
+                        onDelete={() => setDashboardPeopleFilters((prev: any) => ({ ...prev, actionStatus: 'all' }))}
+                      />
+                    )}
+                  </Box>
+                )}
+
+                {/* My Lists Tab Content */}
+                <Box sx={{ display: turfTab === 'lists' ? 'block' : 'none', flex: 1, overflow: 'hidden' }}>
+                  <>
+                {/* Status Filter Chips */}
+                {listStatusFilter !== 'all' && (
+                  <Box sx={{ mb: 1 }}>
+                    <Chip
+                      label={`Status: ${listStatusFilter === 'complete' ? 'Complete' : 'In Progress'}`}
+                      size="small"
+                      onDelete={() => setListStatusFilter('all')}
+                      onClick={() => setListStatusFilter('all')}
+                    />
+                  </Box>
+                )}
+                {/* Table - Each Action as a Column - Show ALL live actions */}
+                {myTurf.filter(p => availableActions.some((a: any) => a.action_id === p.action && a.status === 'live')).length > 0 ? (
+                  <TableContainer sx={{ maxHeight: 'calc(100vh - 360px)', minHeight: '500px' }}>
+                    <Table size="small" stickyHeader>
+                      <TableHead>
+                        {/* Single header row with action groups and field names */}
+                        <TableRow>
+                          <TableCell 
+                            sx={{ 
+                              fontWeight: 600,
+                              py: 1,
+                              position: 'sticky', 
+                              left: 0, 
+                              bgcolor: 'background.paper', 
+                              zIndex: 3,
+                              minWidth: 150
+                            }}
+                          >
+                            Name
+                          </TableCell>
+                          {availableActions
+                            .filter((a: any) => a.status === 'live')
+                            .map((action: any) => {
+                              if (!action || !action.fields) return null;
+                              return action.fields.map((field: any, fieldIndex: number) => (
+                                <TableCell 
+                                  key={`${action.action_id}-${field.key}`}
+                                  align="center"
+                                  sx={{ 
+                                    fontWeight: 600,
+                                    py: 1,
+                                    minWidth: 100,
+                                    bgcolor: fieldIndex === 0 ? '#f5f5f5' : 'background.paper',
+                                    borderLeft: fieldIndex === 0 ? '2px solid #e0e0e0' : '1px solid #e0e0e0'
+                                  }}
+                                >
+                                  <Box>
+                                    {fieldIndex === 0 && (
+                                      <Typography variant="caption" sx={{ display: 'block', fontSize: '0.65rem', color: 'text.secondary', mb: 0.25 }}>
+                                        {action.action_name}
+                                      </Typography>
+                                    )}
+                                    <Typography variant="caption" sx={{ fontSize: '0.75rem' }}>
+                                      {field.label}
+                                    </Typography>
+                                  </Box>
+                                </TableCell>
+                              ));
+                            })
+                          }
+                          <TableCell 
+                            sx={{ 
+                              fontWeight: 600,
+                              py: 1,
+                              minWidth: 100,
+                              borderLeft: '2px solid #e0e0e0'
+                            }}
+                          >
+                            Date Added
+                          </TableCell>
+                          <TableCell 
+                            align="center"
+                            width={50}
+                            sx={{ 
+                              fontWeight: 600,
+                              py: 1
+                            }}
+                          >
+                          </TableCell>
+                        </TableRow>
+                      </TableHead>
+                      <TableBody>
+                        {/* Group by person - one row per person */}
+                        {Array.from(new Set(myTurf
+                          .filter(p => availableActions.some((a: any) => a.action_id === p.action && a.status === 'live'))
+                          .map(p => p.vanid)
+                        ))
+                        .map(vanid => {
+                          // Get all live actions for this person
+                          const liveActionIds = availableActions
+                            .filter((a: any) => a.status === 'live')
+                            .map((a: any) => a.action_id);
+                          const personEntries = myTurf.filter(p => p.vanid === vanid && liveActionIds.includes(p.action));
+                          const firstEntry = personEntries[0];
+                          
+                          return (
+                            <TableRow
+                              key={vanid}
+                              sx={{ 
+                                '&:hover': { bgcolor: '#f5f5f5' }
+                              }}
+                            >
+                              <TableCell 
+                                sx={{ 
+                                  py: 0.75,
+                                  position: 'sticky', 
+                                  left: 0, 
+                                  bgcolor: 'background.paper', 
+                                  zIndex: 1 
+                                }}
+                              >
+                                <Typography 
+                                  variant="body2" 
+                                  sx={{ 
+                                    fontSize: '0.8rem',
+                                    cursor: 'pointer',
+                                    '&:hover': { color: 'primary.main', textDecoration: 'underline' }
+                                  }}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    onPersonDetailsOpen?.(vanid.toString());
+                                  }}
+                                >
+                                  {firstEntry.firstName} {firstEntry.lastName}
+                                </Typography>
+                              </TableCell>
+                              
+                              {/* One cell per field of each live action */}
+                              {availableActions
+                                .filter((a: any) => a.status === 'live')
+                                .map((action: any) => {
+                                  const actionId = action.action_id;
+                                  const entry = personEntries.find(e => e.action === actionId);
+                                
+                                if (!entry) {
+                                  // Single merged cell with add button when person not on this list
+                                  return (
+                                    <TableCell 
+                                      key={`${actionId}-add`}
+                                      colSpan={action.fields?.length || 1}
+                                      align="center"
+                                      sx={{ 
+                                        py: 0.75,
+                                        borderLeft: '2px solid #e0e0e0',
+                                        bgcolor: '#f9f9f9'
+                                      }}
+                                    >
+                                      <Tooltip title={`Add to ${action.action_name} list`}>
+                                        <IconButton
+                                          size="small"
+                                          onClick={async () => {
+                                            try {
+                                              // Initialize fields for this action (all false)
+                                              const initialFields: Record<string, boolean> = {};
+                                              action.fields.forEach((field: any) => {
+                                                initialFields[field.key] = false;
+                                              });
+                                              
+                                              // Add to database
+                                              const success = await addToList({
+                                                organizer_vanid: selectedOrganizerId,
+                                                contact_vanid: vanid,
+                                                contact_name: `${firstEntry.firstName} ${firstEntry.lastName}`,
+                                                action_id: actionId,
+                                                action: action.action_name,
+                                                desired_change: '',
+                                                progress: initialFields
+                                              });
+                                              
+                                              if (success) {
+                                                // Reload list from database
+                                                const lists = await fetchLists(selectedOrganizerId);
+                                                const turfPeople: TurfPerson[] = lists.map(item => ({
+                                                  vanid: parseInt(item.vanid),
+                                                  firstName: item.contact_name.split(' ')[0] || '',
+                                                  lastName: item.contact_name.split(' ').slice(1).join(' ') || '',
+                                                  desiredChange: item.desired_change || '',
+                                                  action: item.action_id,
+                                                  fields: item.progress || {},
+                                                  datePledged: item.date_pledged,
+                                                  list_id: item.list_id
+                                                }));
+                                                setTurfList(turfPeople);
+                                              }
+                                            } catch (error) {
+                                              console.error('Error adding to list:', error);
+                                              alert('Failed to add person to list. Please try again.');
+                                            }
+                                          }}
+                                          sx={{
+                                            color: '#1976d2',
+                                            '&:hover': {
+                                              bgcolor: '#e3f2fd',
+                                              color: '#1565c0'
+                                            }
+                                          }}
+                                        >
+                                          <AddIcon fontSize="small" />
+                                        </IconButton>
+                                      </Tooltip>
+                                    </TableCell>
+                                  );
+                                }
+                                
+                                // Render each field in its own cell
+                                return action.fields && action.fields.map((field: any, fieldIndex: number) => {
+                                  const fieldType = field.type || 'boolean';
+                                  
+                                  return (
+                                    <TableCell 
+                                      key={`${actionId}-${field.key}`}
+                                      align="center"
+                                      sx={{ 
+                                        py: 0.75,
+                                        borderLeft: fieldIndex === 0 ? '2px solid #e0e0e0' : '1px solid #e0e0e0'
+                                      }}
+                                    >
+                                      {/* Boolean field - checkbox */}
+                                      {fieldType === 'boolean' && (
+                                        <Checkbox
+                                          size="small"
+                                          checked={entry.fields[field.key] || false}
+                                          onChange={async (e) => {
+                                            if (!entry.list_id) return;
+                                            
+                                            const newValue = e.target.checked;
+                                            const newFields = { ...entry.fields, [field.key]: newValue };
+                                            await updateListItem(entry.list_id, {
+                                              progress: newFields
+                                            });
+                                            setTurfList(prev => prev.map(p => 
+                                              p.list_id === entry.list_id 
+                                                ? { ...p, fields: newFields }
+                                                : p
+                                            ));
+                                          }}
+                                          sx={{ 
+                                            p: 0,
+                                            '& .MuiSvgIcon-root': { fontSize: 20 }
+                                          }}
+                                        />
+                                      )}
+                                      
+                                      {/* Select field - dropdown */}
+                                      {fieldType === 'select' && (
+                                        <Select
+                                          size="small"
+                                          value={entry.fields[field.key] || ''}
+                                          onChange={async (e) => {
+                                            if (!entry.list_id) return;
+                                            
+                                            const newValue = e.target.value;
+                                            const newFields = { ...entry.fields, [field.key]: newValue };
+                                            await updateListItem(entry.list_id, {
+                                              progress: newFields
+                                            });
+                                            setTurfList(prev => prev.map(p => 
+                                              p.list_id === entry.list_id 
+                                                ? { ...p, fields: newFields }
+                                                : p
+                                            ));
+                                          }}
+                                          displayEmpty
+                                          sx={{ 
+                                            minWidth: 120,
+                                            '& .MuiSelect-select': {
+                                              fontSize: '0.75rem',
+                                              py: 0.5
+                                            }
+                                          }}
+                                        >
+                                          <MenuItem value="" sx={{ fontSize: '0.75rem' }}><em>—</em></MenuItem>
+                                          {field.options && field.options.map((option: string) => (
+                                            <MenuItem key={option} value={option} sx={{ fontSize: '0.75rem' }}>
+                                              {option}
+                                            </MenuItem>
+                                          ))}
+                                        </Select>
+                                      )}
+                                      
+                                      {/* Text field - input */}
+                                      {fieldType === 'text' && (
+                                        <TextField
+                                          size="small"
+                                          value={entry.fields[field.key] || ''}
+                                          onChange={(e) => {
+                                            const newValue = e.target.value;
+                                            const newFields = { ...entry.fields, [field.key]: newValue };
+                                            setTurfList(prev => prev.map(p => 
+                                              p.list_id === entry.list_id 
+                                                ? { ...p, fields: newFields }
+                                                : p
+                                            ));
+                                          }}
+                                          onBlur={async (e) => {
+                                            if (!entry.list_id) return;
+                                            
+                                            const newValue = e.target.value;
+                                            const newFields = { ...entry.fields, [field.key]: newValue };
+                                            await updateListItem(entry.list_id, {
+                                              progress: newFields
+                                            });
+                                          }}
+                                          placeholder="Enter..."
+                                          sx={{ 
+                                            minWidth: 150,
+                                            '& .MuiInputBase-input': { 
+                                              fontSize: '0.75rem',
+                                              py: 0.5
+                                            }
+                                          }}
+                                        />
+                                      )}
+                                    </TableCell>
+                                  );
+                                });
+                              })}
+                              
+                              <TableCell sx={{ py: 0.75, borderLeft: '2px solid #e0e0e0' }}>
+                                <Typography variant="body2" color="text.secondary" sx={{ fontSize: '0.75rem' }}>
+                                  {(() => {
+                                    if (!firstEntry.datePledged) return '—';
+                                    try {
+                                      const date = new Date(firstEntry.datePledged);
+                                      return isNaN(date.getTime()) ? '—' : format(date, 'MMM dd');
+                                    } catch {
+                                      return '—';
+                                    }
+                                  })()}
+                                </Typography>
+                              </TableCell>
+                              <TableCell align="center" sx={{ py: 0.75 }}>
+                                <Tooltip title="Remove from all lists">
+                                  <IconButton
+                                    size="small"
+                                    onClick={() => handleRemoveTurfPerson(vanid)}
+                                    sx={{ 
+                                      p: 0.5,
+                                      color: 'text.secondary',
+                                      '&:hover': { color: 'error.main' }
+                                    }}
+                                  >
+                                    <DeleteIcon sx={{ fontSize: 18 }} />
+                                  </IconButton>
+                                </Tooltip>
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
+                      </TableBody>
+                    </Table>
+                  </TableContainer>
+                ) : (
+                  <Typography variant="body2" color="text.secondary" sx={{ py: 2, textAlign: 'center' }}>
+                    No people for selected actions. Add people you're reaching out to!
+                  </Typography>
+                )}
+                  </>
+                </Box>
+
+                {/* My People Tab Content - Reuse PeoplePanel */}
+                <Box sx={{ height: 'calc(100vh - 360px)', minHeight: '500px', overflow: 'hidden', display: turfTab === 'people' ? 'block' : 'none' }}>
+                    <PeoplePanel
+                      meetings={[]}
+                      selectedNodeId={null}
+                      currentDateRange={currentDateRange ? [currentDateRange.start, currentDateRange.end] : null}
+                      userMap={userMap as any}
+                      orgIds={[]}
+                      selectedChapter={selectedChapter || 'All Chapters'}
+                      onNodeHover={() => {}}
+                      nodes={[]}
+                      onClearFilter={() => {}}
+                      onAddConnection={() => {}}
+                      currentVisualization="people"
+                      peopleFilters={dashboardPeopleFilters}
+                      onFiltersChange={setDashboardPeopleFilters}
+                      pledgeSubmissions={pledgeSubmissions}
+                      selectedActions={currentOrganizerLiveActions}
+                      currentUserId={currentUserId || undefined}
+                      currentUserName={currentUserInfo?.fullName || currentUserInfo?.firstname || ''}
+                      actions={actionsProp}
+                      hideColumns={['chapter', 'organizer']}
+                      externalFilterOpen={showMyPeopleFilters}
+                      onExternalFilterOpenChange={setShowMyPeopleFilters}
+                      sharedAllContacts={sharedAllContacts}
+                      sharedCachedMeetings={sharedCachedMeetings}
+                      organizerMappings={organizerMappings}
+                    />
+                </Box>
+
+                {/* My Leaders Tab Content */}
+                <Box sx={{ display: turfTab === 'leaders' ? 'block' : 'none', flex: 1, overflow: 'hidden' }}>
+                  <>
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+                      <Button
+                        startIcon={<AddIcon />}
+                        size="small"
+                        variant="outlined"
+                        onClick={() => setShowAddLeaderDialog(true)}
+                        disabled={conversationPeopleForLeaders.length === 0}
+                      >
+                        Add Leader
+                      </Button>
+                    </Box>
+
+                    {myLeaders.length > 0 ? (
+                      <>
+                        {(() => {
+                          // Calculate unified action IDs for the table
+                          const allActionIds = new Set<string>();
+                          myLeaders.forEach(leader => {
+                            const actions = leaderActionsMap[leader.id] || [];
+                            actions.forEach(actionId => allActionIds.add(actionId));
+                          });
+                          
+                          const federationActions = ['sign_pledge', 'registration_real'];
+                          const unifiedActionIdsForTable = Array.from(allActionIds).sort((a, b) => {
+                            const aIsFederation = federationActions.includes(a);
+                            const bIsFederation = federationActions.includes(b);
+                            
+                            if (aIsFederation && !bIsFederation) return -1;
+                            if (!aIsFederation && bIsFederation) return 1;
+                            return a.localeCompare(b);
+                          });
+                          
+                          return (
+                            <LeaderMetricsTable
+                              leaders={myLeaders}
+                              leaderActionsMap={leaderActionsMap}
+                              leaderGoalsMap={leaderGoalsMap}
+                              unifiedActionIds={unifiedActionIdsForTable}
+                              ACTIONS={ACTIONS}
+                              availableActions={availableActions}
+                              pledgeSubmissions={pledgeSubmissions}
+                              currentUserId={currentUserId || undefined}
+                              peopleRecords={peopleRecords}
+                              reloadTriggers={leaderListReloadTrigger}
+                              showSummary={true}
+                              onRemoveLeader={(leaderId) => handleRemoveLeader(parseInt(leaderId))}
+                              onAddToList={handleOpenAddToLeaderList}
+                              onPersonDetailsOpen={onPersonDetailsOpen}
+                              onFilterByOrganizer={onFilterByOrganizer}
+                              onEditOrganizerMapping={onEditOrganizerMapping}
+                            />
+                          );
+                        })()}
+                      </>
+                    ) : (
+                      <Box sx={{ p: 3, textAlign: 'center' }}>
+                        <Typography variant="body2" color="text.secondary">
+                          No leaders added yet. Add leaders above to track their progress.
+                        </Typography>
+                      </Box>
+                    )}
+                  </>
+                </Box>
+
+                {/* My Actions Tab Content */}
+                <Box sx={{ display: turfTab === 'actions' ? 'flex' : 'none', flex: 1, overflow: 'hidden', flexDirection: 'column' }}>
+                  <Box sx={{ p: 2, flex: 1, overflow: 'auto', display: 'flex', flexDirection: 'column' }}>
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                      <Typography variant="h6">
+                        My Actions
+                      </Typography>
+                      <Button
+                        startIcon={<AddIcon />
+                {/* My Actions Tab Content */}
+                <Box sx={{ display: turfTab === 'actions' ? 'flex' : 'none', flex: 1, overflow: 'hidden', flexDirection: 'column' }}>
+                  <Box sx={{ p: 2, flex: 1, overflow: 'auto', display: 'flex', flexDirection: 'column' }}>
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                      <Typography variant="h6">
+                        My Actions
+                      </Typography>
+                      <Button
+                        startIcon={<AddIcon />}
+                        size="small"
+                        variant="contained"
+                        onClick={() => setShowAddActionDialog(true)}
+                      >
+                        Create Action
+                      </Button>
+                    </Box>
+                    
+                    {/* Status Tabs: Live / Archived */}
+                    <Tabs 
+                      value={actionStatusFilter} 
+                      onChange={(e, newValue) => setActionStatusFilter(newValue)}
+                      sx={{ mb: 2, borderBottom: 1, borderColor: 'divider' }}
+                    >
+                      <Tab label="Live Actions" value="live" />
+                      <Tab label="Archived" value="archived" />
+                    </Tabs>
+                    
+                    {/* List of available actions - filtered by status */}
+                    {loadingActions ? (
+                      <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
+                        <LinearProgress sx={{ width: '50%' }} />
+                      </Box>
+                    ) : availableActions.filter(a => (a.status || 'live') === actionStatusFilter).length === 0 ? (
+                      <Paper sx={{ p: 3, textAlign: 'center', bgcolor: 'grey.50' }}>
+                        <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
+                          {actionStatusFilter === 'live' 
+                            ? 'No live actions available yet. Create your first action to get started!'
+                            : 'No archived actions.'}
+                        </Typography>
+                      </Paper>
+                    ) : (
+                      <Box sx={{ 
+                        display: 'grid', 
+                        gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', 
+                        gap: 2, 
+                        overflow: 'auto', 
+                        pb: 2 
+                      }}>
+                        {availableActions
+                          .filter(a => (a.status || 'live') === actionStatusFilter)
+                          .map((action) => (
+                          <Card key={action.action_id} variant="outlined" sx={{ display: 'flex', flexDirection: 'column' }}>
+                            <CardContent sx={{ p: 1.5, flex: 1, display: 'flex', flexDirection: 'column', '&:last-child': { pb: 1.5 } }}>
+                              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1 }}>
+                                <Typography variant="subtitle1" sx={{ fontSize: '0.95rem', fontWeight: 600, lineHeight: 1.3, flex: 1, mr: 1 }}>
+                                  {action.action_name}
+                                </Typography>
+                                <Chip 
+                                  icon={action.organizer_vanid ? <PeopleIcon /> : <GroupsIcon />}
+                                  label={action.organizer_vanid ? 'Personal' : 'Federation'}
+                                  size="small"
+                                  color={action.organizer_vanid ? 'primary' : 'default'}
+                                  variant="outlined"
+                                  sx={{ fontSize: '0.65rem', height: 20 }}
+                                />
+                              </Box>
+                              
+                              {/* Fields - show first 3 */}
+                              <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap', mb: 1 }}>
+                                {action.fields && action.fields.slice(0, 3).map((field: any, idx: number) => (
+                                  <Chip 
+                                    key={idx}
+                                    label={field.label} 
+                                    size="small" 
+                                    variant="outlined"
+                                    sx={{ fontSize: '0.7rem', height: 20 }}
+                                  />
+                                ))}
+                                {action.fields && action.fields.length > 3 && (
+                                  <Chip 
+                                    label={`+${action.fields.length - 3}`}
+                                    size="small" 
+                                    variant="outlined"
+                                    sx={{ fontSize: '0.7rem', height: 20 }}
+                                  />
+                                )}
+                              </Box>
+                              
+                              {/* Goal Display */}
+                              {organizerGoals[action.action_id] && (
+                                <Box sx={{ mb: 1, p: 0.75, bgcolor: '#f5f5f5', borderRadius: 1 }}>
+                                  <Typography variant="caption" sx={{ fontSize: '0.7rem' }} color="text.secondary">
+                                    Goal: <strong>{organizerGoals[action.action_id]}</strong>
+                                  </Typography>
+                                </Box>
+                              )}
+                              
+                              {/* Spacer */}
+                              <Box sx={{ flex: 1 }} />
+                              
+                              {/* Action Buttons */}
+                              <Box sx={{ display: 'flex', gap: 0.5, mt: 1 }}>
+                                {actionStatusFilter === 'live' && (
+                                  <Button
+                                    size="small"
+                                    variant="outlined"
+                                    onClick={() => {
+                                      setGoalActionId(action.action_id);
+                                      setGoalValue(organizerGoals[action.action_id] || 5);
+                                      setShowSetGoalDialog(true);
+                                    }}
+                                    sx={{ fontSize: '0.7rem', py: 0.25, px: 0.75 }}
+                                  >
+                                    {organizerGoals[action.action_id] ? 'Goal' : '+Goal'}
+                                  </Button>
+                                )}
+                                
+                                {action.organizer_vanid === selectedOrganizerId && (
+                                  <>
+                                    <Button
+                                      size="small"
+                                      variant="outlined"
+                                      startIcon={<EditIcon sx={{ fontSize: 14 }} />}
+                                      onClick={() => {
+                                        setEditingAction(action);
+                                        setShowAddActionDialog(true);
+                                      }}
+                                      sx={{ fontSize: '0.7rem', py: 0.25, px: 0.75, flex: 1 }}
+                                    >
+                                      Edit
+                                    </Button>
+                                    
+                                    <Tooltip title={actionStatusFilter === 'live' ? 'Archive' : 'Restore'}>
+                                      <IconButton
+                                        size="small"
+                                        color={actionStatusFilter === 'live' ? 'warning' : 'success'}
+                                        onClick={async () => {
+                                          const newStatus = actionStatusFilter === 'live' ? 'archived' : 'live';
+                                          try {
+                                            await fetch(`http://localhost:3003/api/actions/${action.action_id}/status`, {
+                                              method: 'PATCH',
+                                              headers: { 'Content-Type': 'application/json' },
+                                              body: JSON.stringify({ status: newStatus })
+                                            });
+                                            const updatedActions = await fetchActions(selectedOrganizerId);
+                                            setAvailableActions(updatedActions);
+                                          } catch (error) {
+                                            console.error('Error updating action status:', error);
+                                          }
+                                        }}
+                                        sx={{ p: 0.5 }}
+                                      >
+                                        {actionStatusFilter === 'live' ? 
+                                          <ArchiveIcon sx={{ fontSize: 16 }} /> : 
+                                          <UnarchiveIcon sx={{ fontSize: 16 }} />
+                                        }
+                                      </IconButton>
+                                    </Tooltip>
+                                  </>
+                                )}
+                              </Box>
+                            </CardContent>
+                          </Card>
+                        ))}
+                      </Box>
+                    )}
+                  </Box>
+                </Box>
+              </CardContent>
+            </Card>
+          </Box>
+        </Box>
+      </Box>
+      </Box>
+      
+      {/* Dialogs below this point */}
+      
+      {/* Add to Turf Dialog */}
+      <Dialog 
+        open={showAddTurfDialog} 
+        onClose={() => {
+          setShowAddTurfDialog(false);
+          setTurfSearchText('');
+        }}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>Add People to Your Turf</DialogTitle>
+        <DialogContent>
+          {/* Action Selector */}
+          <FormControl fullWidth sx={{ mb: 3, mt: 1 }}>
+            <InputLabel>Action</InputLabel>
+            <Select
+              value={selectedActionForAdd}
+              onChange={(e) => setSelectedActionForAdd(e.target.value)}
+              label="Action"
+            >
+              {availableActions.map(action => (
+                <MenuItem key={action.action_id} value={action.action_id}>
+                  {action.action_name}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+          
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            Select people to add to your {availableActions.find((a: any) => a.action_id === selectedActionForAdd)?.action_name} list:
+          </Typography>
+          
+          <TextField
+            fullWidth
+            size="small"
+            placeholder="Search by name or chapter..."
+            value={turfSearchText}
+            onChange={(e) => setTurfSearchText(e.target.value)}
+            sx={{ mb: 2 }}
+          />
+          
+          <List sx={{ maxHeight: 400, overflow: 'auto' }}>
+            {filteredTurfPeople.length > 0 ? (
+              filteredTurfPeople.map((person) => (
+                <ListItem
+                  key={person.id}
+                  sx={{
+                    border: '1px solid #e0e0e0',
+                    borderRadius: 1,
+                    mb: 1,
+                    cursor: 'pointer',
+                    '&:hover': { bgcolor: '#f5f5f5' }
+                  }}
+                  onClick={() => handleAddToTurf(person)}
+                >
+                  <ListItemText
+                    primary={person.name}
+                    secondary={person.chapter}
+                  />
+                  <IconButton size="small" color="primary">
+                    <AddIcon />
+                  </IconButton>
+                </ListItem>
+              ))
+            ) : (
+              <Typography variant="body2" color="text.secondary" sx={{ py: 2, textAlign: 'center' }}>
+                {turfSearchText ? 'No matching people found.' : 'No available people for this action.'}
+              </Typography>
+            )}
+          </List>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => {
+            setShowAddTurfDialog(false);
+            setTurfSearchText('');
+          }}>Close</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Add to Leader's Organizing List Dialog */}
+      <Dialog 
+        open={showAddToLeaderListDialog} 
+        onClose={() => {
+          setShowAddToLeaderListDialog(false);
+          setLeaderListSearchText('');
+        }}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>Add People to {selectedLeaderForAdd?.name}'s List</DialogTitle>
+        <DialogContent>
+          {/* Action Selector */}
+          <FormControl fullWidth sx={{ mb: 3, mt: 1 }}>
+            <InputLabel>Action</InputLabel>
+            <Select
+              value={selectedActionForLeaderAdd}
+              onChange={(e) => setSelectedActionForLeaderAdd(e.target.value)}
+              label="Action"
+            >
+              {availableActions.map(action => (
+                <MenuItem key={action.action_id} value={action.action_id}>
+                  {action.action_name}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+          
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            Select people to add to {selectedLeaderForAdd?.name}'s {availableActions.find((a: any) => a.action_id === selectedActionForLeaderAdd)?.action_name} list:
+          </Typography>
+          
+          <TextField
+            fullWidth
+            size="small"
+            placeholder="Search by name..."
+            value={leaderListSearchText}
+            onChange={(e) => setLeaderListSearchText(e.target.value)}
+            sx={{ mb: 2 }}
+          />
+          
+          <List sx={{ maxHeight: 400, overflow: 'auto' }}>
+            {filteredPeopleForLeaderList.length > 0 ? (
+              filteredPeopleForLeaderList.map((person) => (
+                <ListItem
+                  key={person.id}
+                  sx={{
+                    border: '1px solid #e0e0e0',
+                    borderRadius: 1,
+                    mb: 1,
+                    cursor: 'pointer',
+                    '&:hover': { bgcolor: '#f5f5f5' }
+                  }}
+                  onClick={() => handleAddToLeaderList(person)}
+                >
+                  <ListItemText
+                    primary={person.name}
+                    secondary={person.chapter}
+                  />
+                  <IconButton size="small" color="primary">
+                    <AddIcon />
+                  </IconButton>
+                </ListItem>
+              ))
+            ) : (
+              <Typography variant="body2" color="text.secondary" sx={{ py: 2, textAlign: 'center' }}>
+                {leaderListSearchText ? 'No matching people found.' : 'No available people.'}
+              </Typography>
+            )}
+          </List>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => {
+            setShowAddToLeaderListDialog(false);
+            setLeaderListSearchText('');
+          }}>Close</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Add Leader Dialog */}
+      <Dialog 
+        open={showAddLeaderDialog} 
+        onClose={() => {
+          setShowAddLeaderDialog(false);
+          setLeaderSearchText('');
+          setSelectedParentLeader(null);
+        }}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>Add Leader</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2, mt: 1 }}>
+            Select people you're developing as leaders. <strong>Team members</strong> and people in your chapter appear first:
+          </Typography>
+          
+          {/* Reports To Dropdown */}
+          <FormControl fullWidth size="small" sx={{ mb: 2 }}>
+            <InputLabel>Reports To</InputLabel>
+            <Select
+              value={selectedParentLeader || ''}
+              onChange={(e) => setSelectedParentLeader(e.target.value || null)}
+              label="Reports To"
+            >
+              <MenuItem value="">Direct report to me</MenuItem>
+              {myLeaders.map(leader => (
+                <MenuItem key={leader.id} value={leader.id}>
+                  {leader.name}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+          
+          <TextField
+            fullWidth
+            size="small"
+            placeholder="Search by name or chapter..."
+            value={leaderSearchText}
+            onChange={(e) => setLeaderSearchText(e.target.value)}
+            sx={{ mb: 2 }}
+          />
+          
+          <List sx={{ maxHeight: 400, overflow: 'auto' }}>
+            {filteredLeaderPeople.length > 0 ? (
+              filteredLeaderPeople.map((person) => (
+                <ListItem
+                  key={person.id}
+                  sx={{
+                    border: '1px solid #e0e0e0',
+                    borderRadius: 1,
+                    mb: 1,
+                    cursor: 'pointer',
+                    '&:hover': { bgcolor: '#f5f5f5' }
+                  }}
+                  onClick={() => handleAddLeader(person)}
+                >
+                  <ListItemText
+                    primary={person.name}
+                    secondary={person.chapter}
+                  />
+                  <IconButton size="small" color="primary">
+                    <AddIcon />
+                  </IconButton>
+                </ListItem>
+              ))
+            ) : (
+              <Typography variant="body2" color="text.secondary" sx={{ py: 2, textAlign: 'center' }}>
+                {leaderSearchText ? 'No matching people found.' : 'No available people. Everyone is already in your leaders list!'}
+              </Typography>
+            )}
+          </List>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => {
+            setShowAddLeaderDialog(false);
+            setLeaderSearchText('');
+          }}>Close</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Add Team Dialog */}
+      <AddTeamDialog
+        open={showAddTeamDialog}
+        onClose={() => setShowAddTeamDialog(false)}
+        onSave={handleAddTeam}
+        organizers={organizers}
+        allPeople={allPeople}
+        chapters={chapters}
+      />
+
+      {/* Edit Team Dialog */}
+      <EditTeamDialog
+        open={showEditTeamDialog}
+        onClose={() => {
+          setShowEditTeamDialog(false);
+          setTeamToEdit(null);
+        }}
+        onSave={handleSaveEditedTeam}
+        organizers={organizers}
+        allPeople={allPeople}
+        chapters={chapters}
+        teamToEdit={teamToEdit}
+      />
+
+      {/* Add Action Dialog */}
+      <CampaignActionDialog
+        open={showAddActionDialog}
+        onClose={() => {
+          setShowAddActionDialog(false);
+          setEditingAction(null);
+        }}
+        editingAction={editingAction}
+        onSave={async (action) => {
+          try {
+            if (editingAction) {
+              // Update existing action
+              console.log('Updating action:', editingAction.action_id, action);
+              
+              const response = await fetch(`http://localhost:3003/api/actions/${editingAction.action_id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  action_name: action.name,
+                  fields: action.fields,
+                  goal_field_key: action.goalFieldKey,
+                  parent_campaign_id: action.parentCampaignId,
+                  goal_type_id: action.goalTypeId,
+                  chapters: action.chapters,
+                  organizer_vanid: action.creatorOrganizerVanid,
+                  visible_to_organizers: action.visibleToOrganizers,
+                  has_goal: action.hasGoal
+                })
+              });
+              
+              if (response.ok) {
+                alert(`Action "${action.name}" updated successfully!`);
+                setShowAddActionDialog(false);
+                setEditingAction(null);
+                setReloadTrigger(prev => prev + 1);
+              } else {
+                const errorData = await response.json();
+                throw new Error(errorData.error || 'Failed to update action');
+              }
+            } else {
+              // Create new action
+              console.log('Creating action:', action);
+              
+              const result = await createAction({
+                action_name: action.name,
+                fields: action.fields,
+                goal_field_key: action.goalFieldKey,
+                parent_campaign_id: action.parentCampaignId,
+                goal_type_id: action.goalTypeId,
+                chapters: action.chapters,
+                organizer_vanid: action.creatorOrganizerVanid,
+                visible_to_organizers: action.visibleToOrganizers,
+                has_goal: action.hasGoal
+              });
+              
+              console.log('Action created successfully:', result);
+              alert(`Action "${action.name}" created successfully!`);
+              setShowAddActionDialog(false);
+              
+              // Refresh actions list
+              setReloadTrigger(prev => prev + 1);
+            }
+          } catch (error) {
+            console.error('Error saving action:', error);
+            alert('Failed to save action. Please try again.');
+          }
+        }}
+        chapters={chapters}
+        selectedChapter={selectedChapter || 'All Chapters'}
+        existingCampaigns={[]}
+        parentCampaigns={parentCampaigns}
+        currentUserId={selectedOrganizerId}
+        currentUserName={selectedOrganizerInfo?.fullName || selectedOrganizerInfo?.firstname}
+        availableOrganizers={dashboardOrganizers}
+      />
+
+      {/* Quick Add to List Dialog */}
+      <Dialog 
+        open={showQuickAddDialog} 
+        onClose={() => {
+          setShowQuickAddDialog(false);
+          setPersonToQuickAdd(null);
+        }}
+        maxWidth="xs"
+        fullWidth
+      >
+        <DialogTitle>Add to Action List</DialogTitle>
+        <DialogContent>
+          {personToQuickAdd && (
+            <>
+              <Typography variant="body2" sx={{ mb: 2 }}>
+                Add <strong>{personToQuickAdd.name}</strong> to which action list?
+              </Typography>
+              <FormControl fullWidth sx={{ mt: 1 }}>
+                <InputLabel>Action</InputLabel>
+                <Select
+                  value={quickAddActionId}
+                  onChange={(e) => setQuickAddActionId(e.target.value)}
+                  label="Action"
+                >
+                  {ACTIONS.map(action => (
+                    <MenuItem key={action.id} value={action.id}>
+                      {action.name}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => {
+            setShowQuickAddDialog(false);
+            setPersonToQuickAdd(null);
+          }}>
+            Cancel
+          </Button>
+          <Button onClick={handleQuickAddConfirm} variant="contained">
+            Add
+          </Button>
+        </DialogActions>
+      </Dialog>
+      
+      {/* Set Goal Dialog */}
+      <Dialog open={showSetGoalDialog} onClose={() => setShowSetGoalDialog(false)} maxWidth="xs" fullWidth>
+        <DialogTitle>Set Goal</DialogTitle>
+        <DialogContent>
+          <Box sx={{ pt: 2 }}>
+            <TextField
+              label="Goal Value"
+              type="number"
+              value={goalValue}
+              onChange={(e) => setGoalValue(parseInt(e.target.value) || 0)}
+              fullWidth
+              helperText="How many people do you want to reach?"
+              inputProps={{ min: 0 }}
+            />
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setShowSetGoalDialog(false)}>Cancel</Button>
+          <Button 
+            onClick={async () => {
+              if (!selectedOrganizerId || !goalActionId) return;
+              
+              const success = await saveOrganizerGoal({
+                organizer_vanid: selectedOrganizerId,
+                action_id: goalActionId,
+                goal_value: goalValue
+              });
+              
+              if (success) {
+                // Update local state
+                setOrganizerGoals(prev => ({
+                  ...prev,
+                  [goalActionId]: goalValue
+                }));
+                setShowSetGoalDialog(false);
+              } else {
+                alert('Failed to save goal. Please try again.');
+              }
+            }}
+            variant="contained"
+            color="primary"
+          >
+            Save Goal
+          </Button>
+        </DialogActions>
+      </Dialog>
+    </Box>
+  );
+};
+
+// Nested leader component as table row
+const LeaderTableRow: React.FC<{ 
+  leader: LeaderProgress; 
+  depth: number;
+  leaderActionsMap: Record<string, string[]>;
+  leaderGoalsMap: Record<string, Record<string, number>>;
+  unifiedActionIds: string[];
+  onRemove?: () => void;
+  currentUserId?: string;
+  pledgeSubmissions?: PledgeSubmission[];
+  onAddToList?: (leader: LeaderProgress) => void;
+  reloadTriggers?: {[key: string]: number};
+  peopleRecords?: any[];
+  onPersonDetailsOpen?: (personId: string) => void;
+  onFilterByOrganizer?: (name: string, vanId?: string) => void;
+  onEditOrganizerMapping?: (name: string, vanId?: string) => void;
+  ACTIONS: any[];
+  availableActions?: any[];
+}> = ({ leader, depth, leaderActionsMap, leaderGoalsMap, unifiedActionIds, onRemove, currentUserId, pledgeSubmissions = [], onAddToList, reloadTriggers = {}, peopleRecords = [], onPersonDetailsOpen, onFilterByOrganizer, onEditOrganizerMapping, ACTIONS, availableActions = [] }) => {
+  const [expanded, setExpanded] = useState(false);
+  const [organizingListExpanded, setOrganizingListExpanded] = useState(false);
+  const [organizingList, setOrganizingList] = useState<any[]>([]);
+  const [loadingList, setLoadingList] = useState(false);
+  const [selectedActionFilter, setSelectedActionFilter] = useState<string>('all');
+  
+  const hasSubLeaders = leader.subLeaders.length > 0;
+  const isLoL = hasSubLeaders; // Leader of Leaders if they have sub-leaders
+  
+  // Get this leader's live actions and goals from the maps
+  const leaderActions = leaderActionsMap[leader.id] || [];
+  const leaderGoals = leaderGoalsMap[leader.id] || {};
+  
+  // Calculate pledges collected by this leader from pledgeSubmissions
+  const pledgesCollected = useMemo(() => {
+    const pledges: Array<{
+      vanid: number;
+      first_name: string;
+      last_name: string;
+      desired_change: string;
+      date_submitted: string;
+    }> = [];
+    
+    pledgeSubmissions.forEach(submission => {
+      if (submission.submissions && Array.isArray(submission.submissions)) {
+        submission.submissions.forEach(sub => {
+          const leaderStr = sub.leader?.toString().trim().toLowerCase();
+          
+          // Skip if no leader string
+          if (!leaderStr) return;
+          
+          const leaderNameLower = leader.name.toLowerCase();
+          
+          // Use stricter matching - prioritize exact matches and full name matches
+          let matched = false;
+          
+          // 1. Exact match with leaderId
+          if (leaderStr === leader.id.toLowerCase()) {
+            matched = true;
+          }
+          // 2. Exact match with full name
+          else if (leaderStr === leaderNameLower) {
+            matched = true;
+          }
+          // 3. Full name contains match (but require at least 2 parts to match)
+          else {
+            const leaderNameParts = leaderNameLower.split(' ');
+            if (leaderNameParts.length >= 2) {
+              const firstName = leaderNameParts[0];
+              const lastName = leaderNameParts[leaderNameParts.length - 1];
+              
+              // Both first and last name must be in the leader string
+              if (leaderStr.includes(firstName) && leaderStr.includes(lastName)) {
+                matched = true;
+              }
+            }
+          }
+          
+          if (matched) {
+            pledges.push({
+              vanid: sub.vanid,
+              first_name: sub.first_name,
+              last_name: sub.last_name,
+              desired_change: sub.desired_change,
+              date_submitted: submission.date_submitted
+            });
+          }
+        });
+      }
+    });
+    
+    return pledges;
+  }, [leader.id, leader.name, pledgeSubmissions]);
+  
+  // Calculate sub-leader stats
+  const subLeaderCount = leader.subLeaders.length;
+  const subLeadersMetGoal = leader.subLeaders.filter(sl => sl.hasMetGoal).length;
+  const totalSubLeaderPledges = leader.subLeaders.reduce((sum, sl) => sum + sl.pledgeCount, 0);
+  const totalSubLeaderGoal = leader.subLeaders.length * 5; // Each sub-leader has goal of 5
+  
+  // Load organizing list when expanded or when reloadTrigger changes
+  useEffect(() => {
+    const loadOrganizingList = async () => {
+      if (organizingListExpanded && !loadingList) {
+        setLoadingList(true);
+        try {
+          // Fetch list items where this leader is the organizer
+          const lists = await fetchLists(leader.id);
+          setOrganizingList(lists || []);
+        } catch (error) {
+          console.error('Error loading organizing list for leader:', leader.id, error);
+          setOrganizingList([]); // Set empty array on error to prevent retries
+        } finally {
+          setLoadingList(false);
+        }
+      }
+    };
+    
+    if (organizingListExpanded) {
+      loadOrganizingList();
+    }
+  }, [organizingListExpanded, leader.id, reloadTriggers[leader.id]]);
+
+  // Determine if row should be highlighted green
+  // For LoL: green if ALL sub-leaders have met at least one goal
+  // For regular leaders: green if they've met their personal goal
+  const shouldHighlight = isLoL 
+    ? (subLeadersMetGoal === subLeaderCount && subLeaderCount > 0)
+    : leader.hasMetGoal;
+  
+  return (
+    <>
+      <TableRow sx={{ bgcolor: shouldHighlight ? '#e8f5e9' : 'inherit' }}>
+        <TableCell>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, pl: depth * 3 }}>
+            <OrganizerChip
+              name={leader.name}
+              vanId={leader.id}
+              onFilterBy={onFilterByOrganizer}
+              onEditMapping={onEditOrganizerMapping}
+              size="small"
+              sx={{ fontWeight: depth === 0 ? 600 : 400 }}
+            />
+            {leader.isAutomatic && (
+              <Tooltip title="This leader is automatically tracked from a team" arrow>
+                <Chip 
+                  label="Team" 
+                  size="small" 
+                  onClick={(e) => e.stopPropagation()}
+                  sx={{ height: 20, fontSize: '0.7rem', ml: 0.5, cursor: 'default' }}
+                  color="info"
+                  variant="outlined"
+                />
+              </Tooltip>
+            )}
+            {shouldHighlight && (
+              <CheckCircleIcon fontSize="small" sx={{ color: '#4caf50' }} />
+            )}
+            {isLoL && (
+              <Tooltip 
+                title={
+                  <Box>
+                    <Box component="span" sx={{ display: 'block', fontWeight: 600, fontSize: '0.75rem' }}>
+                      Leader of Leaders
+                    </Box>
+                    <Box component="span" sx={{ display: 'block', fontSize: '0.75rem' }}>
+                      Developing {subLeaderCount} {subLeaderCount === 1 ? 'leader' : 'leaders'}
+                    </Box>
+                    <Box component="span" sx={{ display: 'block', fontSize: '0.75rem' }}>
+                      {subLeadersMetGoal} at goal • {totalSubLeaderPledges} total pledges
+                    </Box>
+                    <Box component="span" sx={{ display: 'block', fontSize: '0.65rem', fontStyle: 'italic', mt: 0.5, color: '#e0e0e0' }}>
+                      Expand to see personal stats
+                    </Box>
+                  </Box>
+                }
+                arrow
+              >
+                <Chip 
+                  icon={<PeopleIcon sx={{ fontSize: 14 }} />} 
+                  label={`LoL (${subLeadersMetGoal}/${subLeaderCount})`}
+                  size="small" 
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setExpanded(!expanded);
+                  }}
+                  sx={{ 
+                    height: 20, 
+                    fontSize: '0.7rem', 
+                    ml: 0.5,
+                    cursor: 'pointer',
+                    '&:hover': {
+                      bgcolor: 'primary.light'
+                    }
+                  }}
+                  color="primary"
+                  variant="outlined"
+                />
+              </Tooltip>
+            )}
+          </Box>
+        </TableCell>
+        <TableCell align="center">
+          {hasSubLeaders ? (
+            <Typography variant="body2" sx={{ fontSize: '0.8rem', fontWeight: 600 }}>
+              {subLeaderCount}
+            </Typography>
+          ) : (
+            <Typography variant="body2" color="text.secondary" sx={{ fontSize: '0.875rem' }}>
+              —
+            </Typography>
+          )}
+        </TableCell>
+        <TableCell>
+          <Tooltip title="Membership status in the organization" arrow>
+            <Chip
+              label={leader.memberStatus || 'Unknown'}
+              size="small"
+              variant="filled"
+              onClick={(e) => e.stopPropagation()}
+              sx={{
+                fontSize: '0.7rem',
+                height: 20,
+                cursor: 'default',
+                bgcolor: (() => {
+                  const status = (leader.memberStatus || '').toLowerCase();
+                  if (status.includes('active')) return '#4caf5020';
+                  if (status.includes('lapsed') || status.includes('former')) return '#ff980020';
+                  return '#9e9e9e20'; // Gray for unknown/null
+                })(),
+                color: (() => {
+                  const status = (leader.memberStatus || '').toLowerCase();
+                  if (status.includes('active')) return '#4caf50';
+                  if (status.includes('lapsed') || status.includes('former')) return '#ff9800';
+                  return '#757575'; // Dark gray for unknown/null
+                })()
+              }}
+            />
+          </Tooltip>
+        </TableCell>
+        {unifiedActionIds.map(actionId => {
+          const action = ACTIONS.find((a: any) => a.id === actionId);
+          const actionHasGoal = action?.has_goal !== false; // Default to true if not set
+          
+          // If Leader of Leaders, show aggregate stats of their sub-leaders
+          if (isLoL) {
+            // Calculate aggregate stats across all sub-leaders for this action
+            let subLeadersWithAction = 0;
+            let subLeadersAtGoal = 0;
+            let totalCount = 0;
+            let totalGoal = 0;
+            
+            leader.subLeaders.forEach(subLeader => {
+              const subProgress = subLeader.actionProgress?.[actionId];
+              if (subProgress) {
+                subLeadersWithAction++;
+                totalCount += subProgress.count || 0;
+                totalGoal += subProgress.goal || 5;
+                if (subProgress.hasMetGoal) {
+                  subLeadersAtGoal++;
+                }
+              }
+            });
+            
+            if (subLeadersWithAction === 0) {
+              // None of the sub-leaders have this action
+              return (
+                <React.Fragment key={actionId}>
+                  <TableCell>
+                    <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.7rem', textAlign: 'center', display: 'block' }}>
+                      —
+                    </Typography>
+                  </TableCell>
+                  <TableCell align="center">
+                    <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.7rem' }}>
+                      —
+                    </Typography>
+                  </TableCell>
+                </React.Fragment>
+              );
+            }
+            
+            if (!actionHasGoal) {
+              // Action doesn't have a goal - just show aggregate count
+              return (
+                <React.Fragment key={actionId}>
+                  <TableCell colSpan={2} align="center">
+                    <Typography variant="body2" sx={{ fontWeight: 600, fontSize: '0.8rem' }}>
+                      {totalCount} {totalCount === 1 ? 'item' : 'items'}
+                    </Typography>
+                  </TableCell>
+                </React.Fragment>
+              );
+            }
+            
+            // Show aggregate: X/Y leaders at goal + total count/goal
+            const percentage = totalGoal > 0 ? (totalCount / totalGoal) * 100 : 0;
+            
+            return (
+              <React.Fragment key={actionId}>
+                <TableCell>
+                  <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.25 }}>
+                    <Typography variant="caption" sx={{ fontSize: '0.65rem', color: 'text.secondary' }}>
+                      {subLeadersAtGoal}/{subLeadersWithAction} at goal
+                    </Typography>
+                    <LinearProgress
+                      variant="determinate"
+                      value={Math.min(percentage, 100)}
+                      sx={{
+                        height: 6,
+                        borderRadius: 1,
+                        '& .MuiLinearProgress-bar': {
+                          backgroundColor: subLeadersAtGoal === subLeadersWithAction ? '#4caf50' : '#1976d2'
+                        }
+                      }}
+                    />
+                  </Box>
+                </TableCell>
+                <TableCell align="center">
+                  <Typography variant="body2" sx={{ fontWeight: 600, fontSize: '0.8rem' }}>
+                    {totalCount} / {totalGoal}
+                  </Typography>
+                </TableCell>
+              </React.Fragment>
+            );
+          }
+          
+          // Not LoL - show personal stats
+          const hasAction = leaderActions.includes(actionId);
+          const progress = leader.actionProgress?.[actionId];
+          const count = progress?.count || 0;
+          const goal = leaderGoals[actionId] || 5;
+          const hasMetGoal = count >= goal;
+          
+          if (!hasAction) {
+            // Leader doesn't have this action - show empty cells
+            return (
+              <React.Fragment key={actionId}>
+                <TableCell>
+                  <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.7rem', textAlign: 'center', display: 'block' }}>
+                    —
+                  </Typography>
+                </TableCell>
+                <TableCell align="center">
+                  <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.7rem' }}>
+                    —
+                  </Typography>
+                </TableCell>
+              </React.Fragment>
+            );
+          }
+          
+          if (!actionHasGoal) {
+            // Action doesn't have a goal - just show count
+            return (
+              <React.Fragment key={actionId}>
+                <TableCell colSpan={2} align="center">
+                  <Typography variant="body2" sx={{ fontWeight: 600, fontSize: '0.8rem' }}>
+                    {count} {count === 1 ? 'item' : 'items'}
+                  </Typography>
+                </TableCell>
+              </React.Fragment>
+            );
+          }
+          
+          // Action has a goal - show barometer
+          return (
+            <React.Fragment key={actionId}>
+              <TableCell>
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.25 }}>
+                  <LinearProgress
+                    variant="determinate"
+                    value={Math.min((count / goal) * 100, 100)}
+                    sx={{
+                      height: 6,
+                      borderRadius: 1,
+                      '& .MuiLinearProgress-bar': {
+                        backgroundColor: hasMetGoal ? '#4caf50' : '#1976d2'
+                      }
+                    }}
+                  />
+                </Box>
+              </TableCell>
+              <TableCell align="center">
+                <Typography variant="body2" sx={{ fontWeight: 600, fontSize: '0.8rem' }}>
+                  {count} / {goal}
+                </Typography>
+              </TableCell>
+            </React.Fragment>
+          );
+        })}
+        <TableCell>
+          <Box sx={{ display: 'flex', gap: 0.5 }}>
+            {/* View Organizing List button */}
+            <Tooltip title="View organizing list">
+              <IconButton 
+                size="small" 
+                onClick={() => setOrganizingListExpanded(!organizingListExpanded)}
+                color={organizingListExpanded ? 'primary' : 'default'}
+              >
+                <PeopleIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+            
+            {/* Expand sub-leaders button */}
+            {hasSubLeaders && (
+              <IconButton size="small" onClick={() => setExpanded(!expanded)}>
+                {expanded ? <ExpandLessIcon /> : <ExpandMoreIcon />}
+              </IconButton>
+            )}
+          </Box>
+        </TableCell>
+        <TableCell>
+          {depth === 0 && onRemove && !leader.isAutomatic ? (
+            <IconButton 
+              size="small" 
+              onClick={(e) => {
+                e.stopPropagation();
+                console.log('[Delete] Removing leader:', leader.name, leader.id);
+                onRemove();
+              }} 
+              color="error"
+            >
+              <DeleteIcon fontSize="small" />
+            </IconButton>
+          ) : depth === 0 && leader.isAutomatic ? (
+            <Tooltip title="Cannot remove team members. Edit the team instead." arrow>
+              <span>
+                <IconButton size="small" disabled>
+                  <DeleteIcon fontSize="small" />
+                </IconButton>
+              </span>
+            </Tooltip>
+          ) : null}
+        </TableCell>
+      </TableRow>
+      
+      {/* Organizing List View - More indented */}
+      {organizingListExpanded && (
+        <TableRow>
+          <TableCell 
+            colSpan={3 + (unifiedActionIds.length * 2) + 2} 
+            sx={{ 
+              pl: depth === 0 ? 6 : 8,
+              pr: 2,
+              py: 1,
+              borderLeft: '2px solid #e0e0e0'
+            }}
+          >
+            <Box>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 0.5 }}>
+                <Typography variant="caption" sx={{ fontWeight: 600, color: 'text.secondary', fontSize: '0.75rem' }}>
+                  Organizing List
+                </Typography>
+                <IconButton
+                  size="small"
+                  onClick={() => {
+                    if (onAddToList) {
+                      onAddToList(leader);
+                    }
+                  }}
+                  sx={{ p: 0.5 }}
+                  title="Add person to list"
+                >
+                  <AddIcon sx={{ fontSize: 16 }} />
+                </IconButton>
+              </Box>
+              
+              {loadingList ? (
+                <Typography variant="body2">Loading...</Typography>
+              ) : organizingList.length > 0 || pledgesCollected.length > 0 ? (() => {
+                // Merge organizing list with pledge submissions
+                const combinedList = [
+                  // From lumoviz_lists
+                  ...organizingList,
+                  // From pledge submissions - convert to same format
+                  ...pledgesCollected.map(pledge => ({
+                    list_id: `pledge_${pledge.vanid}`,
+                    organizer_vanid: leader.id,
+                    vanid: pledge.vanid.toString(),
+                    contact_name: `${pledge.first_name} ${pledge.last_name}`,
+                    action_id: 'sign_pledge',
+                    progress: {
+                      asked: true,
+                      signed: true
+                    },
+                    desired_change: pledge.desired_change,
+                    date_pledged: pledge.date_submitted,
+                    date_added: pledge.date_submitted
+                  }))
+                ];
+                
+                                // Get only LIVE actions that this leader has people for
+                                const leaderActionIds = Array.from(new Set(combinedList.map(item => item.action_id)));
+                                const liveActions = availableActions.filter((a: any) => 
+                                  leaderActionIds.includes(a.action_id) && a.status === 'live'
+                                );
+                                const leaderActions = liveActions.map((a: any) => a.action_id);
+                
+                return (
+                  <TableContainer sx={{ maxHeight: '400px' }}>
+                    <Table size="small" stickyHeader>
+                      <TableHead>
+                        {/* Action headers - spanning across fields */}
+                        <TableRow>
+                          <TableCell 
+                            sx={{ 
+                              fontWeight: 'bold', 
+                              fontSize: '0.75rem',
+                              borderRight: '2px solid #e0e0e0'
+                            }}
+                            rowSpan={3}
+                          >
+                            Name
+                          </TableCell>
+                          {leaderActions.map(actionId => {
+                            const action = availableActions.find((a: any) => a.action_id === actionId);
+                            const fieldCount = action?.fields?.length || 1;
+                            return (
+                              <TableCell 
+                                key={actionId} 
+                                colSpan={fieldCount}
+                                align="center"
+                                sx={{ 
+                                  fontWeight: 'bold',
+                                  fontSize: '0.75rem',
+                                  bgcolor: '#f5f5f5',
+                                  borderLeft: '2px solid #e0e0e0',
+                                  borderRight: '2px solid #e0e0e0'
+                                }}
+                              >
+                                {action ? action.action_name : actionId}
+                              </TableCell>
+                            );
+                          })}
+                        </TableRow>
+                        
+                        {/* Conversion rate row */}
+                        <TableRow>
+                          {leaderActions.map((actionId, actionIndex) => {
+                            const action = availableActions.find((a: any) => a.action_id === actionId);
+                            if (!action || !action.fields) return null;
+                            
+                            return action.fields.map((field: any, fieldIndex: number) => {
+                              let conversionText = '—';
+                              
+                              if (fieldIndex === 0) {
+                                const totalPeopleOnList = combinedList.filter(p => p.action_id === actionId).length;
+                                const peopleWithCurrentField = combinedList.filter(p => 
+                                  p.action_id === actionId && p.progress?.[field.key]
+                                ).length;
+                                
+                                if (totalPeopleOnList > 0) {
+                                  const rate = (peopleWithCurrentField / totalPeopleOnList * 100).toFixed(0);
+                                  conversionText = `${rate}%`;
+                                }
+                              } else if (fieldIndex > 0) {
+                                const prevField = action.fields[fieldIndex - 1];
+                                const peopleWithPrevField = combinedList.filter(p => 
+                                  p.action_id === actionId && p.progress?.[prevField.key]
+                                ).length;
+                                const peopleWithCurrentField = combinedList.filter(p => 
+                                  p.action_id === actionId && p.progress?.[field.key]
+                                ).length;
+                                
+                                if (peopleWithPrevField > 0) {
+                                  const rate = (peopleWithCurrentField / peopleWithPrevField * 100).toFixed(0);
+                                  conversionText = `${rate}%`;
+                                }
+                              }
+                              
+                              return (
+                                <TableCell 
+                                  key={`${actionId}-${field.key}-conversion`}
+                                  sx={{ 
+                                    fontSize: '0.65rem',
+                                    py: 0.5,
+                                    bgcolor: '#f9f9f9',
+                                    color: 'text.secondary',
+                                    fontStyle: 'italic',
+                                    textAlign: 'center',
+                                    borderLeft: fieldIndex === 0 ? '2px solid #e0e0e0' : 'none',
+                                    borderRight: fieldIndex === (action.fields.length - 1) ? '2px solid #e0e0e0' : '1px solid #e0e0e0'
+                                  }}
+                                >
+                                  {conversionText}
+                                </TableCell>
+                              );
+                            });
+                          })}
+                        </TableRow>
+                        
+                        {/* Field headers - one per field */}
+                        <TableRow>
+                          {leaderActions.map(actionId => {
+                            const action = availableActions.find((a: any) => a.action_id === actionId);
+                            if (!action || !action.fields) return null;
+                            
+                            return action.fields.map((field: any, fieldIndex: number) => (
+                              <TableCell 
+                                key={`${actionId}-${field.key}`}
+                                sx={{ 
+                                  fontWeight: 'bold',
+                                  fontSize: '0.7rem',
+                                  py: 0.5,
+                                  bgcolor: '#fafafa',
+                                  borderLeft: fieldIndex === 0 ? '2px solid #e0e0e0' : 'none',
+                                  borderRight: fieldIndex === (action.fields.length - 1) ? '2px solid #e0e0e0' : '1px solid #e0e0e0'
+                                }}
+                              >
+                                {field.label}
+                              </TableCell>
+                            ));
+                          })}
+                        </TableRow>
+                      </TableHead>
+                      <TableBody>
+                        {/* Group by person - one row per person */}
+                        {Array.from(new Set(combinedList.map(p => p.vanid))).map(vanid => {
+                          const personEntries = combinedList.filter(p => p.vanid === vanid);
+                          const firstEntry = personEntries[0];
+                          const contactName = firstEntry.contact_name || '';
+                          const [firstName, ...lastNameParts] = contactName.split(' ');
+                          const lastName = lastNameParts.join(' ');
+                          
+                          return (
+                            <TableRow key={vanid}>
+                              <TableCell sx={{ py: 0.5, fontSize: '0.75rem', borderRight: '2px solid #e0e0e0' }}>
+                                {firstName} {lastName}
+                              </TableCell>
+                              
+                              {/* One cell per field of each action */}
+                              {leaderActions.map(actionId => {
+                                const entry = personEntries.find(e => e.action_id === actionId);
+                                const action = availableActions.find((a: any) => a.action_id === actionId);
+                                
+                                if (!entry || !action) {
+                                  return action?.fields?.map((field: any, fieldIndex: number) => (
+                                    <TableCell 
+                                      key={`${actionId}-${field.key}-empty`} 
+                                      sx={{ 
+                                        py: 0.5,
+                                        fontSize: '0.7rem',
+                                        borderLeft: fieldIndex === 0 ? '2px solid #e0e0e0' : 'none',
+                                        borderRight: fieldIndex === (action.fields.length - 1) ? '2px solid #e0e0e0' : '1px solid #e0e0e0'
+                                      }}
+                                    >
+                                      —
+                                    </TableCell>
+                                  ));
+                                }
+                                
+                                return action.fields && action.fields.map((field: any, fieldIndex: number) => {
+                                  const fieldType = field.type || 'boolean';
+                                  const progress = entry.progress || {};
+                                  
+                                  return (
+                                    <TableCell 
+                                      key={`${actionId}-${field.key}`} 
+                                      sx={{ 
+                                        py: 0.5,
+                                        borderLeft: fieldIndex === 0 ? '2px solid #e0e0e0' : 'none',
+                                        borderRight: fieldIndex === (action.fields.length - 1) ? '2px solid #e0e0e0' : '1px solid #e0e0e0'
+                                      }}
+                                    >
+                                      {fieldType === 'boolean' && (
+                                        <Checkbox
+                                          size="small"
+                                          checked={progress[field.key] || false}
+                                          disabled
+                                          sx={{ p: 0 }}
+                                        />
+                                      )}
+                                      
+                                      {fieldType === 'select' && (
+                                        <Typography variant="caption" sx={{ fontSize: '0.7rem' }}>
+                                          {progress[field.key] || '—'}
+                                        </Typography>
+                                      )}
+                                      
+                                      {fieldType === 'text' && (
+                                        <Typography variant="caption" sx={{ fontSize: '0.7rem' }}>
+                                          {progress[field.key] || '—'}
+                                        </Typography>
+                                      )}
+                                    </TableCell>
+                                  );
+                                });
+                              })}
+                            </TableRow>
+                          );
+                        })}
+                      </TableBody>
+                    </Table>
+                  </TableContainer>
+                );
+              })() : (
+                <Typography variant="body2" color="text.secondary" sx={{ fontSize: '0.8rem', py: 1 }}>
+                  No one on this list yet.
+                </Typography>
+              )}
+            </Box>
+          </TableCell>
+        </TableRow>
+      )}
+      
+      {/* Visual separator if both organizing list and sub-leaders are visible */}
+      {organizingListExpanded && hasSubLeaders && expanded && (
+        <TableRow>
+          <TableCell 
+            colSpan={3 + (unifiedActionIds.length * 2) + 2} 
+            sx={{ 
+              pl: depth === 0 ? 4 : 6,
+              pr: 0,
+              py: 0.5,
+              borderLeft: '2px solid #e0e0e0'
+            }} 
+          >
+            <Box sx={{ 
+              height: 1,
+              bgcolor: '#e0e0e0',
+              ml: 1
+            }} />
+          </TableCell>
+        </TableRow>
+      )}
+      
+      {/* Sub-leaders (nested hierarchy) - Less indented than organizing list */}
+      {hasSubLeaders && expanded && (
+        <>
+          {/* Show LoL's personal stats first as a nested row */}
+          <TableRow sx={{ bgcolor: leader.hasMetGoal ? '#e8f5e9' : '#f9f9f9' }}>
+            <TableCell>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, pl: (depth + 1) * 3 }}>
+                <Typography variant="body2" sx={{ fontSize: '0.8rem', fontStyle: 'italic', color: 'text.secondary' }}>
+                  {leader.name} (personal)
+                </Typography>
+              </Box>
+            </TableCell>
+            <TableCell>
+              <Typography variant="body2" color="text.secondary" sx={{ fontSize: '0.8rem' }}>
+                —
+              </Typography>
+            </TableCell>
+            <TableCell>
+              <Typography variant="body2" color="text.secondary" sx={{ fontSize: '0.8rem' }}>
+                —
+              </Typography>
+            </TableCell>
+            {/* Show personal action progress */}
+            {unifiedActionIds.map(actionId => {
+              const hasAction = leaderActions.includes(actionId);
+              const progress = leader.actionProgress?.[actionId];
+              const count = progress?.count || 0;
+              const goal = leaderGoals[actionId] || 5;
+              const hasMetGoal = count >= goal;
+              const action = ACTIONS.find((a: any) => a.id === actionId);
+              const actionHasGoal = action?.has_goal !== false;
+              
+              if (!hasAction) {
+                return (
+                  <React.Fragment key={actionId}>
+                    <TableCell>
+                      <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.7rem', textAlign: 'center', display: 'block' }}>
+                        —
+                      </Typography>
+                    </TableCell>
+                    <TableCell align="center">
+                      <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.7rem' }}>
+                        —
+                      </Typography>
+                    </TableCell>
+                  </React.Fragment>
+                );
+              }
+              
+              if (!actionHasGoal) {
+                return (
+                  <React.Fragment key={actionId}>
+                    <TableCell colSpan={2} align="center">
+                      <Typography variant="body2" sx={{ fontWeight: 600, fontSize: '0.75rem' }}>
+                        {count} {count === 1 ? 'item' : 'items'}
+                      </Typography>
+                    </TableCell>
+                  </React.Fragment>
+                );
+              }
+              
+              return (
+                <React.Fragment key={actionId}>
+                  <TableCell>
+                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.25 }}>
+                      <LinearProgress
+                        variant="determinate"
+                        value={Math.min((count / goal) * 100, 100)}
+                        sx={{
+                          height: 4,
+                          borderRadius: 1,
+                          '& .MuiLinearProgress-bar': {
+                            backgroundColor: hasMetGoal ? '#4caf50' : '#1976d2'
+                          }
+                        }}
+                      />
+                    </Box>
+                  </TableCell>
+                  <TableCell align="center">
+                    <Typography variant="body2" sx={{ fontWeight: 500, fontSize: '0.75rem' }}>
+                      {count} / {goal}
+                    </Typography>
+                  </TableCell>
+                </React.Fragment>
+              );
+            })}
+            <TableCell></TableCell>
+            <TableCell></TableCell>
+          </TableRow>
+          
+          {/* Now show the sub-leaders */}
+          {leader.subLeaders?.map((subLeader: any) => (
+            <LeaderTableRow
+              key={subLeader.id}
+              leader={subLeader}
+              depth={depth + 1}
+              leaderActionsMap={leaderActionsMap}
+              leaderGoalsMap={leaderGoalsMap}
+              unifiedActionIds={unifiedActionIds}
+              onRemove={onRemove}
+              currentUserId={currentUserId}
+              pledgeSubmissions={pledgeSubmissions}
+              onAddToList={onAddToList}
+              reloadTriggers={reloadTriggers}
+              peopleRecords={peopleRecords}
+              ACTIONS={ACTIONS}
+              availableActions={availableActions}
+              onPersonDetailsOpen={onPersonDetailsOpen}
+              onFilterByOrganizer={onFilterByOrganizer}
+              onEditOrganizerMapping={onEditOrganizerMapping}
+            />
+          ))}
+        </>
+      )}
+    </>
+  );
+};
+
+export default Dashboard;

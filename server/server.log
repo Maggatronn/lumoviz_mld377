@@ -1,0 +1,1453 @@
+Error: ENOENT: no such file or directory, stat '/Users/maggiehughes/Desktop/CarolinaFederation/lumoviz/server/public/index.html'
+Error: ENOENT: no such file or directory, stat '/Users/maggiehughes/Desktop/CarolinaFederation/lumoviz/server/public/index.html'
+Error: ENOENT: no such file or directory, stat '/Users/maggiehughes/Desktop/CarolinaFederation/lumoviz/server/public/index.html'
+Error: ENOENT: no such file or directory, stat '/Users/maggiehughes/Desktop/CarolinaFederation/lumoviz/server/public/index.html'
+Error: ENOENT: no such file or directory, stat '/Users/maggiehughes/Desktop/CarolinaFederation/lumoviz/server/public/index.html'
+Error: ENOENT: no such file or directory, stat '/Users/maggiehughes/Desktop/CarolinaFederation/lumoviz/server/public/index.html'
+Error: ENOENT: no such file or directory, stat '/Users/maggiehughes/Desktop/CarolinaFederation/lumoviz/server/public/index.html'
+Attempting to query chapters from chapter-448015.lumoviz.lumoviz_teams
+Executing query: 
+      SELECT DISTINCT chapter
+      FROM `chapter-448015.lumoviz.lumoviz_teams`
+      WHERE chapter IS NOT NULL AND chapter != ''
+      ORDER BY chapter
+    
+Successfully retrieved 5 chapters
+Attempting to query chapters from chapter-448015.lumoviz.lumoviz_teams
+Executing query: 
+      SELECT DISTINCT chapter
+      FROM `chapter-448015.lumoviz.lumoviz_teams`
+      WHERE chapter IS NOT NULL AND chapter != ''
+      ORDER BY chapter
+    
+Successfully retrieved 5 chapters
+📊 /api/meetings/histogram called with: granularity=day, scope=federation, start_date=2025-02-09, end_date=2026-02-09, chapter=undefined, organizer=undefined, meeting_types=undefined
+📊 Executing histogram query: 
+      SELECT 
+        DATE(c.date_contacted) as time_bucket,
+        FORMAT_DATE("%b %d", DATE(c.date_contacted)) as time_label,
+        "Carolina Federation" as scope_key,
+        COUNT(*) as meeting_count
+      FROM `chapter-448015.lumoviz.conversations` c
+      LEFT JOIN `chapter-448015.lumoviz.org_ids` o1
+        ON CAST(c.organizer_vanid AS STRING) = CAST(o1.vanid AS STRING)
+      LEFT JOIN `chapter-448015.lumoviz.contacts` cont2 
+        ON CAST(c.organizer_vanid AS STRING) = CAST(cont2.vanid AS STRING)
+      WHERE 1=1 AND DATE(c.date_contacted) >= DATE('2025-02-09') AND DATE(c.date_contacted) <= DATE('2026-02-09')
+      GROUP BY time_bucket, time_label, scope_key
+      ORDER BY time_bucket ASC
+    
+📊 /api/meetings/histogram called with: granularity=day, scope=chapter, start_date=2025-02-09, end_date=2026-02-09, chapter=undefined, organizer=undefined, meeting_types=undefined
+📊 Executing histogram query: 
+      SELECT 
+        DATE(c.date_contacted) as time_bucket,
+        FORMAT_DATE("%b %d", DATE(c.date_contacted)) as time_label,
+        c.participant_chapter as scope_key,
+        COUNT(*) as meeting_count
+      FROM `chapter-448015.lumoviz.conversations` c
+      LEFT JOIN `chapter-448015.lumoviz.org_ids` o1
+        ON CAST(c.organizer_vanid AS STRING) = CAST(o1.vanid AS STRING)
+      LEFT JOIN `chapter-448015.lumoviz.contacts` cont2 
+        ON CAST(c.organizer_vanid AS STRING) = CAST(cont2.vanid AS STRING)
+      WHERE 1=1 AND DATE(c.date_contacted) >= DATE('2025-02-09') AND DATE(c.date_contacted) <= DATE('2026-02-09')
+      GROUP BY time_bucket, time_label, scope_key
+      ORDER BY time_bucket ASC
+    
+📊 Histogram query returned 286 rows
+📊 /api/meetings/histogram called with: granularity=week, scope=chapter, start_date=2025-02-09, end_date=2026-02-09, chapter=undefined, organizer=undefined, meeting_types=undefined
+📊 Executing histogram query: 
+      SELECT 
+        DATE_TRUNC(DATE(c.date_contacted), WEEK) as time_bucket,
+        FORMAT_DATE("%b %d", DATE_TRUNC(DATE(c.date_contacted), WEEK)) as time_label,
+        c.participant_chapter as scope_key,
+        COUNT(*) as meeting_count
+      FROM `chapter-448015.lumoviz.conversations` c
+      LEFT JOIN `chapter-448015.lumoviz.org_ids` o1
+        ON CAST(c.organizer_vanid AS STRING) = CAST(o1.vanid AS STRING)
+      LEFT JOIN `chapter-448015.lumoviz.contacts` cont2 
+        ON CAST(c.organizer_vanid AS STRING) = CAST(cont2.vanid AS STRING)
+      WHERE 1=1 AND DATE(c.date_contacted) >= DATE('2025-02-09') AND DATE(c.date_contacted) <= DATE('2026-02-09')
+      GROUP BY time_bucket, time_label, scope_key
+      ORDER BY time_bucket ASC
+    
+📊 Histogram query returned 647 rows
+📊 /api/meetings/histogram called with: granularity=day, scope=person, start_date=2025-02-09, end_date=2026-02-09, chapter=undefined, organizer=undefined, meeting_types=undefined
+📊 Executing histogram query: 
+      SELECT 
+        DATE(c.date_contacted) as time_bucket,
+        FORMAT_DATE("%b %d", DATE(c.date_contacted)) as time_label,
+        COALESCE(NULLIF(TRIM(CONCAT(COALESCE(o1.firstname, ""), " ", COALESCE(o1.lastname, ""))), ""), NULLIF(TRIM(CONCAT(COALESCE(cont2.first_name, ""), " ", COALESCE(cont2.last_name, ""))), ""), "Unknown") as scope_key,
+        COUNT(*) as meeting_count
+      FROM `chapter-448015.lumoviz.conversations` c
+      LEFT JOIN `chapter-448015.lumoviz.org_ids` o1
+        ON CAST(c.organizer_vanid AS STRING) = CAST(o1.vanid AS STRING)
+      LEFT JOIN `chapter-448015.lumoviz.contacts` cont2 
+        ON CAST(c.organizer_vanid AS STRING) = CAST(cont2.vanid AS STRING)
+      WHERE 1=1 AND DATE(c.date_contacted) >= DATE('2025-02-09') AND DATE(c.date_contacted) <= DATE('2026-02-09')
+      GROUP BY time_bucket, time_label, scope_key
+      ORDER BY time_bucket ASC
+    
+📊 Histogram query returned 172 rows
+📊 /api/meetings/histogram called with: granularity=week, scope=federation, start_date=2025-02-09, end_date=2026-02-09, chapter=undefined, organizer=undefined, meeting_types=undefined
+📊 Executing histogram query: 
+      SELECT 
+        DATE_TRUNC(DATE(c.date_contacted), WEEK) as time_bucket,
+        FORMAT_DATE("%b %d", DATE_TRUNC(DATE(c.date_contacted), WEEK)) as time_label,
+        "Carolina Federation" as scope_key,
+        COUNT(*) as meeting_count
+      FROM `chapter-448015.lumoviz.conversations` c
+      LEFT JOIN `chapter-448015.lumoviz.org_ids` o1
+        ON CAST(c.organizer_vanid AS STRING) = CAST(o1.vanid AS STRING)
+      LEFT JOIN `chapter-448015.lumoviz.contacts` cont2 
+        ON CAST(c.organizer_vanid AS STRING) = CAST(cont2.vanid AS STRING)
+      WHERE 1=1 AND DATE(c.date_contacted) >= DATE('2025-02-09') AND DATE(c.date_contacted) <= DATE('2026-02-09')
+      GROUP BY time_bucket, time_label, scope_key
+      ORDER BY time_bucket ASC
+    
+📊 /api/meetings/histogram called with: granularity=day, scope=type, start_date=2025-02-09, end_date=2026-02-09, chapter=undefined, organizer=undefined, meeting_types=undefined
+📊 Executing histogram query: 
+      SELECT 
+        DATE(c.date_contacted) as time_bucket,
+        FORMAT_DATE("%b %d", DATE(c.date_contacted)) as time_label,
+        c.conversation_type as scope_key,
+        COUNT(*) as meeting_count
+      FROM `chapter-448015.lumoviz.conversations` c
+      LEFT JOIN `chapter-448015.lumoviz.org_ids` o1
+        ON CAST(c.organizer_vanid AS STRING) = CAST(o1.vanid AS STRING)
+      LEFT JOIN `chapter-448015.lumoviz.contacts` cont2 
+        ON CAST(c.organizer_vanid AS STRING) = CAST(cont2.vanid AS STRING)
+      WHERE 1=1 AND DATE(c.date_contacted) >= DATE('2025-02-09') AND DATE(c.date_contacted) <= DATE('2026-02-09')
+      GROUP BY time_bucket, time_label, scope_key
+      ORDER BY time_bucket ASC
+    
+📊 Histogram query returned 1074 rows
+📊 Histogram query returned 51 rows
+📊 /api/meetings/histogram called with: granularity=week, scope=person, start_date=2025-02-09, end_date=2026-02-09, chapter=undefined, organizer=undefined, meeting_types=undefined
+📊 Executing histogram query: 
+      SELECT 
+        DATE_TRUNC(DATE(c.date_contacted), WEEK) as time_bucket,
+        FORMAT_DATE("%b %d", DATE_TRUNC(DATE(c.date_contacted), WEEK)) as time_label,
+        COALESCE(NULLIF(TRIM(CONCAT(COALESCE(o1.firstname, ""), " ", COALESCE(o1.lastname, ""))), ""), NULLIF(TRIM(CONCAT(COALESCE(cont2.first_name, ""), " ", COALESCE(cont2.last_name, ""))), ""), "Unknown") as scope_key,
+        COUNT(*) as meeting_count
+      FROM `chapter-448015.lumoviz.conversations` c
+      LEFT JOIN `chapter-448015.lumoviz.org_ids` o1
+        ON CAST(c.organizer_vanid AS STRING) = CAST(o1.vanid AS STRING)
+      LEFT JOIN `chapter-448015.lumoviz.contacts` cont2 
+        ON CAST(c.organizer_vanid AS STRING) = CAST(cont2.vanid AS STRING)
+      WHERE 1=1 AND DATE(c.date_contacted) >= DATE('2025-02-09') AND DATE(c.date_contacted) <= DATE('2026-02-09')
+      GROUP BY time_bucket, time_label, scope_key
+      ORDER BY time_bucket ASC
+    
+📊 Histogram query returned 590 rows
+📊 /api/meetings/histogram called with: granularity=week, scope=type, start_date=2025-02-09, end_date=2026-02-09, chapter=undefined, organizer=undefined, meeting_types=undefined
+📊 Executing histogram query: 
+      SELECT 
+        DATE_TRUNC(DATE(c.date_contacted), WEEK) as time_bucket,
+        FORMAT_DATE("%b %d", DATE_TRUNC(DATE(c.date_contacted), WEEK)) as time_label,
+        c.conversation_type as scope_key,
+        COUNT(*) as meeting_count
+      FROM `chapter-448015.lumoviz.conversations` c
+      LEFT JOIN `chapter-448015.lumoviz.org_ids` o1
+        ON CAST(c.organizer_vanid AS STRING) = CAST(o1.vanid AS STRING)
+      LEFT JOIN `chapter-448015.lumoviz.contacts` cont2 
+        ON CAST(c.organizer_vanid AS STRING) = CAST(cont2.vanid AS STRING)
+      WHERE 1=1 AND DATE(c.date_contacted) >= DATE('2025-02-09') AND DATE(c.date_contacted) <= DATE('2026-02-09')
+      GROUP BY time_bucket, time_label, scope_key
+      ORDER BY time_bucket ASC
+    
+📊 Histogram query returned 469 rows
+📊 /api/meetings/histogram called with: granularity=month, scope=federation, start_date=2025-02-09, end_date=2026-02-09, chapter=undefined, organizer=undefined, meeting_types=undefined
+📊 Executing histogram query: 
+      SELECT 
+        DATE_TRUNC(DATE(c.date_contacted), MONTH) as time_bucket,
+        FORMAT_DATE("%b %Y", DATE_TRUNC(DATE(c.date_contacted), MONTH)) as time_label,
+        "Carolina Federation" as scope_key,
+        COUNT(*) as meeting_count
+      FROM `chapter-448015.lumoviz.conversations` c
+      LEFT JOIN `chapter-448015.lumoviz.org_ids` o1
+        ON CAST(c.organizer_vanid AS STRING) = CAST(o1.vanid AS STRING)
+      LEFT JOIN `chapter-448015.lumoviz.contacts` cont2 
+        ON CAST(c.organizer_vanid AS STRING) = CAST(cont2.vanid AS STRING)
+      WHERE 1=1 AND DATE(c.date_contacted) >= DATE('2025-02-09') AND DATE(c.date_contacted) <= DATE('2026-02-09')
+      GROUP BY time_bucket, time_label, scope_key
+      ORDER BY time_bucket ASC
+    
+📊 Histogram query returned 180 rows
+📊 /api/meetings/histogram called with: granularity=month, scope=person, start_date=2025-02-09, end_date=2026-02-09, chapter=undefined, organizer=undefined, meeting_types=undefined
+📊 Executing histogram query: 
+      SELECT 
+        DATE_TRUNC(DATE(c.date_contacted), MONTH) as time_bucket,
+        FORMAT_DATE("%b %Y", DATE_TRUNC(DATE(c.date_contacted), MONTH)) as time_label,
+        COALESCE(NULLIF(TRIM(CONCAT(COALESCE(o1.firstname, ""), " ", COALESCE(o1.lastname, ""))), ""), NULLIF(TRIM(CONCAT(COALESCE(cont2.first_name, ""), " ", COALESCE(cont2.last_name, ""))), ""), "Unknown") as scope_key,
+        COUNT(*) as meeting_count
+      FROM `chapter-448015.lumoviz.conversations` c
+      LEFT JOIN `chapter-448015.lumoviz.org_ids` o1
+        ON CAST(c.organizer_vanid AS STRING) = CAST(o1.vanid AS STRING)
+      LEFT JOIN `chapter-448015.lumoviz.contacts` cont2 
+        ON CAST(c.organizer_vanid AS STRING) = CAST(cont2.vanid AS STRING)
+      WHERE 1=1 AND DATE(c.date_contacted) >= DATE('2025-02-09') AND DATE(c.date_contacted) <= DATE('2026-02-09')
+      GROUP BY time_bucket, time_label, scope_key
+      ORDER BY time_bucket ASC
+    
+📊 Histogram query returned 13 rows
+📊 /api/meetings/histogram called with: granularity=month, scope=chapter, start_date=2025-02-09, end_date=2026-02-09, chapter=undefined, organizer=undefined, meeting_types=undefined
+📊 Executing histogram query: 
+      SELECT 
+        DATE_TRUNC(DATE(c.date_contacted), MONTH) as time_bucket,
+        FORMAT_DATE("%b %Y", DATE_TRUNC(DATE(c.date_contacted), MONTH)) as time_label,
+        c.participant_chapter as scope_key,
+        COUNT(*) as meeting_count
+      FROM `chapter-448015.lumoviz.conversations` c
+      LEFT JOIN `chapter-448015.lumoviz.org_ids` o1
+        ON CAST(c.organizer_vanid AS STRING) = CAST(o1.vanid AS STRING)
+      LEFT JOIN `chapter-448015.lumoviz.contacts` cont2 
+        ON CAST(c.organizer_vanid AS STRING) = CAST(cont2.vanid AS STRING)
+      WHERE 1=1 AND DATE(c.date_contacted) >= DATE('2025-02-09') AND DATE(c.date_contacted) <= DATE('2026-02-09')
+      GROUP BY time_bucket, time_label, scope_key
+      ORDER BY time_bucket ASC
+    
+📊 /api/meetings/histogram called with: granularity=month, scope=type, start_date=2025-02-09, end_date=2026-02-09, chapter=undefined, organizer=undefined, meeting_types=undefined
+📊 Executing histogram query: 
+      SELECT 
+        DATE_TRUNC(DATE(c.date_contacted), MONTH) as time_bucket,
+        FORMAT_DATE("%b %Y", DATE_TRUNC(DATE(c.date_contacted), MONTH)) as time_label,
+        c.conversation_type as scope_key,
+        COUNT(*) as meeting_count
+      FROM `chapter-448015.lumoviz.conversations` c
+      LEFT JOIN `chapter-448015.lumoviz.org_ids` o1
+        ON CAST(c.organizer_vanid AS STRING) = CAST(o1.vanid AS STRING)
+      LEFT JOIN `chapter-448015.lumoviz.contacts` cont2 
+        ON CAST(c.organizer_vanid AS STRING) = CAST(cont2.vanid AS STRING)
+      WHERE 1=1 AND DATE(c.date_contacted) >= DATE('2025-02-09') AND DATE(c.date_contacted) <= DATE('2026-02-09')
+      GROUP BY time_bucket, time_label, scope_key
+      ORDER BY time_bucket ASC
+    
+📊 Histogram query returned 201 rows
+📊 Histogram query returned 51 rows
+📊 Histogram query returned 58 rows
+[/api/meetings/by-contacts] Fetching meetings for 250 contacts, include_notes: true
+[/api/meetings/by-contacts] Fetching meetings for 250 contacts, include_notes: true
+[/api/meetings/by-contacts] Found 676 meetings
+[/api/meetings/by-contacts] Found 676 meetings
+[/api/meetings/by-contacts] Fetching meetings for 250 contacts, include_notes: true
+[/api/meetings/by-contacts] Found 676 meetings
+[/api/meetings/by-contacts] Fetching meetings for 250 contacts, include_notes: true
+[/api/meetings/by-contacts] Fetching meetings for 250 contacts, include_notes: true
+Attempting to query chapters from chapter-448015.lumoviz.lumoviz_teams
+Executing query: 
+      SELECT DISTINCT chapter
+      FROM `chapter-448015.lumoviz.lumoviz_teams`
+      WHERE chapter IS NOT NULL AND chapter != ''
+      ORDER BY chapter
+    
+Error: ENOENT: no such file or directory, stat '/Users/maggiehughes/Desktop/CarolinaFederation/lumoviz/server/public/index.html'
+Error: ENOENT: no such file or directory, stat '/Users/maggiehughes/Desktop/CarolinaFederation/lumoviz/server/public/index.html'
+[/api/meetings/by-contacts] Found 676 meetings
+[/api/meetings/by-contacts] Fetching meetings for 250 contacts, include_notes: true
+Successfully retrieved 5 chapters
+Attempting to query chapters from chapter-448015.lumoviz.lumoviz_teams
+Executing query: 
+      SELECT DISTINCT chapter
+      FROM `chapter-448015.lumoviz.lumoviz_teams`
+      WHERE chapter IS NOT NULL AND chapter != ''
+      ORDER BY chapter
+    
+[/api/meetings/by-contacts] Found 556 meetings
+[/api/meetings/by-contacts] Fetching meetings for 100 contacts, include_notes: true
+Successfully retrieved 5 chapters
+[/api/meetings/by-contacts] Fetching meetings for 250 contacts, include_notes: true
+[/api/meetings/by-contacts] Found 361 meetings
+[/api/meetings/by-contacts] Found 556 meetings
+[/api/meetings/by-contacts] Fetching meetings for 100 contacts, include_notes: true
+[/api/meetings/by-contacts] Found 556 meetings
+[/api/meetings/by-contacts] Fetching meetings for 250 contacts, include_notes: true
+[/api/meetings/by-contacts] Found 223 meetings
+[/api/meetings/by-contacts] Fetching meetings for 250 contacts, include_notes: true
+[/api/meetings/by-contacts] Fetching meetings for 250 contacts, include_notes: true
+[/api/meetings/by-contacts] Fetching meetings for 250 contacts, include_notes: true
+[/api/meetings/by-contacts] Found 329 meetings
+[/api/meetings/by-contacts] Found 556 meetings
+[/api/meetings/by-contacts] Found 329 meetings
+[/api/meetings/by-contacts] Found 329 meetings
+📊 /api/meetings/histogram called with: granularity=day, scope=federation, start_date=2025-02-09, end_date=2026-02-09, chapter=undefined, organizer=undefined, meeting_types=undefined
+📊 Executing histogram query: 
+      SELECT 
+        DATE(c.date_contacted) as time_bucket,
+        FORMAT_DATE("%b %d", DATE(c.date_contacted)) as time_label,
+        "Carolina Federation" as scope_key,
+        COUNT(*) as meeting_count
+      FROM `chapter-448015.lumoviz.conversations` c
+      LEFT JOIN `chapter-448015.lumoviz.org_ids` o1
+        ON CAST(c.organizer_vanid AS STRING) = CAST(o1.vanid AS STRING)
+      LEFT JOIN `chapter-448015.lumoviz.contacts` cont2 
+        ON CAST(c.organizer_vanid AS STRING) = CAST(cont2.vanid AS STRING)
+      WHERE 1=1 AND DATE(c.date_contacted) >= DATE('2025-02-09') AND DATE(c.date_contacted) <= DATE('2026-02-09')
+      GROUP BY time_bucket, time_label, scope_key
+      ORDER BY time_bucket ASC
+    
+📊 /api/meetings/histogram called with: granularity=day, scope=type, start_date=2025-02-09, end_date=2026-02-09, chapter=undefined, organizer=undefined, meeting_types=undefined
+📊 Executing histogram query: 
+      SELECT 
+        DATE(c.date_contacted) as time_bucket,
+        FORMAT_DATE("%b %d", DATE(c.date_contacted)) as time_label,
+        c.conversation_type as scope_key,
+        COUNT(*) as meeting_count
+      FROM `chapter-448015.lumoviz.conversations` c
+      LEFT JOIN `chapter-448015.lumoviz.org_ids` o1
+        ON CAST(c.organizer_vanid AS STRING) = CAST(o1.vanid AS STRING)
+      LEFT JOIN `chapter-448015.lumoviz.contacts` cont2 
+        ON CAST(c.organizer_vanid AS STRING) = CAST(cont2.vanid AS STRING)
+      WHERE 1=1 AND DATE(c.date_contacted) >= DATE('2025-02-09') AND DATE(c.date_contacted) <= DATE('2026-02-09')
+      GROUP BY time_bucket, time_label, scope_key
+      ORDER BY time_bucket ASC
+    
+📊 /api/meetings/histogram called with: granularity=day, scope=chapter, start_date=2025-02-09, end_date=2026-02-09, chapter=undefined, organizer=undefined, meeting_types=undefined
+📊 Executing histogram query: 
+      SELECT 
+        DATE(c.date_contacted) as time_bucket,
+        FORMAT_DATE("%b %d", DATE(c.date_contacted)) as time_label,
+        c.participant_chapter as scope_key,
+        COUNT(*) as meeting_count
+      FROM `chapter-448015.lumoviz.conversations` c
+      LEFT JOIN `chapter-448015.lumoviz.org_ids` o1
+        ON CAST(c.organizer_vanid AS STRING) = CAST(o1.vanid AS STRING)
+      LEFT JOIN `chapter-448015.lumoviz.contacts` cont2 
+        ON CAST(c.organizer_vanid AS STRING) = CAST(cont2.vanid AS STRING)
+      WHERE 1=1 AND DATE(c.date_contacted) >= DATE('2025-02-09') AND DATE(c.date_contacted) <= DATE('2026-02-09')
+      GROUP BY time_bucket, time_label, scope_key
+      ORDER BY time_bucket ASC
+    
+📊 Histogram query returned 590 rows
+📊 Histogram query returned 286 rows
+📊 /api/meetings/histogram called with: granularity=day, scope=person, start_date=2025-02-09, end_date=2026-02-09, chapter=undefined, organizer=undefined, meeting_types=undefined
+📊 Executing histogram query: 
+      SELECT 
+        DATE(c.date_contacted) as time_bucket,
+        FORMAT_DATE("%b %d", DATE(c.date_contacted)) as time_label,
+        COALESCE(NULLIF(TRIM(CONCAT(COALESCE(o1.firstname, ""), " ", COALESCE(o1.lastname, ""))), ""), NULLIF(TRIM(CONCAT(COALESCE(cont2.first_name, ""), " ", COALESCE(cont2.last_name, ""))), ""), "Unknown") as scope_key,
+        COUNT(*) as meeting_count
+      FROM `chapter-448015.lumoviz.conversations` c
+      LEFT JOIN `chapter-448015.lumoviz.org_ids` o1
+        ON CAST(c.organizer_vanid AS STRING) = CAST(o1.vanid AS STRING)
+      LEFT JOIN `chapter-448015.lumoviz.contacts` cont2 
+        ON CAST(c.organizer_vanid AS STRING) = CAST(cont2.vanid AS STRING)
+      WHERE 1=1 AND DATE(c.date_contacted) >= DATE('2025-02-09') AND DATE(c.date_contacted) <= DATE('2026-02-09')
+      GROUP BY time_bucket, time_label, scope_key
+      ORDER BY time_bucket ASC
+    
+📊 /api/meetings/histogram called with: granularity=week, scope=federation, start_date=2025-02-09, end_date=2026-02-09, chapter=undefined, organizer=undefined, meeting_types=undefined
+📊 Executing histogram query: 
+      SELECT 
+        DATE_TRUNC(DATE(c.date_contacted), WEEK) as time_bucket,
+        FORMAT_DATE("%b %d", DATE_TRUNC(DATE(c.date_contacted), WEEK)) as time_label,
+        "Carolina Federation" as scope_key,
+        COUNT(*) as meeting_count
+      FROM `chapter-448015.lumoviz.conversations` c
+      LEFT JOIN `chapter-448015.lumoviz.org_ids` o1
+        ON CAST(c.organizer_vanid AS STRING) = CAST(o1.vanid AS STRING)
+      LEFT JOIN `chapter-448015.lumoviz.contacts` cont2 
+        ON CAST(c.organizer_vanid AS STRING) = CAST(cont2.vanid AS STRING)
+      WHERE 1=1 AND DATE(c.date_contacted) >= DATE('2025-02-09') AND DATE(c.date_contacted) <= DATE('2026-02-09')
+      GROUP BY time_bucket, time_label, scope_key
+      ORDER BY time_bucket ASC
+    
+📊 Histogram query returned 647 rows
+📊 Histogram query returned 1074 rows
+📊 Histogram query returned 51 rows
+📊 /api/meetings/histogram called with: granularity=week, scope=person, start_date=2025-02-09, end_date=2026-02-09, chapter=undefined, organizer=undefined, meeting_types=undefined
+📊 Executing histogram query: 
+      SELECT 
+        DATE_TRUNC(DATE(c.date_contacted), WEEK) as time_bucket,
+        FORMAT_DATE("%b %d", DATE_TRUNC(DATE(c.date_contacted), WEEK)) as time_label,
+        COALESCE(NULLIF(TRIM(CONCAT(COALESCE(o1.firstname, ""), " ", COALESCE(o1.lastname, ""))), ""), NULLIF(TRIM(CONCAT(COALESCE(cont2.first_name, ""), " ", COALESCE(cont2.last_name, ""))), ""), "Unknown") as scope_key,
+        COUNT(*) as meeting_count
+      FROM `chapter-448015.lumoviz.conversations` c
+      LEFT JOIN `chapter-448015.lumoviz.org_ids` o1
+        ON CAST(c.organizer_vanid AS STRING) = CAST(o1.vanid AS STRING)
+      LEFT JOIN `chapter-448015.lumoviz.contacts` cont2 
+        ON CAST(c.organizer_vanid AS STRING) = CAST(cont2.vanid AS STRING)
+      WHERE 1=1 AND DATE(c.date_contacted) >= DATE('2025-02-09') AND DATE(c.date_contacted) <= DATE('2026-02-09')
+      GROUP BY time_bucket, time_label, scope_key
+      ORDER BY time_bucket ASC
+    
+📊 /api/meetings/histogram called with: granularity=week, scope=type, start_date=2025-02-09, end_date=2026-02-09, chapter=undefined, organizer=undefined, meeting_types=undefined
+📊 Executing histogram query: 
+      SELECT 
+        DATE_TRUNC(DATE(c.date_contacted), WEEK) as time_bucket,
+        FORMAT_DATE("%b %d", DATE_TRUNC(DATE(c.date_contacted), WEEK)) as time_label,
+        c.conversation_type as scope_key,
+        COUNT(*) as meeting_count
+      FROM `chapter-448015.lumoviz.conversations` c
+      LEFT JOIN `chapter-448015.lumoviz.org_ids` o1
+        ON CAST(c.organizer_vanid AS STRING) = CAST(o1.vanid AS STRING)
+      LEFT JOIN `chapter-448015.lumoviz.contacts` cont2 
+        ON CAST(c.organizer_vanid AS STRING) = CAST(cont2.vanid AS STRING)
+      WHERE 1=1 AND DATE(c.date_contacted) >= DATE('2025-02-09') AND DATE(c.date_contacted) <= DATE('2026-02-09')
+      GROUP BY time_bucket, time_label, scope_key
+      ORDER BY time_bucket ASC
+    
+📊 Histogram query returned 469 rows
+📊 /api/meetings/histogram called with: granularity=week, scope=chapter, start_date=2025-02-09, end_date=2026-02-09, chapter=undefined, organizer=undefined, meeting_types=undefined
+📊 Executing histogram query: 
+      SELECT 
+        DATE_TRUNC(DATE(c.date_contacted), WEEK) as time_bucket,
+        FORMAT_DATE("%b %d", DATE_TRUNC(DATE(c.date_contacted), WEEK)) as time_label,
+        c.participant_chapter as scope_key,
+        COUNT(*) as meeting_count
+      FROM `chapter-448015.lumoviz.conversations` c
+      LEFT JOIN `chapter-448015.lumoviz.org_ids` o1
+        ON CAST(c.organizer_vanid AS STRING) = CAST(o1.vanid AS STRING)
+      LEFT JOIN `chapter-448015.lumoviz.contacts` cont2 
+        ON CAST(c.organizer_vanid AS STRING) = CAST(cont2.vanid AS STRING)
+      WHERE 1=1 AND DATE(c.date_contacted) >= DATE('2025-02-09') AND DATE(c.date_contacted) <= DATE('2026-02-09')
+      GROUP BY time_bucket, time_label, scope_key
+      ORDER BY time_bucket ASC
+    
+📊 /api/meetings/histogram called with: granularity=month, scope=federation, start_date=2025-02-09, end_date=2026-02-09, chapter=undefined, organizer=undefined, meeting_types=undefined
+📊 Executing histogram query: 
+      SELECT 
+        DATE_TRUNC(DATE(c.date_contacted), MONTH) as time_bucket,
+        FORMAT_DATE("%b %Y", DATE_TRUNC(DATE(c.date_contacted), MONTH)) as time_label,
+        "Carolina Federation" as scope_key,
+        COUNT(*) as meeting_count
+      FROM `chapter-448015.lumoviz.conversations` c
+      LEFT JOIN `chapter-448015.lumoviz.org_ids` o1
+        ON CAST(c.organizer_vanid AS STRING) = CAST(o1.vanid AS STRING)
+      LEFT JOIN `chapter-448015.lumoviz.contacts` cont2 
+        ON CAST(c.organizer_vanid AS STRING) = CAST(cont2.vanid AS STRING)
+      WHERE 1=1 AND DATE(c.date_contacted) >= DATE('2025-02-09') AND DATE(c.date_contacted) <= DATE('2026-02-09')
+      GROUP BY time_bucket, time_label, scope_key
+      ORDER BY time_bucket ASC
+    
+📊 Histogram query returned 172 rows
+📊 Histogram query returned 180 rows
+📊 /api/meetings/histogram called with: granularity=month, scope=chapter, start_date=2025-02-09, end_date=2026-02-09, chapter=undefined, organizer=undefined, meeting_types=undefined
+📊 Executing histogram query: 
+      SELECT 
+        DATE_TRUNC(DATE(c.date_contacted), MONTH) as time_bucket,
+        FORMAT_DATE("%b %Y", DATE_TRUNC(DATE(c.date_contacted), MONTH)) as time_label,
+        c.participant_chapter as scope_key,
+        COUNT(*) as meeting_count
+      FROM `chapter-448015.lumoviz.conversations` c
+      LEFT JOIN `chapter-448015.lumoviz.org_ids` o1
+        ON CAST(c.organizer_vanid AS STRING) = CAST(o1.vanid AS STRING)
+      LEFT JOIN `chapter-448015.lumoviz.contacts` cont2 
+        ON CAST(c.organizer_vanid AS STRING) = CAST(cont2.vanid AS STRING)
+      WHERE 1=1 AND DATE(c.date_contacted) >= DATE('2025-02-09') AND DATE(c.date_contacted) <= DATE('2026-02-09')
+      GROUP BY time_bucket, time_label, scope_key
+      ORDER BY time_bucket ASC
+    
+📊 Histogram query returned 13 rows
+📊 /api/meetings/histogram called with: granularity=month, scope=type, start_date=2025-02-09, end_date=2026-02-09, chapter=undefined, organizer=undefined, meeting_types=undefined
+📊 Executing histogram query: 
+      SELECT 
+        DATE_TRUNC(DATE(c.date_contacted), MONTH) as time_bucket,
+        FORMAT_DATE("%b %Y", DATE_TRUNC(DATE(c.date_contacted), MONTH)) as time_label,
+        c.conversation_type as scope_key,
+        COUNT(*) as meeting_count
+      FROM `chapter-448015.lumoviz.conversations` c
+      LEFT JOIN `chapter-448015.lumoviz.org_ids` o1
+        ON CAST(c.organizer_vanid AS STRING) = CAST(o1.vanid AS STRING)
+      LEFT JOIN `chapter-448015.lumoviz.contacts` cont2 
+        ON CAST(c.organizer_vanid AS STRING) = CAST(cont2.vanid AS STRING)
+      WHERE 1=1 AND DATE(c.date_contacted) >= DATE('2025-02-09') AND DATE(c.date_contacted) <= DATE('2026-02-09')
+      GROUP BY time_bucket, time_label, scope_key
+      ORDER BY time_bucket ASC
+    
+📊 Histogram query returned 51 rows
+📊 /api/meetings/histogram called with: granularity=month, scope=person, start_date=2025-02-09, end_date=2026-02-09, chapter=undefined, organizer=undefined, meeting_types=undefined
+📊 Executing histogram query: 
+      SELECT 
+        DATE_TRUNC(DATE(c.date_contacted), MONTH) as time_bucket,
+        FORMAT_DATE("%b %Y", DATE_TRUNC(DATE(c.date_contacted), MONTH)) as time_label,
+        COALESCE(NULLIF(TRIM(CONCAT(COALESCE(o1.firstname, ""), " ", COALESCE(o1.lastname, ""))), ""), NULLIF(TRIM(CONCAT(COALESCE(cont2.first_name, ""), " ", COALESCE(cont2.last_name, ""))), ""), "Unknown") as scope_key,
+        COUNT(*) as meeting_count
+      FROM `chapter-448015.lumoviz.conversations` c
+      LEFT JOIN `chapter-448015.lumoviz.org_ids` o1
+        ON CAST(c.organizer_vanid AS STRING) = CAST(o1.vanid AS STRING)
+      LEFT JOIN `chapter-448015.lumoviz.contacts` cont2 
+        ON CAST(c.organizer_vanid AS STRING) = CAST(cont2.vanid AS STRING)
+      WHERE 1=1 AND DATE(c.date_contacted) >= DATE('2025-02-09') AND DATE(c.date_contacted) <= DATE('2026-02-09')
+      GROUP BY time_bucket, time_label, scope_key
+      ORDER BY time_bucket ASC
+    
+📊 Histogram query returned 58 rows
+📊 Histogram query returned 201 rows
+[/api/meetings/by-contacts] Fetching meetings for 100 contacts, include_notes: true
+[/api/meetings/by-contacts] Fetching meetings for 250 contacts, include_notes: true
+[/api/meetings/by-contacts] Found 361 meetings
+[/api/meetings/by-contacts] Found 676 meetings
+[/api/meetings/by-contacts] Fetching meetings for 250 contacts, include_notes: true
+[/api/meetings/by-contacts] Fetching meetings for 250 contacts, include_notes: true
+[/api/meetings/by-contacts] Found 676 meetings
+[/api/meetings/by-contacts] Found 676 meetings
+[/api/meetings/by-contacts] Fetching meetings for 250 contacts, include_notes: true
+[/api/meetings/by-contacts] Fetching meetings for 250 contacts, include_notes: true
+[/api/meetings/by-contacts] Found 556 meetings
+[/api/meetings/by-contacts] Fetching meetings for 100 contacts, include_notes: true
+[/api/meetings/by-contacts] Fetching meetings for 250 contacts, include_notes: true
+[/api/meetings/by-contacts] Found 223 meetings
+[/api/meetings/by-contacts] Found 556 meetings
+[/api/meetings/by-contacts] Found 556 meetings
+[/api/meetings/by-contacts] Fetching meetings for 250 contacts, include_notes: true
+[/api/meetings/by-contacts] Fetching meetings for 100 contacts, include_notes: true
+[/api/meetings/by-contacts] Found 329 meetings
+[/api/meetings/by-contacts] Fetching meetings for 250 contacts, include_notes: true
+[/api/meetings/by-contacts] Fetching meetings for 250 contacts, include_notes: true
+[/api/meetings/by-contacts] Found 226 meetings
+[/api/meetings/by-contacts] Found 329 meetings
+[/api/meetings/by-contacts] Found 329 meetings
+[/api/meetings/by-contacts] Fetching meetings for 250 contacts, include_notes: true
+[/api/meetings/by-contacts] Fetching meetings for 250 contacts, include_notes: true
+[/api/meetings/by-contacts] Fetching meetings for 250 contacts, include_notes: true
+[/api/meetings/by-contacts] Found 131 meetings
+[/api/meetings/by-contacts] Found 131 meetings
+[/api/meetings/by-contacts] Fetching meetings for 100 contacts, include_notes: true
+[/api/meetings/by-contacts] Found 131 meetings
+[/api/meetings/by-contacts] Found 246 meetings
+[/api/meetings/by-contacts] Fetching meetings for 100 contacts, include_notes: true
+[/api/meetings/by-contacts] Found 176 meetings
+Attempting to query chapters from chapter-448015.lumoviz.lumoviz_teams
+Executing query: 
+      SELECT DISTINCT chapter
+      FROM `chapter-448015.lumoviz.lumoviz_teams`
+      WHERE chapter IS NOT NULL AND chapter != ''
+      ORDER BY chapter
+    
+Attempting to query chapters from chapter-448015.lumoviz.lumoviz_teams
+Executing query: 
+      SELECT DISTINCT chapter
+      FROM `chapter-448015.lumoviz.lumoviz_teams`
+      WHERE chapter IS NOT NULL AND chapter != ''
+      ORDER BY chapter
+    
+Error: ENOENT: no such file or directory, stat '/Users/maggiehughes/Desktop/CarolinaFederation/lumoviz/server/public/index.html'
+Error: ENOENT: no such file or directory, stat '/Users/maggiehughes/Desktop/CarolinaFederation/lumoviz/server/public/index.html'
+Successfully retrieved 5 chapters
+Successfully retrieved 5 chapters
+[/api/meetings/by-contacts] Fetching meetings for 100 contacts, include_notes: true
+📊 /api/meetings/histogram called with: granularity=day, scope=federation, start_date=2025-02-09, end_date=2026-02-09, chapter=undefined, organizer=undefined, meeting_types=undefined
+📊 Executing histogram query: 
+      SELECT 
+        DATE(c.date_contacted) as time_bucket,
+        FORMAT_DATE("%b %d", DATE(c.date_contacted)) as time_label,
+        "Carolina Federation" as scope_key,
+        COUNT(*) as meeting_count
+      FROM `chapter-448015.lumoviz.conversations` c
+      LEFT JOIN `chapter-448015.lumoviz.org_ids` o1
+        ON CAST(c.organizer_vanid AS STRING) = CAST(o1.vanid AS STRING)
+      LEFT JOIN `chapter-448015.lumoviz.contacts` cont2 
+        ON CAST(c.organizer_vanid AS STRING) = CAST(cont2.vanid AS STRING)
+      WHERE 1=1 AND DATE(c.date_contacted) >= DATE('2025-02-09') AND DATE(c.date_contacted) <= DATE('2026-02-09')
+      GROUP BY time_bucket, time_label, scope_key
+      ORDER BY time_bucket ASC
+    
+[/api/meetings/by-contacts] Found 361 meetings
+📊 /api/meetings/histogram called with: granularity=day, scope=chapter, start_date=2025-02-09, end_date=2026-02-09, chapter=undefined, organizer=undefined, meeting_types=undefined
+📊 Executing histogram query: 
+      SELECT 
+        DATE(c.date_contacted) as time_bucket,
+        FORMAT_DATE("%b %d", DATE(c.date_contacted)) as time_label,
+        c.participant_chapter as scope_key,
+        COUNT(*) as meeting_count
+      FROM `chapter-448015.lumoviz.conversations` c
+      LEFT JOIN `chapter-448015.lumoviz.org_ids` o1
+        ON CAST(c.organizer_vanid AS STRING) = CAST(o1.vanid AS STRING)
+      LEFT JOIN `chapter-448015.lumoviz.contacts` cont2 
+        ON CAST(c.organizer_vanid AS STRING) = CAST(cont2.vanid AS STRING)
+      WHERE 1=1 AND DATE(c.date_contacted) >= DATE('2025-02-09') AND DATE(c.date_contacted) <= DATE('2026-02-09')
+      GROUP BY time_bucket, time_label, scope_key
+      ORDER BY time_bucket ASC
+    
+📊 /api/meetings/histogram called with: granularity=day, scope=person, start_date=2025-02-09, end_date=2026-02-09, chapter=undefined, organizer=undefined, meeting_types=undefined
+📊 Executing histogram query: 
+      SELECT 
+        DATE(c.date_contacted) as time_bucket,
+        FORMAT_DATE("%b %d", DATE(c.date_contacted)) as time_label,
+        COALESCE(NULLIF(TRIM(CONCAT(COALESCE(o1.firstname, ""), " ", COALESCE(o1.lastname, ""))), ""), NULLIF(TRIM(CONCAT(COALESCE(cont2.first_name, ""), " ", COALESCE(cont2.last_name, ""))), ""), "Unknown") as scope_key,
+        COUNT(*) as meeting_count
+      FROM `chapter-448015.lumoviz.conversations` c
+      LEFT JOIN `chapter-448015.lumoviz.org_ids` o1
+        ON CAST(c.organizer_vanid AS STRING) = CAST(o1.vanid AS STRING)
+      LEFT JOIN `chapter-448015.lumoviz.contacts` cont2 
+        ON CAST(c.organizer_vanid AS STRING) = CAST(cont2.vanid AS STRING)
+      WHERE 1=1 AND DATE(c.date_contacted) >= DATE('2025-02-09') AND DATE(c.date_contacted) <= DATE('2026-02-09')
+      GROUP BY time_bucket, time_label, scope_key
+      ORDER BY time_bucket ASC
+    
+📊 Histogram query returned 286 rows
+📊 /api/meetings/histogram called with: granularity=day, scope=type, start_date=2025-02-09, end_date=2026-02-09, chapter=undefined, organizer=undefined, meeting_types=undefined
+📊 Executing histogram query: 
+      SELECT 
+        DATE(c.date_contacted) as time_bucket,
+        FORMAT_DATE("%b %d", DATE(c.date_contacted)) as time_label,
+        c.conversation_type as scope_key,
+        COUNT(*) as meeting_count
+      FROM `chapter-448015.lumoviz.conversations` c
+      LEFT JOIN `chapter-448015.lumoviz.org_ids` o1
+        ON CAST(c.organizer_vanid AS STRING) = CAST(o1.vanid AS STRING)
+      LEFT JOIN `chapter-448015.lumoviz.contacts` cont2 
+        ON CAST(c.organizer_vanid AS STRING) = CAST(cont2.vanid AS STRING)
+      WHERE 1=1 AND DATE(c.date_contacted) >= DATE('2025-02-09') AND DATE(c.date_contacted) <= DATE('2026-02-09')
+      GROUP BY time_bucket, time_label, scope_key
+      ORDER BY time_bucket ASC
+    
+📊 Histogram query returned 647 rows
+📊 Histogram query returned 1074 rows
+📊 Histogram query returned 590 rows
+📊 /api/meetings/histogram called with: granularity=week, scope=person, start_date=2025-02-09, end_date=2026-02-09, chapter=undefined, organizer=undefined, meeting_types=undefined
+📊 Executing histogram query: 
+      SELECT 
+        DATE_TRUNC(DATE(c.date_contacted), WEEK) as time_bucket,
+        FORMAT_DATE("%b %d", DATE_TRUNC(DATE(c.date_contacted), WEEK)) as time_label,
+        COALESCE(NULLIF(TRIM(CONCAT(COALESCE(o1.firstname, ""), " ", COALESCE(o1.lastname, ""))), ""), NULLIF(TRIM(CONCAT(COALESCE(cont2.first_name, ""), " ", COALESCE(cont2.last_name, ""))), ""), "Unknown") as scope_key,
+        COUNT(*) as meeting_count
+      FROM `chapter-448015.lumoviz.conversations` c
+      LEFT JOIN `chapter-448015.lumoviz.org_ids` o1
+        ON CAST(c.organizer_vanid AS STRING) = CAST(o1.vanid AS STRING)
+      LEFT JOIN `chapter-448015.lumoviz.contacts` cont2 
+        ON CAST(c.organizer_vanid AS STRING) = CAST(cont2.vanid AS STRING)
+      WHERE 1=1 AND DATE(c.date_contacted) >= DATE('2025-02-09') AND DATE(c.date_contacted) <= DATE('2026-02-09')
+      GROUP BY time_bucket, time_label, scope_key
+      ORDER BY time_bucket ASC
+    
+📊 /api/meetings/histogram called with: granularity=week, scope=federation, start_date=2025-02-09, end_date=2026-02-09, chapter=undefined, organizer=undefined, meeting_types=undefined
+📊 Executing histogram query: 
+      SELECT 
+        DATE_TRUNC(DATE(c.date_contacted), WEEK) as time_bucket,
+        FORMAT_DATE("%b %d", DATE_TRUNC(DATE(c.date_contacted), WEEK)) as time_label,
+        "Carolina Federation" as scope_key,
+        COUNT(*) as meeting_count
+      FROM `chapter-448015.lumoviz.conversations` c
+      LEFT JOIN `chapter-448015.lumoviz.org_ids` o1
+        ON CAST(c.organizer_vanid AS STRING) = CAST(o1.vanid AS STRING)
+      LEFT JOIN `chapter-448015.lumoviz.contacts` cont2 
+        ON CAST(c.organizer_vanid AS STRING) = CAST(cont2.vanid AS STRING)
+      WHERE 1=1 AND DATE(c.date_contacted) >= DATE('2025-02-09') AND DATE(c.date_contacted) <= DATE('2026-02-09')
+      GROUP BY time_bucket, time_label, scope_key
+      ORDER BY time_bucket ASC
+    
+📊 Histogram query returned 469 rows
+📊 /api/meetings/histogram called with: granularity=week, scope=type, start_date=2025-02-09, end_date=2026-02-09, chapter=undefined, organizer=undefined, meeting_types=undefined
+📊 Executing histogram query: 
+      SELECT 
+        DATE_TRUNC(DATE(c.date_contacted), WEEK) as time_bucket,
+        FORMAT_DATE("%b %d", DATE_TRUNC(DATE(c.date_contacted), WEEK)) as time_label,
+        c.conversation_type as scope_key,
+        COUNT(*) as meeting_count
+      FROM `chapter-448015.lumoviz.conversations` c
+      LEFT JOIN `chapter-448015.lumoviz.org_ids` o1
+        ON CAST(c.organizer_vanid AS STRING) = CAST(o1.vanid AS STRING)
+      LEFT JOIN `chapter-448015.lumoviz.contacts` cont2 
+        ON CAST(c.organizer_vanid AS STRING) = CAST(cont2.vanid AS STRING)
+      WHERE 1=1 AND DATE(c.date_contacted) >= DATE('2025-02-09') AND DATE(c.date_contacted) <= DATE('2026-02-09')
+      GROUP BY time_bucket, time_label, scope_key
+      ORDER BY time_bucket ASC
+    
+📊 Histogram query returned 51 rows
+📊 /api/meetings/histogram called with: granularity=week, scope=chapter, start_date=2025-02-09, end_date=2026-02-09, chapter=undefined, organizer=undefined, meeting_types=undefined
+📊 Executing histogram query: 
+      SELECT 
+        DATE_TRUNC(DATE(c.date_contacted), WEEK) as time_bucket,
+        FORMAT_DATE("%b %d", DATE_TRUNC(DATE(c.date_contacted), WEEK)) as time_label,
+        c.participant_chapter as scope_key,
+        COUNT(*) as meeting_count
+      FROM `chapter-448015.lumoviz.conversations` c
+      LEFT JOIN `chapter-448015.lumoviz.org_ids` o1
+        ON CAST(c.organizer_vanid AS STRING) = CAST(o1.vanid AS STRING)
+      LEFT JOIN `chapter-448015.lumoviz.contacts` cont2 
+        ON CAST(c.organizer_vanid AS STRING) = CAST(cont2.vanid AS STRING)
+      WHERE 1=1 AND DATE(c.date_contacted) >= DATE('2025-02-09') AND DATE(c.date_contacted) <= DATE('2026-02-09')
+      GROUP BY time_bucket, time_label, scope_key
+      ORDER BY time_bucket ASC
+    
+📊 /api/meetings/histogram called with: granularity=month, scope=person, start_date=2025-02-09, end_date=2026-02-09, chapter=undefined, organizer=undefined, meeting_types=undefined
+📊 Executing histogram query: 
+      SELECT 
+        DATE_TRUNC(DATE(c.date_contacted), MONTH) as time_bucket,
+        FORMAT_DATE("%b %Y", DATE_TRUNC(DATE(c.date_contacted), MONTH)) as time_label,
+        COALESCE(NULLIF(TRIM(CONCAT(COALESCE(o1.firstname, ""), " ", COALESCE(o1.lastname, ""))), ""), NULLIF(TRIM(CONCAT(COALESCE(cont2.first_name, ""), " ", COALESCE(cont2.last_name, ""))), ""), "Unknown") as scope_key,
+        COUNT(*) as meeting_count
+      FROM `chapter-448015.lumoviz.conversations` c
+      LEFT JOIN `chapter-448015.lumoviz.org_ids` o1
+        ON CAST(c.organizer_vanid AS STRING) = CAST(o1.vanid AS STRING)
+      LEFT JOIN `chapter-448015.lumoviz.contacts` cont2 
+        ON CAST(c.organizer_vanid AS STRING) = CAST(cont2.vanid AS STRING)
+      WHERE 1=1 AND DATE(c.date_contacted) >= DATE('2025-02-09') AND DATE(c.date_contacted) <= DATE('2026-02-09')
+      GROUP BY time_bucket, time_label, scope_key
+      ORDER BY time_bucket ASC
+    
+📊 Histogram query returned 180 rows
+📊 /api/meetings/histogram called with: granularity=month, scope=federation, start_date=2025-02-09, end_date=2026-02-09, chapter=undefined, organizer=undefined, meeting_types=undefined
+📊 Executing histogram query: 
+      SELECT 
+        DATE_TRUNC(DATE(c.date_contacted), MONTH) as time_bucket,
+        FORMAT_DATE("%b %Y", DATE_TRUNC(DATE(c.date_contacted), MONTH)) as time_label,
+        "Carolina Federation" as scope_key,
+        COUNT(*) as meeting_count
+      FROM `chapter-448015.lumoviz.conversations` c
+      LEFT JOIN `chapter-448015.lumoviz.org_ids` o1
+        ON CAST(c.organizer_vanid AS STRING) = CAST(o1.vanid AS STRING)
+      LEFT JOIN `chapter-448015.lumoviz.contacts` cont2 
+        ON CAST(c.organizer_vanid AS STRING) = CAST(cont2.vanid AS STRING)
+      WHERE 1=1 AND DATE(c.date_contacted) >= DATE('2025-02-09') AND DATE(c.date_contacted) <= DATE('2026-02-09')
+      GROUP BY time_bucket, time_label, scope_key
+      ORDER BY time_bucket ASC
+    
+📊 Histogram query returned 172 rows
+📊 Histogram query returned 201 rows
+📊 Histogram query returned 13 rows
+📊 /api/meetings/histogram called with: granularity=month, scope=chapter, start_date=2025-02-09, end_date=2026-02-09, chapter=undefined, organizer=undefined, meeting_types=undefined
+📊 Executing histogram query: 
+      SELECT 
+        DATE_TRUNC(DATE(c.date_contacted), MONTH) as time_bucket,
+        FORMAT_DATE("%b %Y", DATE_TRUNC(DATE(c.date_contacted), MONTH)) as time_label,
+        c.participant_chapter as scope_key,
+        COUNT(*) as meeting_count
+      FROM `chapter-448015.lumoviz.conversations` c
+      LEFT JOIN `chapter-448015.lumoviz.org_ids` o1
+        ON CAST(c.organizer_vanid AS STRING) = CAST(o1.vanid AS STRING)
+      LEFT JOIN `chapter-448015.lumoviz.contacts` cont2 
+        ON CAST(c.organizer_vanid AS STRING) = CAST(cont2.vanid AS STRING)
+      WHERE 1=1 AND DATE(c.date_contacted) >= DATE('2025-02-09') AND DATE(c.date_contacted) <= DATE('2026-02-09')
+      GROUP BY time_bucket, time_label, scope_key
+      ORDER BY time_bucket ASC
+    
+📊 /api/meetings/histogram called with: granularity=month, scope=type, start_date=2025-02-09, end_date=2026-02-09, chapter=undefined, organizer=undefined, meeting_types=undefined
+📊 Executing histogram query: 
+      SELECT 
+        DATE_TRUNC(DATE(c.date_contacted), MONTH) as time_bucket,
+        FORMAT_DATE("%b %Y", DATE_TRUNC(DATE(c.date_contacted), MONTH)) as time_label,
+        c.conversation_type as scope_key,
+        COUNT(*) as meeting_count
+      FROM `chapter-448015.lumoviz.conversations` c
+      LEFT JOIN `chapter-448015.lumoviz.org_ids` o1
+        ON CAST(c.organizer_vanid AS STRING) = CAST(o1.vanid AS STRING)
+      LEFT JOIN `chapter-448015.lumoviz.contacts` cont2 
+        ON CAST(c.organizer_vanid AS STRING) = CAST(cont2.vanid AS STRING)
+      WHERE 1=1 AND DATE(c.date_contacted) >= DATE('2025-02-09') AND DATE(c.date_contacted) <= DATE('2026-02-09')
+      GROUP BY time_bucket, time_label, scope_key
+      ORDER BY time_bucket ASC
+    
+📊 Histogram query returned 51 rows
+📊 Histogram query returned 58 rows
+[/api/meetings/by-contacts] Fetching meetings for 250 contacts, include_notes: true
+[/api/meetings/by-contacts] Fetching meetings for 250 contacts, include_notes: true
+[/api/meetings/by-contacts] Found 676 meetings
+[/api/meetings/by-contacts] Found 676 meetings
+[/api/meetings/by-contacts] Fetching meetings for 100 contacts, include_notes: true
+[/api/meetings/by-contacts] Found 223 meetings
+[/api/meetings/by-contacts] Fetching meetings for 250 contacts, include_notes: true
+[/api/meetings/by-contacts] Found 556 meetings
+[/api/meetings/by-contacts] Fetching meetings for 100 contacts, include_notes: true
+[/api/meetings/by-contacts] Found 226 meetings
+[/api/meetings/by-contacts] Fetching meetings for 250 contacts, include_notes: true
+[/api/meetings/by-contacts] Fetching meetings for 250 contacts, include_notes: true
+[/api/meetings/by-contacts] Found 556 meetings
+[/api/meetings/by-contacts] Found 329 meetings
+[/api/meetings/by-contacts] Fetching meetings for 250 contacts, include_notes: true
+[/api/meetings/by-contacts] Fetching meetings for 100 contacts, include_notes: true
+[/api/meetings/by-contacts] Found 329 meetings
+[/api/meetings/by-contacts] Fetching meetings for 250 contacts, include_notes: true
+[/api/meetings/by-contacts] Found 246 meetings
+[/api/meetings/by-contacts] Found 131 meetings
+[/api/meetings/by-contacts] Fetching meetings for 250 contacts, include_notes: true
+[/api/meetings/by-contacts] Found 131 meetings
+[/api/meetings/by-contacts] Fetching meetings for 100 contacts, include_notes: true
+[/api/meetings/by-contacts] Found 176 meetings
+Error removing from list: ApiError: Could not serialize access to table chapter-448015:lumoviz.lumoviz_lists due to concurrent update
+    at new ApiError (/Users/maggiehughes/Desktop/CarolinaFederation/lumoviz/server/node_modules/@google-cloud/common/build/src/util.js:75:15)
+    at Util.parseHttpRespBody (/Users/maggiehughes/Desktop/CarolinaFederation/lumoviz/server/node_modules/@google-cloud/common/build/src/util.js:210:38)
+    at Util.handleResp (/Users/maggiehughes/Desktop/CarolinaFederation/lumoviz/server/node_modules/@google-cloud/common/build/src/util.js:151:117)
+    at /Users/maggiehughes/Desktop/CarolinaFederation/lumoviz/server/node_modules/@google-cloud/common/build/src/util.js:534:22
+    at onResponse (/Users/maggiehughes/Desktop/CarolinaFederation/lumoviz/server/node_modules/retry-request/index.js:259:7)
+    at /Users/maggiehughes/Desktop/CarolinaFederation/lumoviz/server/node_modules/teeny-request/build/src/index.js:226:13
+    at process.processTicksAndRejections (node:internal/process/task_queues:95:5) {
+  code: 400,
+  errors: [
+    {
+      message: 'Could not serialize access to table chapter-448015:lumoviz.lumoviz_lists due to concurrent update',
+      domain: 'global',
+      reason: 'invalidQuery',
+      location: 'q',
+      locationType: 'parameter'
+    }
+  ],
+  response: Gunzip {
+    _writeState: Uint32Array(2) [ 15915, 0 ],
+    _events: {
+      close: undefined,
+      error: [Array],
+      prefinish: [Function: prefinish],
+      finish: undefined,
+      drain: undefined,
+      data: [Function (anonymous)],
+      end: [Function (anonymous)],
+      readable: undefined,
+      unpipe: undefined
+    },
+    _readableState: ReadableState {
+      highWaterMark: 16384,
+      buffer: [],
+      bufferIndex: 0,
+      length: 0,
+      pipes: [],
+      awaitDrainWriters: null,
+      [Symbol(kState)]: 194512764
+    },
+    _writableState: WritableState {
+      highWaterMark: 16384,
+      length: 0,
+      corked: 0,
+      onwrite: [Function: bound onwrite],
+      writelen: 0,
+      bufferedIndex: 0,
+      pendingcb: 0,
+      [Symbol(kState)]: 1091466620,
+      [Symbol(kBufferedValue)]: null
+    },
+    allowHalfOpen: true,
+    _maxListeners: undefined,
+    _eventsCount: 4,
+    bytesWritten: 245,
+    _handle: null,
+    _outBuffer: <Buffer 7b 0a 20 20 22 65 72 72 6f 72 22 3a 20 7b 0a 20 20 20 20 22 63 6f 64 65 22 3a 20 34 30 30 2c 0a 20 20 20 20 22 6d 65 73 73 61 67 65 22 3a 20 22 43 6f ... 16334 more bytes>,
+    _outOffset: 469,
+    _chunkSize: 16384,
+    _defaultFlushFlag: 2,
+    _finishFlushFlag: 2,
+    _defaultFullFlushFlag: 3,
+    _info: undefined,
+    _maxOutputLength: 4294967296,
+    _level: -1,
+    _strategy: 0,
+    statusCode: 400,
+    statusMessage: 'Bad Request',
+    request: {
+      agent: [Agent],
+      headers: [Object],
+      href: 'https://bigquery.googleapis.com/bigquery/v2/projects/chapter-448015/queries?prettyPrint=false'
+    },
+    body: '{\n' +
+      '  "error": {\n' +
+      '    "code": 400,\n' +
+      '    "message": "Could not serialize access to table chapter-448015:lumoviz.lumoviz_lists due to concurrent update",\n' +
+      '    "errors": [\n' +
+      '      {\n' +
+      '        "message": "Could not serialize access to table chapter-448015:lumoviz.lumoviz_lists due to concurrent update",\n' +
+      '        "domain": "global",\n' +
+      '        "reason": "invalidQuery",\n' +
+      '        "location": "q",\n' +
+      '        "locationType": "parameter"\n' +
+      '      }\n' +
+      '    ],\n' +
+      '    "status": "INVALID_ARGUMENT"\n' +
+      '  }\n' +
+      '}\n',
+    headers: {
+      'alt-svc': 'h3=":443"; ma=2592000,h3-29=":443"; ma=2592000',
+      'content-encoding': 'gzip',
+      'content-type': 'application/json; charset=UTF-8',
+      date: 'Tue, 10 Feb 2026 02:39:25 GMT',
+      server: 'ESF',
+      'transfer-encoding': 'chunked',
+      vary: 'Origin, X-Origin, Referer',
+      'x-content-type-options': 'nosniff',
+      'x-frame-options': 'SAMEORIGIN',
+      'x-xss-protection': '0'
+    },
+    toJSON: [Function: toJSON],
+    [Symbol(shapeMode)]: true,
+    [Symbol(kCapture)]: false,
+    [Symbol(kCallback)]: null,
+    [Symbol(kError)]: null
+  }
+}
+Attempting to query chapters from chapter-448015.lumoviz.lumoviz_teams
+Executing query: 
+      SELECT DISTINCT chapter
+      FROM `chapter-448015.lumoviz.lumoviz_teams`
+      WHERE chapter IS NOT NULL AND chapter != ''
+      ORDER BY chapter
+    
+Error: ENOENT: no such file or directory, stat '/Users/maggiehughes/Desktop/CarolinaFederation/lumoviz/server/public/index.html'
+Successfully retrieved 5 chapters
+Attempting to query chapters from chapter-448015.lumoviz.lumoviz_teams
+Executing query: 
+      SELECT DISTINCT chapter
+      FROM `chapter-448015.lumoviz.lumoviz_teams`
+      WHERE chapter IS NOT NULL AND chapter != ''
+      ORDER BY chapter
+    
+Successfully retrieved 5 chapters
+📊 /api/meetings/histogram called with: granularity=day, scope=chapter, start_date=2025-02-09, end_date=2026-02-09, chapter=undefined, organizer=undefined, meeting_types=undefined
+📊 Executing histogram query: 
+      SELECT 
+        DATE(c.date_contacted) as time_bucket,
+        FORMAT_DATE("%b %d", DATE(c.date_contacted)) as time_label,
+        c.participant_chapter as scope_key,
+        COUNT(*) as meeting_count
+      FROM `chapter-448015.lumoviz.conversations` c
+      LEFT JOIN `chapter-448015.lumoviz.org_ids` o1
+        ON CAST(c.organizer_vanid AS STRING) = CAST(o1.vanid AS STRING)
+      LEFT JOIN `chapter-448015.lumoviz.contacts` cont2 
+        ON CAST(c.organizer_vanid AS STRING) = CAST(cont2.vanid AS STRING)
+      WHERE 1=1 AND DATE(c.date_contacted) >= DATE('2025-02-09') AND DATE(c.date_contacted) <= DATE('2026-02-09')
+      GROUP BY time_bucket, time_label, scope_key
+      ORDER BY time_bucket ASC
+    
+📊 /api/meetings/histogram called with: granularity=day, scope=federation, start_date=2025-02-09, end_date=2026-02-09, chapter=undefined, organizer=undefined, meeting_types=undefined
+📊 Executing histogram query: 
+      SELECT 
+        DATE(c.date_contacted) as time_bucket,
+        FORMAT_DATE("%b %d", DATE(c.date_contacted)) as time_label,
+        "Carolina Federation" as scope_key,
+        COUNT(*) as meeting_count
+      FROM `chapter-448015.lumoviz.conversations` c
+      LEFT JOIN `chapter-448015.lumoviz.org_ids` o1
+        ON CAST(c.organizer_vanid AS STRING) = CAST(o1.vanid AS STRING)
+      LEFT JOIN `chapter-448015.lumoviz.contacts` cont2 
+        ON CAST(c.organizer_vanid AS STRING) = CAST(cont2.vanid AS STRING)
+      WHERE 1=1 AND DATE(c.date_contacted) >= DATE('2025-02-09') AND DATE(c.date_contacted) <= DATE('2026-02-09')
+      GROUP BY time_bucket, time_label, scope_key
+      ORDER BY time_bucket ASC
+    
+📊 Histogram query returned 647 rows
+[/api/meetings/by-contacts] Fetching meetings for 100 contacts, include_notes: true
+📊 Histogram query returned 286 rows
+📊 /api/meetings/histogram called with: granularity=day, scope=person, start_date=2025-02-09, end_date=2026-02-09, chapter=undefined, organizer=undefined, meeting_types=undefined
+📊 Executing histogram query: 
+      SELECT 
+        DATE(c.date_contacted) as time_bucket,
+        FORMAT_DATE("%b %d", DATE(c.date_contacted)) as time_label,
+        COALESCE(NULLIF(TRIM(CONCAT(COALESCE(o1.firstname, ""), " ", COALESCE(o1.lastname, ""))), ""), NULLIF(TRIM(CONCAT(COALESCE(cont2.first_name, ""), " ", COALESCE(cont2.last_name, ""))), ""), "Unknown") as scope_key,
+        COUNT(*) as meeting_count
+      FROM `chapter-448015.lumoviz.conversations` c
+      LEFT JOIN `chapter-448015.lumoviz.org_ids` o1
+        ON CAST(c.organizer_vanid AS STRING) = CAST(o1.vanid AS STRING)
+      LEFT JOIN `chapter-448015.lumoviz.contacts` cont2 
+        ON CAST(c.organizer_vanid AS STRING) = CAST(cont2.vanid AS STRING)
+      WHERE 1=1 AND DATE(c.date_contacted) >= DATE('2025-02-09') AND DATE(c.date_contacted) <= DATE('2026-02-09')
+      GROUP BY time_bucket, time_label, scope_key
+      ORDER BY time_bucket ASC
+    
+📊 /api/meetings/histogram called with: granularity=day, scope=type, start_date=2025-02-09, end_date=2026-02-09, chapter=undefined, organizer=undefined, meeting_types=undefined
+📊 Executing histogram query: 
+      SELECT 
+        DATE(c.date_contacted) as time_bucket,
+        FORMAT_DATE("%b %d", DATE(c.date_contacted)) as time_label,
+        c.conversation_type as scope_key,
+        COUNT(*) as meeting_count
+      FROM `chapter-448015.lumoviz.conversations` c
+      LEFT JOIN `chapter-448015.lumoviz.org_ids` o1
+        ON CAST(c.organizer_vanid AS STRING) = CAST(o1.vanid AS STRING)
+      LEFT JOIN `chapter-448015.lumoviz.contacts` cont2 
+        ON CAST(c.organizer_vanid AS STRING) = CAST(cont2.vanid AS STRING)
+      WHERE 1=1 AND DATE(c.date_contacted) >= DATE('2025-02-09') AND DATE(c.date_contacted) <= DATE('2026-02-09')
+      GROUP BY time_bucket, time_label, scope_key
+      ORDER BY time_bucket ASC
+    
+[/api/meetings/by-contacts] Found 361 meetings
+📊 Histogram query returned 1074 rows
+📊 Histogram query returned 590 rows
+📊 /api/meetings/histogram called with: granularity=week, scope=federation, start_date=2025-02-09, end_date=2026-02-09, chapter=undefined, organizer=undefined, meeting_types=undefined
+📊 Executing histogram query: 
+      SELECT 
+        DATE_TRUNC(DATE(c.date_contacted), WEEK) as time_bucket,
+        FORMAT_DATE("%b %d", DATE_TRUNC(DATE(c.date_contacted), WEEK)) as time_label,
+        "Carolina Federation" as scope_key,
+        COUNT(*) as meeting_count
+      FROM `chapter-448015.lumoviz.conversations` c
+      LEFT JOIN `chapter-448015.lumoviz.org_ids` o1
+        ON CAST(c.organizer_vanid AS STRING) = CAST(o1.vanid AS STRING)
+      LEFT JOIN `chapter-448015.lumoviz.contacts` cont2 
+        ON CAST(c.organizer_vanid AS STRING) = CAST(cont2.vanid AS STRING)
+      WHERE 1=1 AND DATE(c.date_contacted) >= DATE('2025-02-09') AND DATE(c.date_contacted) <= DATE('2026-02-09')
+      GROUP BY time_bucket, time_label, scope_key
+      ORDER BY time_bucket ASC
+    
+📊 /api/meetings/histogram called with: granularity=month, scope=person, start_date=2025-02-09, end_date=2026-02-09, chapter=undefined, organizer=undefined, meeting_types=undefined
+📊 Executing histogram query: 
+      SELECT 
+        DATE_TRUNC(DATE(c.date_contacted), MONTH) as time_bucket,
+        FORMAT_DATE("%b %Y", DATE_TRUNC(DATE(c.date_contacted), MONTH)) as time_label,
+        COALESCE(NULLIF(TRIM(CONCAT(COALESCE(o1.firstname, ""), " ", COALESCE(o1.lastname, ""))), ""), NULLIF(TRIM(CONCAT(COALESCE(cont2.first_name, ""), " ", COALESCE(cont2.last_name, ""))), ""), "Unknown") as scope_key,
+        COUNT(*) as meeting_count
+      FROM `chapter-448015.lumoviz.conversations` c
+      LEFT JOIN `chapter-448015.lumoviz.org_ids` o1
+        ON CAST(c.organizer_vanid AS STRING) = CAST(o1.vanid AS STRING)
+      LEFT JOIN `chapter-448015.lumoviz.contacts` cont2 
+        ON CAST(c.organizer_vanid AS STRING) = CAST(cont2.vanid AS STRING)
+      WHERE 1=1 AND DATE(c.date_contacted) >= DATE('2025-02-09') AND DATE(c.date_contacted) <= DATE('2026-02-09')
+      GROUP BY time_bucket, time_label, scope_key
+      ORDER BY time_bucket ASC
+    
+📊 Histogram query returned 51 rows
+📊 /api/meetings/histogram called with: granularity=week, scope=person, start_date=2025-02-09, end_date=2026-02-09, chapter=undefined, organizer=undefined, meeting_types=undefined
+📊 Executing histogram query: 
+      SELECT 
+        DATE_TRUNC(DATE(c.date_contacted), WEEK) as time_bucket,
+        FORMAT_DATE("%b %d", DATE_TRUNC(DATE(c.date_contacted), WEEK)) as time_label,
+        COALESCE(NULLIF(TRIM(CONCAT(COALESCE(o1.firstname, ""), " ", COALESCE(o1.lastname, ""))), ""), NULLIF(TRIM(CONCAT(COALESCE(cont2.first_name, ""), " ", COALESCE(cont2.last_name, ""))), ""), "Unknown") as scope_key,
+        COUNT(*) as meeting_count
+      FROM `chapter-448015.lumoviz.conversations` c
+      LEFT JOIN `chapter-448015.lumoviz.org_ids` o1
+        ON CAST(c.organizer_vanid AS STRING) = CAST(o1.vanid AS STRING)
+      LEFT JOIN `chapter-448015.lumoviz.contacts` cont2 
+        ON CAST(c.organizer_vanid AS STRING) = CAST(cont2.vanid AS STRING)
+      WHERE 1=1 AND DATE(c.date_contacted) >= DATE('2025-02-09') AND DATE(c.date_contacted) <= DATE('2026-02-09')
+      GROUP BY time_bucket, time_label, scope_key
+      ORDER BY time_bucket ASC
+    
+📊 Histogram query returned 201 rows
+📊 /api/meetings/histogram called with: granularity=week, scope=type, start_date=2025-02-09, end_date=2026-02-09, chapter=undefined, organizer=undefined, meeting_types=undefined
+📊 Executing histogram query: 
+      SELECT 
+        DATE_TRUNC(DATE(c.date_contacted), WEEK) as time_bucket,
+        FORMAT_DATE("%b %d", DATE_TRUNC(DATE(c.date_contacted), WEEK)) as time_label,
+        c.conversation_type as scope_key,
+        COUNT(*) as meeting_count
+      FROM `chapter-448015.lumoviz.conversations` c
+      LEFT JOIN `chapter-448015.lumoviz.org_ids` o1
+        ON CAST(c.organizer_vanid AS STRING) = CAST(o1.vanid AS STRING)
+      LEFT JOIN `chapter-448015.lumoviz.contacts` cont2 
+        ON CAST(c.organizer_vanid AS STRING) = CAST(cont2.vanid AS STRING)
+      WHERE 1=1 AND DATE(c.date_contacted) >= DATE('2025-02-09') AND DATE(c.date_contacted) <= DATE('2026-02-09')
+      GROUP BY time_bucket, time_label, scope_key
+      ORDER BY time_bucket ASC
+    
+📊 /api/meetings/histogram called with: granularity=week, scope=chapter, start_date=2025-02-09, end_date=2026-02-09, chapter=undefined, organizer=undefined, meeting_types=undefined
+📊 Executing histogram query: 
+      SELECT 
+        DATE_TRUNC(DATE(c.date_contacted), WEEK) as time_bucket,
+        FORMAT_DATE("%b %d", DATE_TRUNC(DATE(c.date_contacted), WEEK)) as time_label,
+        c.participant_chapter as scope_key,
+        COUNT(*) as meeting_count
+      FROM `chapter-448015.lumoviz.conversations` c
+      LEFT JOIN `chapter-448015.lumoviz.org_ids` o1
+        ON CAST(c.organizer_vanid AS STRING) = CAST(o1.vanid AS STRING)
+      LEFT JOIN `chapter-448015.lumoviz.contacts` cont2 
+        ON CAST(c.organizer_vanid AS STRING) = CAST(cont2.vanid AS STRING)
+      WHERE 1=1 AND DATE(c.date_contacted) >= DATE('2025-02-09') AND DATE(c.date_contacted) <= DATE('2026-02-09')
+      GROUP BY time_bucket, time_label, scope_key
+      ORDER BY time_bucket ASC
+    
+📊 Histogram query returned 469 rows
+📊 /api/meetings/histogram called with: granularity=month, scope=chapter, start_date=2025-02-09, end_date=2026-02-09, chapter=undefined, organizer=undefined, meeting_types=undefined
+📊 Executing histogram query: 
+      SELECT 
+        DATE_TRUNC(DATE(c.date_contacted), MONTH) as time_bucket,
+        FORMAT_DATE("%b %Y", DATE_TRUNC(DATE(c.date_contacted), MONTH)) as time_label,
+        c.participant_chapter as scope_key,
+        COUNT(*) as meeting_count
+      FROM `chapter-448015.lumoviz.conversations` c
+      LEFT JOIN `chapter-448015.lumoviz.org_ids` o1
+        ON CAST(c.organizer_vanid AS STRING) = CAST(o1.vanid AS STRING)
+      LEFT JOIN `chapter-448015.lumoviz.contacts` cont2 
+        ON CAST(c.organizer_vanid AS STRING) = CAST(cont2.vanid AS STRING)
+      WHERE 1=1 AND DATE(c.date_contacted) >= DATE('2025-02-09') AND DATE(c.date_contacted) <= DATE('2026-02-09')
+      GROUP BY time_bucket, time_label, scope_key
+      ORDER BY time_bucket ASC
+    
+📊 Histogram query returned 180 rows
+📊 Histogram query returned 172 rows
+📊 Histogram query returned 51 rows
+📊 /api/meetings/histogram called with: granularity=month, scope=federation, start_date=2025-02-09, end_date=2026-02-09, chapter=undefined, organizer=undefined, meeting_types=undefined
+📊 Executing histogram query: 
+      SELECT 
+        DATE_TRUNC(DATE(c.date_contacted), MONTH) as time_bucket,
+        FORMAT_DATE("%b %Y", DATE_TRUNC(DATE(c.date_contacted), MONTH)) as time_label,
+        "Carolina Federation" as scope_key,
+        COUNT(*) as meeting_count
+      FROM `chapter-448015.lumoviz.conversations` c
+      LEFT JOIN `chapter-448015.lumoviz.org_ids` o1
+        ON CAST(c.organizer_vanid AS STRING) = CAST(o1.vanid AS STRING)
+      LEFT JOIN `chapter-448015.lumoviz.contacts` cont2 
+        ON CAST(c.organizer_vanid AS STRING) = CAST(cont2.vanid AS STRING)
+      WHERE 1=1 AND DATE(c.date_contacted) >= DATE('2025-02-09') AND DATE(c.date_contacted) <= DATE('2026-02-09')
+      GROUP BY time_bucket, time_label, scope_key
+      ORDER BY time_bucket ASC
+    
+📊 Histogram query returned 13 rows
+📊 /api/meetings/histogram called with: granularity=month, scope=type, start_date=2025-02-09, end_date=2026-02-09, chapter=undefined, organizer=undefined, meeting_types=undefined
+📊 Executing histogram query: 
+      SELECT 
+        DATE_TRUNC(DATE(c.date_contacted), MONTH) as time_bucket,
+        FORMAT_DATE("%b %Y", DATE_TRUNC(DATE(c.date_contacted), MONTH)) as time_label,
+        c.conversation_type as scope_key,
+        COUNT(*) as meeting_count
+      FROM `chapter-448015.lumoviz.conversations` c
+      LEFT JOIN `chapter-448015.lumoviz.org_ids` o1
+        ON CAST(c.organizer_vanid AS STRING) = CAST(o1.vanid AS STRING)
+      LEFT JOIN `chapter-448015.lumoviz.contacts` cont2 
+        ON CAST(c.organizer_vanid AS STRING) = CAST(cont2.vanid AS STRING)
+      WHERE 1=1 AND DATE(c.date_contacted) >= DATE('2025-02-09') AND DATE(c.date_contacted) <= DATE('2026-02-09')
+      GROUP BY time_bucket, time_label, scope_key
+      ORDER BY time_bucket ASC
+    
+📊 Histogram query returned 58 rows
+[/api/meetings/by-contacts] Fetching meetings for 250 contacts, include_notes: true
+[/api/meetings/by-contacts] Fetching meetings for 100 contacts, include_notes: true
+[/api/meetings/by-contacts] Fetching meetings for 250 contacts, include_notes: true
+[/api/meetings/by-contacts] Found 223 meetings
+[/api/meetings/by-contacts] Found 676 meetings
+[/api/meetings/by-contacts] Found 676 meetings
+[/api/meetings/by-contacts] Fetching meetings for 250 contacts, include_notes: true
+[/api/meetings/by-contacts] Fetching meetings for 100 contacts, include_notes: true
+[/api/meetings/by-contacts] Fetching meetings for 250 contacts, include_notes: true
+[/api/meetings/by-contacts] Found 226 meetings
+[/api/meetings/by-contacts] Found 556 meetings
+[/api/meetings/by-contacts] Found 556 meetings
+[/api/meetings/by-contacts] Fetching meetings for 100 contacts, include_notes: true
+[/api/meetings/by-contacts] Fetching meetings for 250 contacts, include_notes: true
+[/api/meetings/by-contacts] Found 246 meetings
+[/api/meetings/by-contacts] Fetching meetings for 250 contacts, include_notes: true
+[/api/meetings/by-contacts] Found 329 meetings
+[/api/meetings/by-contacts] Found 329 meetings
+[/api/meetings/by-contacts] Fetching meetings for 100 contacts, include_notes: true
+[/api/meetings/by-contacts] Found 176 meetings
+[/api/meetings/by-contacts] Fetching meetings for 250 contacts, include_notes: true
+[/api/meetings/by-contacts] Fetching meetings for 250 contacts, include_notes: true
+[/api/meetings/by-contacts] Found 131 meetings
+[/api/meetings/by-contacts] Found 131 meetings
+📊 /api/meetings/histogram called with: granularity=week, scope=chapter, start_date=2025-02-09, end_date=2026-02-09, chapter=undefined, organizer=undefined, meeting_types=undefined
+📊 Executing histogram query: 
+      SELECT 
+        DATE_TRUNC(DATE(c.date_contacted), WEEK) as time_bucket,
+        FORMAT_DATE("%b %d", DATE_TRUNC(DATE(c.date_contacted), WEEK)) as time_label,
+        c.participant_chapter as scope_key,
+        COUNT(*) as meeting_count
+      FROM `chapter-448015.lumoviz.conversations` c
+      LEFT JOIN `chapter-448015.lumoviz.org_ids` o1
+        ON CAST(c.organizer_vanid AS STRING) = CAST(o1.vanid AS STRING)
+      LEFT JOIN `chapter-448015.lumoviz.contacts` cont2 
+        ON CAST(c.organizer_vanid AS STRING) = CAST(cont2.vanid AS STRING)
+      WHERE 1=1 AND DATE(c.date_contacted) >= DATE('2025-02-09') AND DATE(c.date_contacted) <= DATE('2026-02-09')
+      GROUP BY time_bucket, time_label, scope_key
+      ORDER BY time_bucket ASC
+    
+📊 /api/meetings/histogram called with: granularity=day, scope=chapter, start_date=2025-02-09, end_date=2026-02-09, chapter=undefined, organizer=undefined, meeting_types=undefined
+📊 Executing histogram query: 
+      SELECT 
+        DATE(c.date_contacted) as time_bucket,
+        FORMAT_DATE("%b %d", DATE(c.date_contacted)) as time_label,
+        c.participant_chapter as scope_key,
+        COUNT(*) as meeting_count
+      FROM `chapter-448015.lumoviz.conversations` c
+      LEFT JOIN `chapter-448015.lumoviz.org_ids` o1
+        ON CAST(c.organizer_vanid AS STRING) = CAST(o1.vanid AS STRING)
+      LEFT JOIN `chapter-448015.lumoviz.contacts` cont2 
+        ON CAST(c.organizer_vanid AS STRING) = CAST(cont2.vanid AS STRING)
+      WHERE 1=1 AND DATE(c.date_contacted) >= DATE('2025-02-09') AND DATE(c.date_contacted) <= DATE('2026-02-09')
+      GROUP BY time_bucket, time_label, scope_key
+      ORDER BY time_bucket ASC
+    
+📊 /api/meetings/histogram called with: granularity=day, scope=type, start_date=2025-02-09, end_date=2026-02-09, chapter=undefined, organizer=undefined, meeting_types=undefined
+📊 Executing histogram query: 
+      SELECT 
+        DATE(c.date_contacted) as time_bucket,
+        FORMAT_DATE("%b %d", DATE(c.date_contacted)) as time_label,
+        c.conversation_type as scope_key,
+        COUNT(*) as meeting_count
+      FROM `chapter-448015.lumoviz.conversations` c
+      LEFT JOIN `chapter-448015.lumoviz.org_ids` o1
+        ON CAST(c.organizer_vanid AS STRING) = CAST(o1.vanid AS STRING)
+      LEFT JOIN `chapter-448015.lumoviz.contacts` cont2 
+        ON CAST(c.organizer_vanid AS STRING) = CAST(cont2.vanid AS STRING)
+      WHERE 1=1 AND DATE(c.date_contacted) >= DATE('2025-02-09') AND DATE(c.date_contacted) <= DATE('2026-02-09')
+      GROUP BY time_bucket, time_label, scope_key
+      ORDER BY time_bucket ASC
+    
+📊 Histogram query returned 172 rows
+📊 /api/meetings/histogram called with: granularity=day, scope=federation, start_date=2025-02-09, end_date=2026-02-09, chapter=undefined, organizer=undefined, meeting_types=undefined
+📊 Executing histogram query: 
+      SELECT 
+        DATE(c.date_contacted) as time_bucket,
+        FORMAT_DATE("%b %d", DATE(c.date_contacted)) as time_label,
+        "Carolina Federation" as scope_key,
+        COUNT(*) as meeting_count
+      FROM `chapter-448015.lumoviz.conversations` c
+      LEFT JOIN `chapter-448015.lumoviz.org_ids` o1
+        ON CAST(c.organizer_vanid AS STRING) = CAST(o1.vanid AS STRING)
+      LEFT JOIN `chapter-448015.lumoviz.contacts` cont2 
+        ON CAST(c.organizer_vanid AS STRING) = CAST(cont2.vanid AS STRING)
+      WHERE 1=1 AND DATE(c.date_contacted) >= DATE('2025-02-09') AND DATE(c.date_contacted) <= DATE('2026-02-09')
+      GROUP BY time_bucket, time_label, scope_key
+      ORDER BY time_bucket ASC
+    
+📊 /api/meetings/histogram called with: granularity=week, scope=federation, start_date=2025-02-09, end_date=2026-02-09, chapter=undefined, organizer=undefined, meeting_types=undefined
+📊 Executing histogram query: 
+      SELECT 
+        DATE_TRUNC(DATE(c.date_contacted), WEEK) as time_bucket,
+        FORMAT_DATE("%b %d", DATE_TRUNC(DATE(c.date_contacted), WEEK)) as time_label,
+        "Carolina Federation" as scope_key,
+        COUNT(*) as meeting_count
+      FROM `chapter-448015.lumoviz.conversations` c
+      LEFT JOIN `chapter-448015.lumoviz.org_ids` o1
+        ON CAST(c.organizer_vanid AS STRING) = CAST(o1.vanid AS STRING)
+      LEFT JOIN `chapter-448015.lumoviz.contacts` cont2 
+        ON CAST(c.organizer_vanid AS STRING) = CAST(cont2.vanid AS STRING)
+      WHERE 1=1 AND DATE(c.date_contacted) >= DATE('2025-02-09') AND DATE(c.date_contacted) <= DATE('2026-02-09')
+      GROUP BY time_bucket, time_label, scope_key
+      ORDER BY time_bucket ASC
+    
+📊 Histogram query returned 590 rows
+📊 Histogram query returned 647 rows
+📊 /api/meetings/histogram called with: granularity=day, scope=person, start_date=2025-02-09, end_date=2026-02-09, chapter=undefined, organizer=undefined, meeting_types=undefined
+📊 Executing histogram query: 
+      SELECT 
+        DATE(c.date_contacted) as time_bucket,
+        FORMAT_DATE("%b %d", DATE(c.date_contacted)) as time_label,
+        COALESCE(NULLIF(TRIM(CONCAT(COALESCE(o1.firstname, ""), " ", COALESCE(o1.lastname, ""))), ""), NULLIF(TRIM(CONCAT(COALESCE(cont2.first_name, ""), " ", COALESCE(cont2.last_name, ""))), ""), "Unknown") as scope_key,
+        COUNT(*) as meeting_count
+      FROM `chapter-448015.lumoviz.conversations` c
+      LEFT JOIN `chapter-448015.lumoviz.org_ids` o1
+        ON CAST(c.organizer_vanid AS STRING) = CAST(o1.vanid AS STRING)
+      LEFT JOIN `chapter-448015.lumoviz.contacts` cont2 
+        ON CAST(c.organizer_vanid AS STRING) = CAST(cont2.vanid AS STRING)
+      WHERE 1=1 AND DATE(c.date_contacted) >= DATE('2025-02-09') AND DATE(c.date_contacted) <= DATE('2026-02-09')
+      GROUP BY time_bucket, time_label, scope_key
+      ORDER BY time_bucket ASC
+    
+📊 Histogram query returned 51 rows
+📊 Histogram query returned 286 rows
+📊 Histogram query returned 1074 rows
+📊 /api/meetings/histogram called with: granularity=week, scope=person, start_date=2025-02-09, end_date=2026-02-09, chapter=undefined, organizer=undefined, meeting_types=undefined
+📊 Executing histogram query: 
+      SELECT 
+        DATE_TRUNC(DATE(c.date_contacted), WEEK) as time_bucket,
+        FORMAT_DATE("%b %d", DATE_TRUNC(DATE(c.date_contacted), WEEK)) as time_label,
+        COALESCE(NULLIF(TRIM(CONCAT(COALESCE(o1.firstname, ""), " ", COALESCE(o1.lastname, ""))), ""), NULLIF(TRIM(CONCAT(COALESCE(cont2.first_name, ""), " ", COALESCE(cont2.last_name, ""))), ""), "Unknown") as scope_key,
+        COUNT(*) as meeting_count
+      FROM `chapter-448015.lumoviz.conversations` c
+      LEFT JOIN `chapter-448015.lumoviz.org_ids` o1
+        ON CAST(c.organizer_vanid AS STRING) = CAST(o1.vanid AS STRING)
+      LEFT JOIN `chapter-448015.lumoviz.contacts` cont2 
+        ON CAST(c.organizer_vanid AS STRING) = CAST(cont2.vanid AS STRING)
+      WHERE 1=1 AND DATE(c.date_contacted) >= DATE('2025-02-09') AND DATE(c.date_contacted) <= DATE('2026-02-09')
+      GROUP BY time_bucket, time_label, scope_key
+      ORDER BY time_bucket ASC
+    
+📊 /api/meetings/histogram called with: granularity=month, scope=federation, start_date=2025-02-09, end_date=2026-02-09, chapter=undefined, organizer=undefined, meeting_types=undefined
+📊 Executing histogram query: 
+      SELECT 
+        DATE_TRUNC(DATE(c.date_contacted), MONTH) as time_bucket,
+        FORMAT_DATE("%b %Y", DATE_TRUNC(DATE(c.date_contacted), MONTH)) as time_label,
+        "Carolina Federation" as scope_key,
+        COUNT(*) as meeting_count
+      FROM `chapter-448015.lumoviz.conversations` c
+      LEFT JOIN `chapter-448015.lumoviz.org_ids` o1
+        ON CAST(c.organizer_vanid AS STRING) = CAST(o1.vanid AS STRING)
+      LEFT JOIN `chapter-448015.lumoviz.contacts` cont2 
+        ON CAST(c.organizer_vanid AS STRING) = CAST(cont2.vanid AS STRING)
+      WHERE 1=1 AND DATE(c.date_contacted) >= DATE('2025-02-09') AND DATE(c.date_contacted) <= DATE('2026-02-09')
+      GROUP BY time_bucket, time_label, scope_key
+      ORDER BY time_bucket ASC
+    
+📊 /api/meetings/histogram called with: granularity=week, scope=type, start_date=2025-02-09, end_date=2026-02-09, chapter=undefined, organizer=undefined, meeting_types=undefined
+📊 Executing histogram query: 
+      SELECT 
+        DATE_TRUNC(DATE(c.date_contacted), WEEK) as time_bucket,
+        FORMAT_DATE("%b %d", DATE_TRUNC(DATE(c.date_contacted), WEEK)) as time_label,
+        c.conversation_type as scope_key,
+        COUNT(*) as meeting_count
+      FROM `chapter-448015.lumoviz.conversations` c
+      LEFT JOIN `chapter-448015.lumoviz.org_ids` o1
+        ON CAST(c.organizer_vanid AS STRING) = CAST(o1.vanid AS STRING)
+      LEFT JOIN `chapter-448015.lumoviz.contacts` cont2 
+        ON CAST(c.organizer_vanid AS STRING) = CAST(cont2.vanid AS STRING)
+      WHERE 1=1 AND DATE(c.date_contacted) >= DATE('2025-02-09') AND DATE(c.date_contacted) <= DATE('2026-02-09')
+      GROUP BY time_bucket, time_label, scope_key
+      ORDER BY time_bucket ASC
+    
+📊 Histogram query returned 469 rows
+📊 /api/meetings/histogram called with: granularity=month, scope=chapter, start_date=2025-02-09, end_date=2026-02-09, chapter=undefined, organizer=undefined, meeting_types=undefined
+📊 Executing histogram query: 
+      SELECT 
+        DATE_TRUNC(DATE(c.date_contacted), MONTH) as time_bucket,
+        FORMAT_DATE("%b %Y", DATE_TRUNC(DATE(c.date_contacted), MONTH)) as time_label,
+        c.participant_chapter as scope_key,
+        COUNT(*) as meeting_count
+      FROM `chapter-448015.lumoviz.conversations` c
+      LEFT JOIN `chapter-448015.lumoviz.org_ids` o1
+        ON CAST(c.organizer_vanid AS STRING) = CAST(o1.vanid AS STRING)
+      LEFT JOIN `chapter-448015.lumoviz.contacts` cont2 
+        ON CAST(c.organizer_vanid AS STRING) = CAST(cont2.vanid AS STRING)
+      WHERE 1=1 AND DATE(c.date_contacted) >= DATE('2025-02-09') AND DATE(c.date_contacted) <= DATE('2026-02-09')
+      GROUP BY time_bucket, time_label, scope_key
+      ORDER BY time_bucket ASC
+    
+📊 /api/meetings/histogram called with: granularity=month, scope=person, start_date=2025-02-09, end_date=2026-02-09, chapter=undefined, organizer=undefined, meeting_types=undefined
+📊 Executing histogram query: 
+      SELECT 
+        DATE_TRUNC(DATE(c.date_contacted), MONTH) as time_bucket,
+        FORMAT_DATE("%b %Y", DATE_TRUNC(DATE(c.date_contacted), MONTH)) as time_label,
+        COALESCE(NULLIF(TRIM(CONCAT(COALESCE(o1.firstname, ""), " ", COALESCE(o1.lastname, ""))), ""), NULLIF(TRIM(CONCAT(COALESCE(cont2.first_name, ""), " ", COALESCE(cont2.last_name, ""))), ""), "Unknown") as scope_key,
+        COUNT(*) as meeting_count
+      FROM `chapter-448015.lumoviz.conversations` c
+      LEFT JOIN `chapter-448015.lumoviz.org_ids` o1
+        ON CAST(c.organizer_vanid AS STRING) = CAST(o1.vanid AS STRING)
+      LEFT JOIN `chapter-448015.lumoviz.contacts` cont2 
+        ON CAST(c.organizer_vanid AS STRING) = CAST(cont2.vanid AS STRING)
+      WHERE 1=1 AND DATE(c.date_contacted) >= DATE('2025-02-09') AND DATE(c.date_contacted) <= DATE('2026-02-09')
+      GROUP BY time_bucket, time_label, scope_key
+      ORDER BY time_bucket ASC
+    
+📊 Histogram query returned 180 rows
+📊 Histogram query returned 13 rows
+📊 /api/meetings/histogram called with: granularity=month, scope=type, start_date=2025-02-09, end_date=2026-02-09, chapter=undefined, organizer=undefined, meeting_types=undefined
+📊 Executing histogram query: 
+      SELECT 
+        DATE_TRUNC(DATE(c.date_contacted), MONTH) as time_bucket,
+        FORMAT_DATE("%b %Y", DATE_TRUNC(DATE(c.date_contacted), MONTH)) as time_label,
+        c.conversation_type as scope_key,
+        COUNT(*) as meeting_count
+      FROM `chapter-448015.lumoviz.conversations` c
+      LEFT JOIN `chapter-448015.lumoviz.org_ids` o1
+        ON CAST(c.organizer_vanid AS STRING) = CAST(o1.vanid AS STRING)
+      LEFT JOIN `chapter-448015.lumoviz.contacts` cont2 
+        ON CAST(c.organizer_vanid AS STRING) = CAST(cont2.vanid AS STRING)
+      WHERE 1=1 AND DATE(c.date_contacted) >= DATE('2025-02-09') AND DATE(c.date_contacted) <= DATE('2026-02-09')
+      GROUP BY time_bucket, time_label, scope_key
+      ORDER BY time_bucket ASC
+    
+📊 Histogram query returned 51 rows
+📊 Histogram query returned 201 rows
+📊 Histogram query returned 58 rows
+Attempting to query chapters from chapter-448015.lumoviz.lumoviz_teams
+Executing query: 
+      SELECT DISTINCT chapter
+      FROM `chapter-448015.lumoviz.lumoviz_teams`
+      WHERE chapter IS NOT NULL AND chapter != ''
+      ORDER BY chapter
+    
+Successfully retrieved 5 chapters
+Attempting to query chapters from chapter-448015.lumoviz.lumoviz_teams
+Executing query: 
+      SELECT DISTINCT chapter
+      FROM `chapter-448015.lumoviz.lumoviz_teams`
+      WHERE chapter IS NOT NULL AND chapter != ''
+      ORDER BY chapter
+    
+Successfully retrieved 5 chapters
+[/api/meetings/by-contacts] Fetching meetings for 100 contacts, include_notes: true
+[/api/meetings/by-contacts] Fetching meetings for 250 contacts, include_notes: true
+[/api/meetings/by-contacts] Found 361 meetings
+[/api/meetings/by-contacts] Found 676 meetings
+[/api/meetings/by-contacts] Fetching meetings for 250 contacts, include_notes: true
+[/api/meetings/by-contacts] Fetching meetings for 100 contacts, include_notes: true
+[/api/meetings/by-contacts] Found 676 meetings
+[/api/meetings/by-contacts] Found 223 meetings
+[/api/meetings/by-contacts] Fetching meetings for 250 contacts, include_notes: true
+[/api/meetings/by-contacts] Found 556 meetings
+[/api/meetings/by-contacts] Fetching meetings for 250 contacts, include_notes: true
+[/api/meetings/by-contacts] Fetching meetings for 100 contacts, include_notes: true
+[/api/meetings/by-contacts] Found 556 meetings
+[/api/meetings/by-contacts] Fetching meetings for 250 contacts, include_notes: true
+[/api/meetings/by-contacts] Found 226 meetings
+[/api/meetings/by-contacts] Found 329 meetings
+[/api/meetings/by-contacts] Fetching meetings for 250 contacts, include_notes: true
+[/api/meetings/by-contacts] Fetching meetings for 100 contacts, include_notes: true
+[/api/meetings/by-contacts] Found 329 meetings
+[/api/meetings/by-contacts] Found 246 meetings
+[/api/meetings/by-contacts] Fetching meetings for 250 contacts, include_notes: true
+[/api/meetings/by-contacts] Found 131 meetings
+[/api/meetings/by-contacts] Fetching meetings for 100 contacts, include_notes: true
+[/api/meetings/by-contacts] Fetching meetings for 250 contacts, include_notes: true
+[/api/meetings/by-contacts] Found 176 meetings
+[/api/meetings/by-contacts] Found 131 meetings
+Attempting to query chapters from chapter-448015.lumoviz.lumoviz_teams
+Executing query: 
+      SELECT DISTINCT chapter
+      FROM `chapter-448015.lumoviz.lumoviz_teams`
+      WHERE chapter IS NOT NULL AND chapter != ''
+      ORDER BY chapter
+    
+Error: ENOENT: no such file or directory, stat '/Users/maggiehughes/Desktop/CarolinaFederation/lumoviz/server/public/index.html'
+Successfully retrieved 5 chapters
+Attempting to query chapters from chapter-448015.lumoviz.lumoviz_teams
+Executing query: 
+      SELECT DISTINCT chapter
+      FROM `chapter-448015.lumoviz.lumoviz_teams`
+      WHERE chapter IS NOT NULL AND chapter != ''
+      ORDER BY chapter
+    
+Successfully retrieved 5 chapters
+[/api/meetings/by-contacts] Fetching meetings for 100 contacts, include_notes: true
+[/api/meetings/by-contacts] Found 361 meetings
+[/api/meetings/by-contacts] Fetching meetings for 250 contacts, include_notes: true
+[/api/meetings/by-contacts] Found 676 meetings
+[/api/meetings/by-contacts] Fetching meetings for 100 contacts, include_notes: true
+[/api/meetings/by-contacts] Fetching meetings for 250 contacts, include_notes: true
+[/api/meetings/by-contacts] Found 223 meetings
+[/api/meetings/by-contacts] Found 676 meetings
+[/api/meetings/by-contacts] Fetching meetings for 250 contacts, include_notes: true
+[/api/meetings/by-contacts] Found 556 meetings
+[/api/meetings/by-contacts] Fetching meetings for 100 contacts, include_notes: true
+[/api/meetings/by-contacts] Fetching meetings for 250 contacts, include_notes: true
+[/api/meetings/by-contacts] Found 226 meetings
+[/api/meetings/by-contacts] Found 556 meetings
+[/api/meetings/by-contacts] Fetching meetings for 250 contacts, include_notes: true
+[/api/meetings/by-contacts] Found 329 meetings
+[/api/meetings/by-contacts] Fetching meetings for 100 contacts, include_notes: true
+[/api/meetings/by-contacts] Fetching meetings for 250 contacts, include_notes: true
+[/api/meetings/by-contacts] Found 246 meetings
+[/api/meetings/by-contacts] Found 329 meetings
+[/api/meetings/by-contacts] Fetching meetings for 250 contacts, include_notes: true
+[/api/meetings/by-contacts] Found 131 meetings
+[/api/meetings/by-contacts] Fetching meetings for 100 contacts, include_notes: true
+[/api/meetings/by-contacts] Fetching meetings for 250 contacts, include_notes: true
+[/api/meetings/by-contacts] Found 176 meetings
+[/api/meetings/by-contacts] Found 131 meetings
+Attempting to query chapters from chapter-448015.lumoviz.lumoviz_teams
+Executing query: 
+      SELECT DISTINCT chapter
+      FROM `chapter-448015.lumoviz.lumoviz_teams`
+      WHERE chapter IS NOT NULL AND chapter != ''
+      ORDER BY chapter
+    
+Successfully retrieved 5 chapters
+Error: ENOENT: no such file or directory, stat '/Users/maggiehughes/Desktop/CarolinaFederation/lumoviz/server/public/index.html'
+Error: ENOENT: no such file or directory, stat '/Users/maggiehughes/Desktop/CarolinaFederation/lumoviz/server/public/index.html'
+Attempting to query chapters from chapter-448015.lumoviz.lumoviz_teams
+Executing query: 
+      SELECT DISTINCT chapter
+      FROM `chapter-448015.lumoviz.lumoviz_teams`
+      WHERE chapter IS NOT NULL AND chapter != ''
+      ORDER BY chapter
+    
+Attempting to query chapters from chapter-448015.lumoviz.lumoviz_teams
+Executing query: 
+      SELECT DISTINCT chapter
+      FROM `chapter-448015.lumoviz.lumoviz_teams`
+      WHERE chapter IS NOT NULL AND chapter != ''
+      ORDER BY chapter
+    
+Successfully retrieved 5 chapters
+Successfully retrieved 5 chapters
+[/api/meetings/by-contacts] Fetching meetings for 100 contacts, include_notes: true
+[/api/meetings/by-contacts] Found 361 meetings
+[/api/meetings/by-contacts] Fetching meetings for 250 contacts, include_notes: true
+[/api/meetings/by-contacts] Found 676 meetings
+[/api/meetings/by-contacts] Fetching meetings for 250 contacts, include_notes: true
+[/api/meetings/by-contacts] Found 676 meetings
+[/api/meetings/by-contacts] Fetching meetings for 100 contacts, include_notes: true
+[/api/meetings/by-contacts] Fetching meetings for 250 contacts, include_notes: true
+[/api/meetings/by-contacts] Found 223 meetings
+[/api/meetings/by-contacts] Found 556 meetings
+[/api/meetings/by-contacts] Fetching meetings for 250 contacts, include_notes: true
+[/api/meetings/by-contacts] Fetching meetings for 100 contacts, include_notes: true
+[/api/meetings/by-contacts] Fetching meetings for 250 contacts, include_notes: true
+[/api/meetings/by-contacts] Found 556 meetings
+[/api/meetings/by-contacts] Found 226 meetings
+[/api/meetings/by-contacts] Found 329 meetings
+[/api/meetings/by-contacts] Fetching meetings for 100 contacts, include_notes: true
+[/api/meetings/by-contacts] Fetching meetings for 250 contacts, include_notes: true
+[/api/meetings/by-contacts] Found 246 meetings
+[/api/meetings/by-contacts] Found 329 meetings
+[/api/meetings/by-contacts] Fetching meetings for 250 contacts, include_notes: true
+[/api/meetings/by-contacts] Found 131 meetings
+[/api/meetings/by-contacts] Fetching meetings for 100 contacts, include_notes: true
+[/api/meetings/by-contacts] Fetching meetings for 250 contacts, include_notes: true
+[/api/meetings/by-contacts] Found 176 meetings
+[/api/meetings/by-contacts] Found 131 meetings
