@@ -48,7 +48,7 @@ interface GraphLink {
   utc_datecanvassed?: string;
   contact_type?: string;
   contact_result?: string;
-  linkSource?: 'meetings' | 'teams' | 'contacts' | 'org' | 'people_table';
+  linkSource?: 'meetings' | 'teams' | 'contacts' | 'org' | 'people_table' | 'section_leader';
   meetingId?: string;
   meetingCount?: number;
   twoOnOneRole?: 'organizer' | 'host';
@@ -307,6 +307,12 @@ const NetworkGraph: React.FC<NetworkGraphProps> = ({
         ctx.lineWidth = Math.max(edgeWidth, 3);
         ctx.globalAlpha = 1;
         ctx.setLineDash([]);
+      } else if (type === 'section_leader' || linkSource === 'section_leader') {
+        // Section leader → team representative: purple dashed line
+        ctx.strokeStyle = '#7c4dff';
+        ctx.lineWidth = 2.5;
+        ctx.globalAlpha = 0.75;
+        ctx.setLineDash([10, 5]);
       } else if (type === 'inter_team_connection') {
         // Inter-team connections: Orange dashed lines
         ctx.strokeStyle = '#ff9800';
@@ -348,12 +354,14 @@ const NetworkGraph: React.FC<NetworkGraphProps> = ({
       const isSelected = selectedNodeId === node.id;
       const isMultiTeam = node.type === 'multi_team_member';
       const isLead = node.type === 'team_lead';
+      const isSectionLeader = node.type === 'section_leader';
       
       // Calculate base node size from degree (centrality), with bonuses for special types
       // More connections = larger node (more pronounced scaling)
       let nodeSize = Math.min(25, Math.max(5, 5 + Math.log2(node.degree || 1) * 3));
       if (isMultiTeam) nodeSize += 3; // Larger for multi-team members
       if (isLead) nodeSize += 2; // Larger for team leads
+      if (isSectionLeader) nodeSize = Math.max(nodeSize + 10, 18); // Section leaders always prominent
 
       ctx.beginPath();
       ctx.arc(node.x, node.y, nodeSize, 0, 2 * Math.PI);
@@ -385,7 +393,23 @@ const NetworkGraph: React.FC<NetworkGraphProps> = ({
       // Regular node border
       ctx.strokeStyle = isSelected ? '#ff6b35' : '#fff';
       ctx.lineWidth = isSelected ? 3 : 1.5;
+      ctx.setLineDash([]);
       ctx.stroke();
+
+      // Gold double-ring for section leaders (Teaching Team members)
+      if (isSectionLeader && !isSelected) {
+        ctx.beginPath();
+        ctx.arc(node.x, node.y, nodeSize + 4, 0, 2 * Math.PI);
+        ctx.strokeStyle = '#ffd700';
+        ctx.lineWidth = 3;
+        ctx.setLineDash([]);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(node.x, node.y, nodeSize + 8, 0, 2 * Math.PI);
+        ctx.strokeStyle = 'rgba(255, 215, 0, 0.35)';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      }
 
 
       // Check if node matches search criteria
@@ -425,10 +449,10 @@ const NetworkGraph: React.FC<NetworkGraphProps> = ({
       }
 
       // Node label - always show labels, with enhanced visibility for search matches
-      const shouldShowLabel = nodeSize > 4 || matchesSearch || isSelected;
+      const shouldShowLabel = nodeSize > 4 || matchesSearch || isSelected || isSectionLeader;
       if (shouldShowLabel) {
-        const fontSize = matchesSearch || isSelected ? 14 : Math.min(12, nodeSize);
-        const fontWeight = matchesSearch || isSelected ? 'bold' : 'normal';
+        const fontSize = matchesSearch || isSelected || isSectionLeader ? 13 : Math.min(12, nodeSize);
+        const fontWeight = matchesSearch || isSelected || isSectionLeader ? 'bold' : 'normal';
         
         // Add background box for search match labels to make them stand out
         if (hasActiveSearch && matchesSearch && !isSelected) {
@@ -450,7 +474,7 @@ const NetworkGraph: React.FC<NetworkGraphProps> = ({
         ctx.textBaseline = 'middle';
         
         const text = node.name || node.id;
-        const maxWidth = matchesSearch ? nodeSize * 5 : nodeSize * 3;
+        const maxWidth = matchesSearch || isSectionLeader ? nodeSize * 5 : nodeSize * 3;
         
         // Truncate text if too long
         let displayText = text;

@@ -313,10 +313,10 @@ const Dashboard: React.FC<DashboardProps> = ({
   // Dashboard tab state - sync with URL
   const getDashboardTabFromURL = () => {
     const params = new URLSearchParams(window.location.search);
-    return params.get('dashboardTab') as 'lists' | 'people' | 'leaders' | 'actions' || 'people';
+    return params.get('dashboardTab') as 'lists' | 'people' | 'leaders' | 'actions' | 'conversations' || 'people';
   };
   
-  const [turfTab, setTurfTab] = React.useState<'lists' | 'people' | 'leaders' | 'actions'>(getDashboardTabFromURL());
+  const [turfTab, setTurfTab] = React.useState<'lists' | 'people' | 'leaders' | 'actions' | 'conversations'>(getDashboardTabFromURL());
   const [listStatusFilter, setListStatusFilter] = React.useState<'all' | 'complete' | 'in_progress'>('all'); // Filter for My Lists by status
   const [listAudienceFilter, setListAudienceFilter] = React.useState<'constituent' | 'leadership'>('constituent'); // Filter for My Lists by target audience
   
@@ -622,6 +622,8 @@ const Dashboard: React.FC<DashboardProps> = ({
   // Search state for dialogs
   const [turfSearchText, setTurfSearchText] = React.useState('');
   const [leaderSearchText, setLeaderSearchText] = React.useState('');
+  const [conversationSearchText, setConversationSearchText] = React.useState('');
+  const [conversationSortOrder, setConversationSortOrder] = React.useState<'newest' | 'oldest'>('newest');
   
   // State for adding people to a leader's organizing list
   // State for adding leader to MY leadership action list
@@ -3830,6 +3832,10 @@ const Dashboard: React.FC<DashboardProps> = ({
                       value="people" 
                     />
                     <Tab label={`My Leaders (${myLeaders.length})`} value="leaders" />
+                    <Tab 
+                      label={`My Conversations (${sharedCachedMeetings.filter((m: any) => getAllOrganizerVanIds.includes(m.organizer_vanid?.toString())).length})`}
+                      value="conversations" 
+                    />
                     <Tab label="My Lists" value="lists" />
                     <Tab label="My Actions" value="actions" />
                   </Tabs>
@@ -4735,6 +4741,252 @@ const Dashboard: React.FC<DashboardProps> = ({
                       </Box>
                     )}
                   </>
+                </Box>
+
+                {/* My Conversations Tab Content */}
+                <Box sx={{ display: turfTab === 'conversations' ? 'flex' : 'none', flex: 1, overflow: 'hidden', flexDirection: 'column' }}>
+                  <Box sx={{ p: 2, flex: 1, overflow: 'auto', display: 'flex', flexDirection: 'column' }}>
+                    {/* Header row */}
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                      <Typography variant="h6">My Conversations</Typography>
+                      <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+                        <Select
+                          size="small"
+                          value={conversationSortOrder}
+                          onChange={(e) => setConversationSortOrder(e.target.value as 'newest' | 'oldest')}
+                          sx={{ fontSize: '0.8rem', height: 32 }}
+                        >
+                          <MenuItem value="newest">Newest first</MenuItem>
+                          <MenuItem value="oldest">Oldest first</MenuItem>
+                        </Select>
+                        <Button
+                          variant="outlined"
+                          size="small"
+                          startIcon={<AddIcon />}
+                          onClick={() => setShowLogConversationDialog(true)}
+                          sx={{ fontSize: '0.75rem', px: 1.5 }}
+                        >
+                          Log Conversation
+                        </Button>
+                      </Box>
+                    </Box>
+
+                    {/* Search bar */}
+                    <TextField
+                      size="small"
+                      placeholder="Search by person name or notes…"
+                      value={conversationSearchText}
+                      onChange={(e) => setConversationSearchText(e.target.value)}
+                      InputProps={{
+                        startAdornment: (
+                          <InputAdornment position="start">
+                            <SearchIcon fontSize="small" />
+                          </InputAdornment>
+                        ),
+                        endAdornment: conversationSearchText ? (
+                          <InputAdornment position="end">
+                            <IconButton size="small" onClick={() => setConversationSearchText('')}>
+                              <CloseIcon fontSize="small" />
+                            </IconButton>
+                          </InputAdornment>
+                        ) : null,
+                      }}
+                      sx={{ mb: 2 }}
+                      fullWidth
+                    />
+
+                    {/* Conversations table */}
+                    {(() => {
+                      const orgVanIds = getAllOrganizerVanIds;
+
+                      const myConversations = sharedCachedMeetings
+                        .filter((m: any) => orgVanIds.includes(m.organizer_vanid?.toString()))
+                        .filter((m: any) => {
+                          if (!conversationSearchText.trim()) return true;
+                          const q = conversationSearchText.toLowerCase();
+                          const contactName = [m.participant_first_name, m.participant_last_name].filter(Boolean).join(' ').toLowerCase();
+                          const notes = [m.lmtg_notes, m.notes_purpose, m.lmtg_values, m.lmtg_difference, m.lmtg_resources, m.notes_stakes, m.notes_commitments, m.notes_evaluation].filter(Boolean).join(' ').toLowerCase();
+                          return contactName.includes(q) || notes.includes(q);
+                        })
+                        .sort((a: any, b: any) => {
+                          const dateA = new Date(a.date_contacted?.value || a.date_contacted || a.datestamp?.value || a.datestamp || 0).getTime();
+                          const dateB = new Date(b.date_contacted?.value || b.date_contacted || b.datestamp?.value || b.datestamp || 0).getTime();
+                          return conversationSortOrder === 'newest' ? dateB - dateA : dateA - dateB;
+                        });
+
+                      if (myConversations.length === 0) {
+                        return (
+                          <Paper sx={{ p: 4, textAlign: 'center', bgcolor: 'grey.50' }}>
+                            <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
+                              {conversationSearchText ? 'No conversations match your search.' : 'No conversations logged yet. Use the button above to log your first conversation!'}
+                            </Typography>
+                          </Paper>
+                        );
+                      }
+
+                      const stanceChipStyle = (stance: string): React.CSSProperties => {
+                        const map: Record<string, { color: string; backgroundColor: string }> = {
+                          affirm:    { color: '#0f766e', backgroundColor: '#ccfbf1' },
+                          challenge: { color: '#b91c1c', backgroundColor: '#fee2e2' },
+                          neither:   { color: '#9ca3af', backgroundColor: '#f3f4f6' },
+                        };
+                        const s = map[stance] || { color: '#9ca3af', backgroundColor: '#f3f4f6' };
+                        return {
+                          display: 'inline-block',
+                          padding: '2px 8px',
+                          borderRadius: 12,
+                          fontSize: '0.65rem',
+                          fontWeight: 700,
+                          backgroundColor: s.backgroundColor,
+                          color: s.color,
+                          border: `1px solid ${s.color}`,
+                          whiteSpace: 'nowrap' as const,
+                        };
+                      };
+                      const stanceLabel = (s: string) =>
+                        s === 'affirm' ? 'Affirm' : s === 'challenge' ? 'Challenge' : s === 'neither' ? 'Neither' : s;
+
+                      const thStyle: React.CSSProperties = {
+                        fontWeight: 600,
+                        backgroundColor: '#fafafa',
+                        fontSize: '0.75rem',
+                        padding: '4px 12px',
+                        textAlign: 'left',
+                        borderBottom: '1px solid rgba(224,224,224,1)',
+                        whiteSpace: 'nowrap',
+                        position: 'sticky',
+                        top: 0,
+                        zIndex: 1,
+                      };
+                      const tdStyle: React.CSSProperties = {
+                        padding: '6px 12px',
+                        fontSize: '0.8rem',
+                        borderBottom: '1px solid rgba(224,224,224,1)',
+                        verticalAlign: 'top',
+                      };
+                      const dash = <span style={{ color: '#bdbdbd' }}>—</span>;
+
+                      return (
+                        <Box sx={{ flex: 1, overflowX: 'auto', backgroundColor: '#fff', border: '1px solid rgba(224,224,224,1)', borderRadius: 1 }}>
+                          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem', backgroundColor: '#fff' }}>
+                            <thead>
+                              <tr>
+                                <th style={{ ...thStyle, width: 90 }}>Date</th>
+                                <th style={{ ...thStyle, width: 140 }}>Person</th>
+                                <th style={{ ...thStyle, minWidth: 160 }}>Purpose</th>
+                                <th style={{ ...thStyle, minWidth: 140 }}>Values</th>
+                                <th style={{ ...thStyle, minWidth: 140 }}>Stakes</th>
+                                <th style={{ ...thStyle, minWidth: 140 }}>Resources</th>
+                                <th style={{ ...thStyle, minWidth: 140 }}>Commitments</th>
+                                <th style={{ ...thStyle, minWidth: 140 }}>Constituency</th>
+                                <th style={{ ...thStyle, minWidth: 140 }}>Change</th>
+                                <th style={{ ...thStyle, width: 80 }}>Committed?</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {myConversations.map((m: any, idx: number) => {
+                                const firstName = m.participant_first_name || '';
+                                const lastName = m.participant_last_name || '';
+                                const contactName = [firstName, lastName].filter(Boolean).join(' ') || `VAN ID ${m.participant_vanid || m.vanid || '?'}`;
+
+                                const rawDate = m.date_contacted?.value || m.date_contacted || m.datestamp?.value || m.datestamp;
+                                const displayDate = rawDate
+                                  ? new Date(rawDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+                                  : '—';
+                                const convType = m.meeting_type || m.conversation_type || '';
+                                const leadershipTag = m.lmtg_leadership_tag || m.leadership_tag || '';
+                                const loeColors = leadershipTag ? getLOEColor(leadershipTag) : null;
+
+                                const isNewMeeting = m.data_source === 'lumoviz_meetings';
+                                const purpose = m.notes_purpose || '';
+                                const values = isNewMeeting ? (m.lmtg_values || '') : '';
+                                const stakes = isNewMeeting ? (m.lmtg_difference || '') : (m.notes_stakes || '');
+                                const resources = isNewMeeting ? (m.lmtg_resources || '') : '';
+                                const commitments = isNewMeeting
+                                  ? [m.lmtg_commitment_what, m.lmtg_notes].filter(Boolean).join(' / ')
+                                  : [m.notes_commitments, m.notes_evaluation].filter(Boolean).join(' / ');
+
+                                const constituencyStance = m.lmtg_sp_constituency_stance || '';
+                                const constituencyHow = m.lmtg_sp_constituency_how || '';
+                                const changeStance = m.lmtg_sp_change_stance || '';
+                                const changeHow = m.lmtg_sp_change_how || '';
+                                const commitmentMade = m.lmtg_commitment_made || m.commitment_made_yn || '';
+
+                                return (
+                                  <tr
+                                    key={m.meeting_id || idx}
+                                    onMouseEnter={e => (e.currentTarget.style.backgroundColor = 'rgba(0,0,0,0.04)')}
+                                    onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'transparent')}
+                                  >
+                                    <td style={{ ...tdStyle, whiteSpace: 'nowrap', color: '#616161' }}>{displayDate}</td>
+
+                                    <td style={tdStyle}>
+                                      <div style={{ fontWeight: 600, fontSize: '0.82rem', lineHeight: 1.3 }}>{contactName}</div>
+                                      <div style={{ display: 'flex', gap: 4, marginTop: 3, flexWrap: 'wrap' }}>
+                                        {convType && (
+                                          <span style={{
+                                            display: 'inline-block', padding: '1px 7px', borderRadius: 12,
+                                            fontSize: '0.62rem', fontWeight: 600,
+                                            backgroundColor: '#f0f4ff', color: '#3b5bdb',
+                                            border: '1px solid #c5d0fc',
+                                          }}>{convType}</span>
+                                        )}
+                                        {leadershipTag && loeColors && (
+                                          <span style={{
+                                            display: 'inline-block', padding: '1px 7px', borderRadius: 12,
+                                            fontSize: '0.62rem', fontWeight: 700,
+                                            backgroundColor: loeColors.backgroundColor,
+                                            color: loeColors.color,
+                                            border: `1px solid ${loeColors.color}`,
+                                          }}>{leadershipTag}</span>
+                                        )}
+                                      </div>
+                                    </td>
+
+                                    <td style={tdStyle}>{purpose || dash}</td>
+                                    <td style={tdStyle}>{values || dash}</td>
+                                    <td style={tdStyle}>{stakes || dash}</td>
+                                    <td style={tdStyle}>{resources || dash}</td>
+                                    <td style={tdStyle}>{commitments || dash}</td>
+
+                                    <td style={tdStyle}>
+                                      {constituencyStance ? (
+                                        <div>
+                                          <span style={stanceChipStyle(constituencyStance)}>{stanceLabel(constituencyStance)}</span>
+                                          {constituencyHow && <div style={{ marginTop: 4, fontSize: '0.72rem', color: '#616161', fontStyle: 'italic' }}>{constituencyHow}</div>}
+                                        </div>
+                                      ) : dash}
+                                    </td>
+
+                                    <td style={tdStyle}>
+                                      {changeStance ? (
+                                        <div>
+                                          <span style={stanceChipStyle(changeStance)}>{stanceLabel(changeStance)}</span>
+                                          {changeHow && <div style={{ marginTop: 4, fontSize: '0.72rem', color: '#616161', fontStyle: 'italic' }}>{changeHow}</div>}
+                                        </div>
+                                      ) : dash}
+                                    </td>
+
+                                    <td style={{ ...tdStyle, textAlign: 'center' }}>
+                                      {commitmentMade ? (
+                                        <span style={{
+                                          display: 'inline-block', padding: '2px 8px', borderRadius: 12,
+                                          fontSize: '0.65rem', fontWeight: 700,
+                                          backgroundColor: commitmentMade === 'yes' ? '#dcfce7' : '#f3f4f6',
+                                          color: commitmentMade === 'yes' ? '#166534' : '#9ca3af',
+                                          border: `1px solid ${commitmentMade === 'yes' ? '#86efac' : '#d1d5db'}`,
+                                        }}>{commitmentMade === 'yes' ? '✓ Yes' : '✗ No'}</span>
+                                      ) : dash}
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </Box>
+                      );
+                    })()}
+                  </Box>
                 </Box>
 
                 {/* My Actions Tab Content */}

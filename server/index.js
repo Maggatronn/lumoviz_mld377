@@ -2847,6 +2847,10 @@ app.post('/api/meetings/by-contacts', checkDataAccess, async (req, res) => {
          NULL::TEXT                      AS lmtg_leadership_tag,
          NULL::TEXT                      AS lmtg_catapults,
          NULL::TEXT                      AS lmtg_notes,
+         NULL::TEXT                      AS lmtg_sp_constituency_stance,
+         NULL::TEXT                      AS lmtg_sp_constituency_how,
+         NULL::TEXT                      AS lmtg_sp_change_stance,
+         NULL::TEXT                      AS lmtg_sp_change_how,
          'conversations'                 AS data_source`
       : `conv.participant_vanid,
          conv.organizer_vanid,
@@ -2870,6 +2874,10 @@ app.post('/api/meetings/by-contacts', checkDataAccess, async (req, res) => {
          NULL::TEXT                      AS lmtg_leadership_tag,
          NULL::TEXT                      AS lmtg_catapults,
          NULL::TEXT                      AS lmtg_notes,
+         NULL::TEXT                      AS lmtg_sp_constituency_stance,
+         NULL::TEXT                      AS lmtg_sp_constituency_how,
+         NULL::TEXT                      AS lmtg_sp_change_stance,
+         NULL::TEXT                      AS lmtg_sp_change_how,
          'conversations'                 AS data_source`;
 
     // ── Branch 2: newly-logged lumoviz_meetings ──────────────────────────────
@@ -2898,6 +2906,10 @@ app.post('/api/meetings/by-contacts', checkDataAccess, async (req, res) => {
          m.leadership_tag                AS lmtg_leadership_tag,
          array_to_string(m.catapults, ', ') AS lmtg_catapults,
          m.notes                         AS lmtg_notes,
+         m.shared_purpose_constituency_stance AS lmtg_sp_constituency_stance,
+         m.shared_purpose_constituency_how    AS lmtg_sp_constituency_how,
+         m.shared_purpose_change_stance       AS lmtg_sp_change_stance,
+         m.shared_purpose_change_how          AS lmtg_sp_change_how,
          'lumoviz_meetings'              AS data_source`
       : `m.organizee_vanid               AS participant_vanid,
          m.organizer_vanid,
@@ -2921,6 +2933,10 @@ app.post('/api/meetings/by-contacts', checkDataAccess, async (req, res) => {
          m.leadership_tag                AS lmtg_leadership_tag,
          array_to_string(m.catapults, ', ') AS lmtg_catapults,
          m.notes                         AS lmtg_notes,
+         m.shared_purpose_constituency_stance AS lmtg_sp_constituency_stance,
+         m.shared_purpose_constituency_how    AS lmtg_sp_constituency_how,
+         m.shared_purpose_change_stance       AS lmtg_sp_change_stance,
+         m.shared_purpose_change_how          AS lmtg_sp_change_how,
          'lumoviz_meetings'              AS data_source`;
 
     const query = `

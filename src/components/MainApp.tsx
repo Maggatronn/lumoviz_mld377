@@ -311,7 +311,10 @@ const MainAppContent: React.FC = () => {
     memberStatus: unifiedFilters.memberStatus,
     lastContactFilter: unifiedFilters.lastContactFilter,
     meetingCountFilter: unifiedFilters.meetingCountFilter,
-    actionStatus: unifiedFilters.actionStatus
+    actionStatus: unifiedFilters.actionStatus,
+    team: '',
+    commitmentAsked: '' as const,
+    commitmentMade: '' as const
   }), [
     unifiedFilters.organizer,
     unifiedFilters.chapter,
@@ -2614,8 +2617,73 @@ const MainAppContent: React.FC = () => {
       }
     });
     
+    // ── Section-leader nodes + per-team representative links ────────────────
+    // Each section (Alyssa / Zoe / etc.) gets one node and ONE link to each
+    // team they lead, connecting to the highest-degree member of that team.
+    const sectionLeaderNewNodes: any[] = [];
+    const sectionLeaderLinks: any[] = [];
+    const sectionLeaderIdMap = new Map<string, string>(); // sectionName → nodeId
+
+    teamsData.forEach((team: any) => {
+      const sectionName: string = team.chapter || team.bigQueryData?.chapter;
+      if (!sectionName || !team.organizers?.length) return;
+
+      // Respect chapter filter
+      if (selectedChapter && selectedChapter !== `All ${TERMS.chapters}` && selectedChapter !== sectionName) return;
+
+      // Find or create the section leader node (once per section)
+      if (!sectionLeaderIdMap.has(sectionName)) {
+        const leaderOrg = (orgIds as any[]).find((org: any) =>
+          (org.firstname || '').trim().toLowerCase() === sectionName.toLowerCase()
+        );
+        const leaderId = leaderOrg?.vanid?.toString() || `section_leader_${sectionName}`;
+        sectionLeaderIdMap.set(sectionName, leaderId);
+
+        if (!filteredNodeIds.has(leaderId)) {
+          sectionLeaderNewNodes.push({
+            id: leaderId,
+            name: leaderOrg
+              ? `${(leaderOrg.firstname || '')} ${(leaderOrg.lastname || '')}`.trim()
+              : sectionName,
+            chapter: sectionName,
+            type: 'section_leader',
+            degree: (teamsData as any[]).filter((t: any) => (t.chapter || t.bigQueryData?.chapter) === sectionName).length,
+            x: 0,
+            y: 0,
+          });
+          filteredNodeIds.add(leaderId);
+        }
+      }
+
+      const leaderId = sectionLeaderIdMap.get(sectionName)!;
+
+      // Pick the highest-degree member of this team that's in the filtered graph
+      const candidates = (team.organizers as any[])
+        .map((m: any) => {
+          const id = String(m.id ?? '');
+          const node = filteredNodes.find((n: any) => n.id === id);
+          return node ? { id, degree: (node as any).degree || 0 } : null;
+        })
+        .filter(Boolean) as Array<{ id: string; degree: number }>;
+
+      if (candidates.length === 0) return;
+      candidates.sort((a, b) => b.degree - a.degree);
+
+      sectionLeaderLinks.push({
+        source: leaderId,
+        target: candidates[0].id,
+        type: 'section_leader',
+        linkSource: 'section_leader',
+        teamName: team.teamName,
+      });
+    });
+
+    if (sectionLeaderNewNodes.length > 0) {
+      filteredNodes = [...filteredNodes, ...sectionLeaderNewNodes];
+    }
+
     // Combine all links
-    const allLinks = [...filteredLinks, ...leadershipLinks];
+    const allLinks = [...filteredLinks, ...leadershipLinks, ...sectionLeaderLinks];
     
     // Debug: Count nodes by LOE category
     const loeBreakdown = new Map<string, number>();
@@ -2634,7 +2702,7 @@ const MainAppContent: React.FC = () => {
     // );
     
     return { networkNodes: filteredNodes, networkLinks: allLinks };
-  }, [allNetworkNodes, allNetworkLinks, selectedChapter, networkLOEFilter, leaderHierarchy, getNodeLOECategory]);
+  }, [allNetworkNodes, allNetworkLinks, selectedChapter, networkLOEFilter, leaderHierarchy, getNodeLOECategory, teamsData, orgIds]);
 
 
   // Render mobile view

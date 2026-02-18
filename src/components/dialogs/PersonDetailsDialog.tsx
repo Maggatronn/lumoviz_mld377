@@ -536,6 +536,32 @@ const PersonDetailsDialog: React.FC<PersonDetailsDialogProps> = ({
                         
                         const hasNotes = noteFields.length > 0;
 
+                        const constituencyStance = (meeting as any).lmtg_sp_constituency_stance || '';
+                        const constituencyHow    = (meeting as any).lmtg_sp_constituency_how    || '';
+                        const changeStance       = (meeting as any).lmtg_sp_change_stance       || '';
+                        const changeHow          = (meeting as any).lmtg_sp_change_how          || '';
+                        const hasSharedPurpose   = !!(constituencyStance || changeStance);
+
+                        const stanceEmoji = (stance: string) =>
+                          stance === 'affirm' ? '✅' : stance === 'challenge' ? '⚠️' : stance === 'neither' ? '➖' : '';
+                        const stanceLabel = (stance: string) =>
+                          stance === 'affirm' ? 'Affirm' : stance === 'challenge' ? 'Challenge' : stance === 'neither' ? 'Neither' : stance;
+                        const stanceStyle = (stance: string): React.CSSProperties => {
+                          const map: Record<string, { color: string; background: string; border: string }> = {
+                            affirm:    { color: '#0f766e', background: '#f0fdf9', border: '#99f6e4' },
+                            challenge: { color: '#b91c1c', background: '#fef2f2', border: '#fca5a5' },
+                            neither:   { color: '#6b7280', background: '#f9fafb', border: '#d1d5db' },
+                          };
+                          const s = map[stance] || map.neither;
+                          return {
+                            display: 'inline-flex', alignItems: 'center', gap: 4,
+                            padding: '2px 8px', borderRadius: 10,
+                            fontSize: '0.7rem', fontWeight: 700,
+                            color: s.color, backgroundColor: s.background,
+                            border: `1px solid ${s.border}`,
+                          };
+                        };
+
                         return (
                           <Box 
                             key={index} 
@@ -546,7 +572,7 @@ const PersonDetailsDialog: React.FC<PersonDetailsDialogProps> = ({
                               backgroundColor: '#fafafa'
                             }}
                           >
-                            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: hasNotes ? 1 : 0 }}>
+                            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: (hasNotes || hasSharedPurpose) ? 1 : 0 }}>
                               <Box>
                                 <Typography variant="body2" sx={{ fontSize: '0.875rem' }}>
                                   <strong>{meeting.conversation_type || meeting.meeting_type || 'Meeting'}</strong> with {organizer}
@@ -575,6 +601,61 @@ const PersonDetailsDialog: React.FC<PersonDetailsDialogProps> = ({
                                     <strong>{field.label}:</strong> {field.content}
                                   </Typography>
                                 ))}
+                              </Box>
+                            )}
+
+                            {hasSharedPurpose && (
+                              <Box sx={{
+                                mt: 1.25,
+                                p: 1,
+                                borderRadius: 1,
+                                border: '1px solid #e0e0e0',
+                                backgroundColor: '#fff',
+                              }}>
+                                <Typography variant="caption" sx={{
+                                  display: 'block', mb: 0.75,
+                                  fontSize: '0.65rem', fontWeight: 700,
+                                  textTransform: 'uppercase', letterSpacing: 0.5,
+                                  color: 'text.secondary',
+                                }}>
+                                  Shared Purpose
+                                </Typography>
+                                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.75 }}>
+                                  {constituencyStance && (
+                                    <Box>
+                                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+                                        <Typography variant="caption" sx={{ fontSize: '0.72rem', color: 'text.secondary', minWidth: 80 }}>
+                                          Constituency
+                                        </Typography>
+                                        <span style={stanceStyle(constituencyStance)}>
+                                          {stanceEmoji(constituencyStance)} {stanceLabel(constituencyStance)}
+                                        </span>
+                                      </Box>
+                                      {constituencyHow && (
+                                        <Typography variant="body2" sx={{ mt: 0.4, ml: '88px', fontSize: '0.75rem', color: 'text.secondary', fontStyle: 'italic' }}>
+                                          {constituencyHow}
+                                        </Typography>
+                                      )}
+                                    </Box>
+                                  )}
+                                  {changeStance && (
+                                    <Box>
+                                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+                                        <Typography variant="caption" sx={{ fontSize: '0.72rem', color: 'text.secondary', minWidth: 80 }}>
+                                          Change
+                                        </Typography>
+                                        <span style={stanceStyle(changeStance)}>
+                                          {stanceEmoji(changeStance)} {stanceLabel(changeStance)}
+                                        </span>
+                                      </Box>
+                                      {changeHow && (
+                                        <Typography variant="body2" sx={{ mt: 0.4, ml: '88px', fontSize: '0.75rem', color: 'text.secondary', fontStyle: 'italic' }}>
+                                          {changeHow}
+                                        </Typography>
+                                      )}
+                                    </Box>
+                                  )}
+                                </Box>
                               </Box>
                             )}
                           </Box>

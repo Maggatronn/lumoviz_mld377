@@ -28,6 +28,9 @@ import {
   InputLabel,
   Select,
   MenuItem,
+  Menu,
+  ListItemIcon,
+  Divider,
   Tooltip,
   Checkbox,
   ListItemText,
@@ -46,9 +49,10 @@ import {
   CheckCircleOutline as CheckCircleOutlineIcon,
   ContentCopy,
   PersonAdd as PersonAddIcon,
-  Chat as ChatIcon
+  Chat as ChatIcon,
+  FilterList as FilterListIcon,
+  Edit as EditIcon
 } from '@mui/icons-material';
-import Menu from '@mui/material/Menu';
 
 // This will be populated from props - placeholder for now
 // Will be passed from parent component
@@ -107,6 +111,9 @@ interface PeopleFilterState {
   lastContactFilter: LastContactFilter;
   meetingCountFilter: 'all' | 'zero' | 'hasAny';
   actionStatus: 'all' | 'completed' | 'onList' | 'notOnList';
+  team: string;
+  commitmentAsked: '' | 'yes' | 'no';
+  commitmentMade: '' | 'yes' | 'no';
 }
 
 interface UserInfo {
@@ -211,7 +218,7 @@ interface PersonRecord {
   allMeetingsAllTime: MeetingNote[];
 }
 
-type SortColumn = 'name' | 'chapter' | 'mostRecentContact' | 'totalMeetings' | 'organizers';
+type SortColumn = 'name' | 'chapter' | 'team' | 'mostRecentContact' | 'totalMeetings' | 'organizers';
 type SortDirection = 'asc' | 'desc';
 
 const PeoplePanel: React.FC<PeoplePanelProps> = ({ 
@@ -271,12 +278,13 @@ const PeoplePanel: React.FC<PeoplePanelProps> = ({
     }));
   }, [actions]);
   const { customColors } = useChapterColors();
-  const [editingSectionId, setEditingSectionId] = useState<string | null>(null);
-  // Local overrides for sections edited inline (vanid → section string)
-  const [sectionOverrides, setSectionOverrides] = useState<Record<string, string>>({});
   const [editingLoeId, setEditingLoeId] = useState<string | null>(null);
   // Local overrides for LOE edited inline (vanid → loe string)
   const [loeOverrides, setLoeOverrides] = useState<Record<string, string>>({});
+  // LOE chip context menu state
+  const [loeMenuAnchorEl, setLoeMenuAnchorEl] = useState<HTMLElement | null>(null);
+  const [loeMenuPersonId, setLoeMenuPersonId] = useState<string | null>(null);
+  const [loeMenuCurrentLoe, setLoeMenuCurrentLoe] = useState<string>('');
 
   // Build a lookup from personId → team names they belong to
   const personToTeams = useMemo(() => {
@@ -314,7 +322,10 @@ const PeoplePanel: React.FC<PeoplePanelProps> = ({
     memberStatus: [],
     lastContactFilter: 'all',
     meetingCountFilter: 'all',
-    actionStatus: 'all'
+    actionStatus: 'all',
+    team: '',
+    commitmentAsked: '',
+    commitmentMade: ''
   });
   
   // Local chapter filter - managed independently since global setPeopleFilters strips chapter
@@ -346,7 +357,13 @@ const PeoplePanel: React.FC<PeoplePanelProps> = ({
   }, []);
   
   const filters = externalPeopleFilters 
-    ? { ...externalPeopleFilters, chapter: localChapterFilter || externalPeopleFilters.chapter }
+    ? {
+        ...externalPeopleFilters,
+        chapter: localChapterFilter || externalPeopleFilters.chapter,
+        team: internalFilters.team,
+        commitmentAsked: internalFilters.commitmentAsked,
+        commitmentMade: internalFilters.commitmentMade
+      }
     : internalFilters;
   const setFilters = onFiltersChange || setInternalFilters;
   const [internalFilterOpen, setInternalFilterOpen] = useState(false);
@@ -399,6 +416,11 @@ const PeoplePanel: React.FC<PeoplePanelProps> = ({
 
   // Filter handler functions
   const handleFilterChange = (field: keyof PeopleFilterState, value: any) => {
+    // Team and commitment filters are always managed locally
+    if (field === 'team' || field === 'commitmentAsked' || field === 'commitmentMade') {
+      setInternalFilters((prev: PeopleFilterState) => ({ ...prev, [field]: value }));
+      return;
+    }
     // Chapter is managed locally AND synced to global filters for UI display
     if (field === 'chapter') {
       setLocalChapterFilter(value || '');
@@ -439,6 +461,9 @@ const PeoplePanel: React.FC<PeoplePanelProps> = ({
     if (filters.lastContactFilter !== 'all') count++;
     if (filters.meetingCountFilter !== 'all') count++;
     if (filters.actionStatus !== 'all') count++;
+    if (filters.team) count++;
+    if (filters.commitmentAsked) count++;
+    if (filters.commitmentMade) count++;
     return count;
   };
 
@@ -615,40 +640,45 @@ const PeoplePanel: React.FC<PeoplePanelProps> = ({
     
     // Sort client-side
     result.sort((a, b) => {
-      let aVal: any, bVal: any;
-      
+      let comparison = 0;
+
       switch (sortColumn) {
-        case 'name':
-          aVal = `${a.lastname || ''} ${a.firstname || ''}`.toLowerCase();
-          bVal = `${b.lastname || ''} ${b.firstname || ''}`.toLowerCase();
+        case 'name': {
+          const aKey = `${a.lastname || ''} ${a.firstname || ''}`.trim().toLowerCase();
+          const bKey = `${b.lastname || ''} ${b.firstname || ''}`.trim().toLowerCase();
+          comparison = aKey.localeCompare(bKey);
           break;
+        }
         case 'chapter':
-          aVal = a.chapter || '';
-          bVal = b.chapter || '';
+          comparison = (a.chapter || '').localeCompare(b.chapter || '');
           break;
+        case 'team': {
+          const aTeam = (personToTeams.get(String(a.vanid ?? '')) || [])[0] || '';
+          const bTeam = (personToTeams.get(String(b.vanid ?? '')) || [])[0] || '';
+          comparison = aTeam.localeCompare(bTeam);
+          break;
+        }
+        case 'organizers': {
+          const aOrg = ((a.organizers || []) as string[])[0] || '';
+          const bOrg = ((b.organizers || []) as string[])[0] || '';
+          comparison = aOrg.localeCompare(bOrg);
+          break;
+        }
         case 'totalMeetings':
-          aVal = a.total_meetings_all_time || 0;
-          bVal = b.total_meetings_all_time || 0;
-          break;
-        case 'organizers':
-          aVal = (a.organizers || []).join(', ');
-          bVal = (b.organizers || []).join(', ');
+          comparison = (a.total_meetings_all_time || 0) - (b.total_meetings_all_time || 0);
           break;
         case 'mostRecentContact':
-        default:
-          // Most recent contact - parse dates (BigQuery returns {value: '...'} objects)
+        default: {
           const aDateRaw: any = a.last_contact_date;
           const bDateRaw: any = b.last_contact_date;
           const aDateStr = typeof aDateRaw === 'object' && aDateRaw?.value ? aDateRaw.value : aDateRaw;
           const bDateStr = typeof bDateRaw === 'object' && bDateRaw?.value ? bDateRaw.value : bDateRaw;
-          aVal = aDateStr ? new Date(aDateStr).getTime() : 0;
-          bVal = bDateStr ? new Date(bDateStr).getTime() : 0;
+          comparison = (aDateStr ? new Date(aDateStr).getTime() : 0) - (bDateStr ? new Date(bDateStr).getTime() : 0);
           break;
+        }
       }
-      
-      if (aVal < bVal) return sortDirection === 'asc' ? -1 : 1;
-      if (aVal > bVal) return sortDirection === 'asc' ? 1 : -1;
-      return 0;
+
+      return sortDirection === 'asc' ? comparison : -comparison;
     });
     
     return result;
@@ -778,6 +808,7 @@ const PeoplePanel: React.FC<PeoplePanelProps> = ({
 
   const handleClearFilters = () => {
     setLocalChapterFilter('');
+    setInternalFilters((prev: PeopleFilterState) => ({ ...prev, team: '', commitmentAsked: '', commitmentMade: '' }));
     setFilters({
       organizer: '',
       chapter: '',
@@ -786,7 +817,10 @@ const PeoplePanel: React.FC<PeoplePanelProps> = ({
       memberStatus: [],
       lastContactFilter: 'all',
       meetingCountFilter: 'all',
-      actionStatus: 'all'
+      actionStatus: 'all',
+      team: '',
+      commitmentAsked: '',
+      commitmentMade: ''
     });
   };
 
@@ -1118,15 +1152,10 @@ const PeoplePanel: React.FC<PeoplePanelProps> = ({
   
   const isOnList = (vanid: string, actionId: string): boolean => {
     // Check turfLists first (passed from parent), fallback to local listsData
-    if (turfLists && turfLists.length > 0) {
-      return turfLists.some((item: any) => 
-        item.vanid?.toString() === vanid &&
-        item.action === actionId
-      );
-    }
-    return listsData.some(item => 
+    const list = (turfLists && turfLists.length > 0) ? turfLists : listsData;
+    return list.some((item: any) =>
       item.vanid?.toString() === vanid &&
-      item.action_id === actionId
+      (item.action_id === actionId || item.action === actionId)
     );
   };
   
@@ -1582,29 +1611,42 @@ const PeoplePanel: React.FC<PeoplePanelProps> = ({
       // Apply sorting
       filtered.sort((a, b) => {
         let comparison = 0;
-        
+
         switch (sortColumn) {
-          case 'name':
-            comparison = a.name.localeCompare(b.name);
+          case 'name': {
+            const aLast = (a.name || '').split(' ').slice(-1)[0].toLowerCase();
+            const bLast = (b.name || '').split(' ').slice(-1)[0].toLowerCase();
+            comparison = aLast.localeCompare(bLast) || (a.name || '').localeCompare(b.name || '');
             break;
+          }
           case 'chapter':
-            comparison = a.chapter.localeCompare(b.chapter);
+            comparison = (a.chapter || '').localeCompare(b.chapter || '');
             break;
-          case 'mostRecentContact':
+          case 'team': {
+            const aTeam = (personToTeams.get(a.id) || [])[0] || '';
+            const bTeam = (personToTeams.get(b.id) || [])[0] || '';
+            comparison = aTeam.localeCompare(bTeam) || (a.name || '').localeCompare(b.name || '');
+            break;
+          }
+          case 'organizers': {
+            const aOrg = (a.organizers || [])[0] || '';
+            const bOrg = (b.organizers || [])[0] || '';
+            comparison = aOrg.localeCompare(bOrg);
+            break;
+          }
+          case 'mostRecentContact': {
             const aDate = (a.mostRecentContactAllTime || a.mostRecentContact)?.getTime() || 0;
             const bDate = (b.mostRecentContactAllTime || b.mostRecentContact)?.getTime() || 0;
             comparison = aDate - bDate;
             break;
+          }
           case 'totalMeetings':
             comparison = (a.totalMeetingsAllTime || a.totalMeetings) - (b.totalMeetingsAllTime || b.totalMeetings);
-            break;
-          case 'organizers':
-            comparison = a.organizers.length - b.organizers.length;
             break;
           default:
             comparison = 0;
         }
-        
+
         return sortDirection === 'asc' ? comparison : -comparison;
       });
 
@@ -1617,6 +1659,24 @@ const PeoplePanel: React.FC<PeoplePanelProps> = ({
     // Apply selectedNodeId filter if present (this is UI-specific, not API-filtered)
     if (selectedNodeId) {
       filtered = filtered.filter(person => person.id === selectedNodeId);
+    }
+
+    // Apply team filter (client-side, uses personToTeams lookup)
+    if (filters.team && filters.team.trim()) {
+      filtered = filtered.filter(person => {
+        const teams = personToTeams.get(person.id) || [];
+        return teams.some(t => t === filters.team);
+      });
+    }
+
+    // Apply commitment asked filter
+    if (filters.commitmentAsked) {
+      filtered = filtered.filter(person => person.latestCommitmentAsked === filters.commitmentAsked);
+    }
+
+    // Apply commitment made filter
+    if (filters.commitmentMade) {
+      filtered = filtered.filter(person => person.latestCommitmentMade === filters.commitmentMade);
     }
 
     // Apply search text filter (client-side, including pledge-only people)
@@ -1712,42 +1772,48 @@ const PeoplePanel: React.FC<PeoplePanelProps> = ({
 
     // Organizer filter is now handled server-side - no need for client-side filtering!
 
-    // Only apply client-side sorting for columns not handled by API
-    // API handles: name, chapter
-    // Client handles: totalMeetings, organizers, mostRecentContact (because we add pledge-only people client-side)
-    const apiSortedColumns = ['name', 'chapter'];
-    const isApiSorted = apiSortedColumns.includes(sortColumn);
-    
-    // If API is handling the sort, trust its order
-    if (!isApiSorted) {
-      filtered.sort((a, b) => {
-        let comparison = 0;
-        
-        switch (sortColumn) {
-          case 'name':
-            comparison = a.name.localeCompare(b.name);
-            break;
-          case 'chapter':
-            comparison = a.chapter.localeCompare(b.chapter);
-            break;
-          case 'mostRecentContact':
-            const aDate = (a.mostRecentContactAllTime || a.mostRecentContact)?.getTime() || 0;
-            const bDate = (b.mostRecentContactAllTime || b.mostRecentContact)?.getTime() || 0;
-            comparison = aDate - bDate;
-            break;
-          case 'totalMeetings':
-            comparison = (a.totalMeetingsAllTime || a.totalMeetings) - (b.totalMeetingsAllTime || b.totalMeetings);
-            break;
-          case 'organizers':
-            comparison = a.organizers.length - b.organizers.length;
-            break;
-          default:
-            comparison = 0;
+    // Always sort client-side so the chosen column is respected regardless of API order
+    filtered.sort((a, b) => {
+      let comparison = 0;
+
+      switch (sortColumn) {
+        case 'name': {
+          // Sort by last name, then first name
+          const aLast = (a.name || '').split(' ').slice(-1)[0].toLowerCase();
+          const bLast = (b.name || '').split(' ').slice(-1)[0].toLowerCase();
+          comparison = aLast.localeCompare(bLast) || (a.name || '').localeCompare(b.name || '');
+          break;
         }
-        
-        return sortDirection === 'asc' ? comparison : -comparison;
-      });
-    }
+        case 'chapter':
+          comparison = (a.chapter || '').localeCompare(b.chapter || '');
+          break;
+        case 'team': {
+          const aTeam = (personToTeams.get(a.id) || [])[0] || '';
+          const bTeam = (personToTeams.get(b.id) || [])[0] || '';
+          comparison = aTeam.localeCompare(bTeam) || (a.name || '').localeCompare(b.name || '');
+          break;
+        }
+        case 'organizers': {
+          const aOrg = (a.organizers || [])[0] || '';
+          const bOrg = (b.organizers || [])[0] || '';
+          comparison = aOrg.localeCompare(bOrg);
+          break;
+        }
+        case 'mostRecentContact': {
+          const aDate = (a.mostRecentContactAllTime || a.mostRecentContact)?.getTime() || 0;
+          const bDate = (b.mostRecentContactAllTime || b.mostRecentContact)?.getTime() || 0;
+          comparison = aDate - bDate;
+          break;
+        }
+        case 'totalMeetings':
+          comparison = (a.totalMeetingsAllTime || a.totalMeetings) - (b.totalMeetingsAllTime || b.totalMeetings);
+          break;
+        default:
+          comparison = 0;
+      }
+
+      return sortDirection === 'asc' ? comparison : -comparison;
+    });
 
     return filtered;
   }, [peopleRecords, externalFilteredPeopleRecords, searchText, filters, sortColumn, sortDirection, selectedNodeId]);
@@ -1757,7 +1823,9 @@ const PeoplePanel: React.FC<PeoplePanelProps> = ({
       setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
     } else {
       setSortColumn(column);
-      setSortDirection('desc');
+      // Text columns default A→Z; numeric/date columns default newest/most first
+      const textColumns: SortColumn[] = ['name', 'chapter', 'team', 'organizers'];
+      setSortDirection(textColumns.includes(column) ? 'asc' : 'desc');
     }
   };
 
@@ -1940,6 +2008,7 @@ const PeoplePanel: React.FC<PeoplePanelProps> = ({
                   {selectedNodeId && ` with meetings involving ${getSelectedNodeName()}`}
                   {filters.searchText && ` matching "${filters.searchText}"`}
                   {filters.organizer && ` organized by ${filters.organizer}`}
+                  {filters.team && ` on team "${filters.team}"`}
                 </Typography>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                   {contactsLoading && (
@@ -2267,6 +2336,7 @@ const PeoplePanel: React.FC<PeoplePanelProps> = ({
           {/* Table Container */}
           <Box sx={{
             flex: 1,
+            minHeight: 0,
             overflowY: 'auto',
             backgroundColor: '#fff'
           }}>
@@ -2300,7 +2370,7 @@ const PeoplePanel: React.FC<PeoplePanelProps> = ({
                 </Typography>
               </Box>
             ) : (
-              <div style={{ overflow: 'auto', width: '100%', height: '100%' }}>
+              <div style={{ overflowX: 'auto', width: '100%' }}>
                 <table style={{ 
                   width: '100%', 
                   borderCollapse: 'collapse',
@@ -2339,7 +2409,9 @@ const PeoplePanel: React.FC<PeoplePanelProps> = ({
                       </th>
                       {!hideColumns.includes('chapter') && (
                         <th 
+                          onClick={() => handleSort('chapter')}
                           style={{ 
+                            cursor: 'pointer',
                             fontWeight: 600,
                             backgroundColor: '#fafafa',
                             fontSize: '0.75rem',
@@ -2348,18 +2420,26 @@ const PeoplePanel: React.FC<PeoplePanelProps> = ({
                             borderBottom: '1px solid rgba(224, 224, 224, 1)'
                           }}
                         >
-                          Section
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                            Section <SortIcon column="chapter" />
+                          </Box>
                         </th>
                       )}
-                      <th style={{ 
-                        fontWeight: 600,
-                        backgroundColor: '#fafafa',
-                        fontSize: '0.75rem',
-                        padding: '4px 16px',
-                        textAlign: 'left',
-                        borderBottom: '1px solid rgba(224, 224, 224, 1)'
-                      }}>
-                        Team
+                      <th
+                        onClick={() => handleSort('team')}
+                        style={{ 
+                          cursor: 'pointer',
+                          fontWeight: 600,
+                          backgroundColor: '#fafafa',
+                          fontSize: '0.75rem',
+                          padding: '4px 16px',
+                          textAlign: 'left',
+                          borderBottom: '1px solid rgba(224, 224, 224, 1)'
+                        }}
+                      >
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                          Team <SortIcon column="team" />
+                        </Box>
                       </th>
                       {!hideColumns.includes('organizer') && (
                         <th 
@@ -2546,79 +2626,59 @@ const PeoplePanel: React.FC<PeoplePanelProps> = ({
                           />
                         </td>
                         
-                        {/* Section - Colored Dot + inline editor */}
+                        {/* Section - clickable pill to filter by section */}
                         {!hideColumns.includes('chapter') && (
                           <td
                             onClick={(e) => e.stopPropagation()}
                             style={{ padding: '6px 16px', borderBottom: '1px solid rgba(224, 224, 224, 1)', fontSize: '0.75rem' }}
                           >
-                            {editingSectionId === person.id ? (
-                              <select
-                                autoFocus
-                                value={sectionOverrides[person.id] ?? person.chapter}
-                                onClick={(e) => e.stopPropagation()}
-                                onMouseDown={(e) => e.stopPropagation()}
-                                onPointerDown={(e) => e.stopPropagation()}
-                                onChange={async (e) => {
-                                  e.stopPropagation();
-                                  const newSection = e.target.value;
-                                  setSectionOverrides(prev => ({ ...prev, [person.id]: newSection }));
-                                  setEditingSectionId(null);
-                                  try {
-                                    await fetch(`/api/contacts/${encodeURIComponent(person.id)}/section`, {
-                                      method: 'PATCH',
-                                      headers: { 'Content-Type': 'application/json' },
-                                      body: JSON.stringify({ section: newSection }),
-                                    });
-                                  } catch (err) {
-                                    console.error('Failed to update section:', err);
-                                  }
-                                }}
-                                onBlur={() => setEditingSectionId(null)}
-                                style={{
-                                  fontSize: '0.75rem',
-                                  border: '1px solid #bbb',
-                                  borderRadius: 4,
-                                  padding: '2px 4px',
-                                  background: '#fff',
-                                  cursor: 'pointer',
-                                }}
-                              >
-                                <option value="">— none —</option>
-                                {availableSections.map(s => (
-                                  <option key={s} value={s}>{s}</option>
-                                ))}
-                              </select>
-                            ) : (
-                              (() => {
-                                const sectionVal = sectionOverrides[person.id] ?? person.chapter;
-                                const isUnset = !sectionVal || sectionVal === 'Unknown';
-                                const color = isUnset ? '#9ca3af' : getCustomChapterColor(sectionVal, customColors);
-                                return (
+                            {(() => {
+                              const sectionVal = person.chapter;
+                              const isUnset = !sectionVal || sectionVal === 'Unknown';
+                              const color = isUnset ? '#9ca3af' : getCustomChapterColor(sectionVal, customColors);
+                              const isActive = !isUnset && filters.chapter === sectionVal;
+                              return (
+                                <Tooltip
+                                  title={isUnset ? '' : isActive ? 'Click to clear section filter' : `Filter by "${sectionVal}"`}
+                                  placement="top"
+                                >
                                   <span
-                                    onClick={(e) => { e.stopPropagation(); setEditingSectionId(person.id); }}
-                                    title="Click to edit section"
+                                    onClick={(e) => {
+                                      if (isUnset) return;
+                                      e.stopPropagation();
+                                      handleFilterChange('chapter', isActive ? '' : sectionVal);
+                                    }}
                                     style={{
                                       display: 'inline-block',
                                       padding: '2px 8px',
                                       borderRadius: '12px',
                                       fontSize: '0.65rem',
                                       fontWeight: 600,
-                                      cursor: 'pointer',
-                                      backgroundColor: isUnset ? '#f3f4f6' : `${color}18`,
-                                      color: isUnset ? '#9ca3af' : color,
+                                      cursor: isUnset ? 'default' : 'pointer',
+                                      backgroundColor: isActive ? color : (isUnset ? '#f3f4f6' : `${color}18`),
+                                      color: isActive ? '#fff' : (isUnset ? '#9ca3af' : color),
                                       border: `1px solid ${isUnset ? '#e5e7eb' : `${color}55`}`,
                                       letterSpacing: '0.01em',
-                                      transition: 'opacity 0.15s',
+                                      transition: 'all 0.15s',
                                     }}
-                                    onMouseEnter={e => (e.currentTarget.style.opacity = '0.75')}
-                                    onMouseLeave={e => (e.currentTarget.style.opacity = '1')}
+                                    onMouseEnter={e => {
+                                      if (!isUnset && !isActive) {
+                                        e.currentTarget.style.backgroundColor = color;
+                                        e.currentTarget.style.color = '#fff';
+                                      }
+                                    }}
+                                    onMouseLeave={e => {
+                                      if (!isUnset && !isActive) {
+                                        e.currentTarget.style.backgroundColor = `${color}18`;
+                                        e.currentTarget.style.color = color;
+                                      }
+                                    }}
                                   >
                                     {isUnset ? '—' : sectionVal}
                                   </span>
-                                );
-                              })()
-                            )}
+                                </Tooltip>
+                              );
+                            })()}
                           </td>
                         )}
                         
@@ -2626,27 +2686,52 @@ const PeoplePanel: React.FC<PeoplePanelProps> = ({
                         {(() => {
                           const teams = personToTeams.get(person.id) || [];
                           return (
-                            <td style={{ padding: '6px 16px', borderBottom: '1px solid rgba(224, 224, 224, 1)' }}>
+                            <td
+                              onClick={(e) => e.stopPropagation()}
+                              style={{ padding: '6px 16px', borderBottom: '1px solid rgba(224, 224, 224, 1)' }}
+                            >
                               {teams.length > 0 ? (
                                 <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
-                                  {teams.map(teamName => (
-                                    <span
-                                      key={teamName}
-                                      style={{
-                                        display: 'inline-block',
-                                        padding: '2px 7px',
-                                        borderRadius: '12px',
-                                        fontSize: '0.65rem',
-                                        fontWeight: 600,
-                                        backgroundColor: '#f0f4ff',
-                                        color: '#3b5bdb',
-                                        border: '1px solid #c5d0fc',
-                                        whiteSpace: 'nowrap',
-                                      }}
-                                    >
-                                      {teamName}
-                                    </span>
-                                  ))}
+                                  {teams.map(teamName => {
+                                    const isActive = filters.team === teamName;
+                                    return (
+                                      <Tooltip key={teamName} title={isActive ? 'Click to clear team filter' : `Filter by "${teamName}"`} placement="top">
+                                        <span
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            handleFilterChange('team', isActive ? '' : teamName);
+                                          }}
+                                          style={{
+                                            display: 'inline-block',
+                                            padding: '2px 7px',
+                                            borderRadius: '12px',
+                                            fontSize: '0.65rem',
+                                            fontWeight: 600,
+                                            backgroundColor: isActive ? '#3b5bdb' : '#f0f4ff',
+                                            color: isActive ? '#fff' : '#3b5bdb',
+                                            border: `1px solid ${isActive ? '#3b5bdb' : '#c5d0fc'}`,
+                                            whiteSpace: 'nowrap',
+                                            cursor: 'pointer',
+                                            transition: 'all 0.15s',
+                                          }}
+                                          onMouseEnter={e => {
+                                            if (!isActive) {
+                                              e.currentTarget.style.backgroundColor = '#3b5bdb';
+                                              e.currentTarget.style.color = '#fff';
+                                            }
+                                          }}
+                                          onMouseLeave={e => {
+                                            if (!isActive) {
+                                              e.currentTarget.style.backgroundColor = '#f0f4ff';
+                                              e.currentTarget.style.color = '#3b5bdb';
+                                            }
+                                          }}
+                                        >
+                                          {teamName}
+                                        </span>
+                                      </Tooltip>
+                                    );
+                                  })}
                                 </Box>
                               ) : (
                                 <span style={{ color: '#d1d5db', fontSize: '0.75rem' }}>—</span>
@@ -2739,8 +2824,13 @@ const PeoplePanel: React.FC<PeoplePanelProps> = ({
                                 </select>
                               ) : (
                                 <span
-                                  onClick={(e) => { e.stopPropagation(); setEditingLoeId(person.id); }}
-                                  title="Click to edit LOE"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setLoeMenuAnchorEl(e.currentTarget);
+                                    setLoeMenuPersonId(person.id);
+                                    setLoeMenuCurrentLoe(currentLoe);
+                                  }}
+                                  title="Click for options"
                                   style={{
                                     display: 'inline-block',
                                     padding: '2px 8px',
@@ -2802,39 +2892,67 @@ const PeoplePanel: React.FC<PeoplePanelProps> = ({
                         </td>
 
                         {/* Commitment Asked */}
-                        <td style={{ padding: '4px 4px', width: 40, minWidth: 40, maxWidth: 40, textAlign: 'center', borderBottom: '1px solid rgba(224, 224, 224, 1)' }}>
-                          {person.latestCommitmentAsked
-                            ? <Chip
-                                label={person.latestCommitmentAsked === 'yes' ? '✓' : '✗'}
-                                size="small"
-                                sx={{
-                                  height: 16,
-                                  fontSize: '0.6rem',
-                                  px: 0.25,
-                                  bgcolor: person.latestCommitmentAsked === 'yes' ? 'success.light' : 'grey.200',
-                                  color: person.latestCommitmentAsked === 'yes' ? 'success.dark' : 'text.secondary',
-                                }}
-                              />
-                            : <span style={{ color: 'rgba(0,0,0,0.25)', fontSize: '0.7rem' }}>—</span>
-                          }
+                        <td
+                          onClick={(e) => e.stopPropagation()}
+                          style={{ padding: '4px 4px', width: 40, minWidth: 40, maxWidth: 40, textAlign: 'center', borderBottom: '1px solid rgba(224, 224, 224, 1)' }}
+                        >
+                          {person.latestCommitmentAsked ? (() => {
+                            const val = person.latestCommitmentAsked as 'yes' | 'no';
+                            const isActive = filters.commitmentAsked === val;
+                            const isYes = val === 'yes';
+                            return (
+                              <Tooltip title={isActive ? 'Clear filter' : `Filter: commitment asked = ${val}`} placement="top">
+                                <span
+                                  onClick={(e) => { e.stopPropagation(); handleFilterChange('commitmentAsked', isActive ? '' : val); }}
+                                  style={{
+                                    display: 'inline-block',
+                                    padding: '1px 5px',
+                                    borderRadius: 8,
+                                    fontSize: '0.6rem',
+                                    fontWeight: 700,
+                                    cursor: 'pointer',
+                                    backgroundColor: isActive ? (isYes ? '#2e7d32' : '#616161') : (isYes ? '#c8e6c9' : '#e0e0e0'),
+                                    color: isActive ? '#fff' : (isYes ? '#1b5e20' : '#616161'),
+                                    transition: 'all 0.15s',
+                                  }}
+                                >
+                                  {isYes ? '✓' : '✗'}
+                                </span>
+                              </Tooltip>
+                            );
+                          })() : <span style={{ color: 'rgba(0,0,0,0.25)', fontSize: '0.7rem' }}>—</span>}
                         </td>
 
                         {/* Commitment Made */}
-                        <td style={{ padding: '4px 4px', width: 44, minWidth: 44, maxWidth: 44, textAlign: 'center', borderBottom: '1px solid rgba(224, 224, 224, 1)' }}>
-                          {person.latestCommitmentMade
-                            ? <Chip
-                                label={person.latestCommitmentMade === 'yes' ? '✓' : '✗'}
-                                size="small"
-                                sx={{
-                                  height: 16,
-                                  fontSize: '0.6rem',
-                                  px: 0.25,
-                                  bgcolor: person.latestCommitmentMade === 'yes' ? 'success.light' : 'grey.200',
-                                  color: person.latestCommitmentMade === 'yes' ? 'success.dark' : 'text.secondary',
-                                }}
-                              />
-                            : <span style={{ color: 'rgba(0,0,0,0.25)', fontSize: '0.7rem' }}>—</span>
-                          }
+                        <td
+                          onClick={(e) => e.stopPropagation()}
+                          style={{ padding: '4px 4px', width: 44, minWidth: 44, maxWidth: 44, textAlign: 'center', borderBottom: '1px solid rgba(224, 224, 224, 1)' }}
+                        >
+                          {person.latestCommitmentMade ? (() => {
+                            const val = person.latestCommitmentMade as 'yes' | 'no';
+                            const isActive = filters.commitmentMade === val;
+                            const isYes = val === 'yes';
+                            return (
+                              <Tooltip title={isActive ? 'Clear filter' : `Filter: commitment made = ${val}`} placement="top">
+                                <span
+                                  onClick={(e) => { e.stopPropagation(); handleFilterChange('commitmentMade', isActive ? '' : val); }}
+                                  style={{
+                                    display: 'inline-block',
+                                    padding: '1px 5px',
+                                    borderRadius: 8,
+                                    fontSize: '0.6rem',
+                                    fontWeight: 700,
+                                    cursor: 'pointer',
+                                    backgroundColor: isActive ? (isYes ? '#2e7d32' : '#616161') : (isYes ? '#c8e6c9' : '#e0e0e0'),
+                                    color: isActive ? '#fff' : (isYes ? '#1b5e20' : '#616161'),
+                                    transition: 'all 0.15s',
+                                  }}
+                                >
+                                  {isYes ? '✓' : '✗'}
+                                </span>
+                              </Tooltip>
+                            );
+                          })() : <span style={{ color: 'rgba(0,0,0,0.25)', fontSize: '0.7rem' }}>—</span>}
                         </td>
                         
                         {/* Actions - Show chips for all actions person is involved with */}
@@ -2863,35 +2981,43 @@ const PeoplePanel: React.FC<PeoplePanelProps> = ({
                                 };
                               }).filter(Boolean);
                               
-                              // Show Chip components for all actions person is involved with
+                              // Show span chips for all actions person is involved with
                               const actionElements = actionStatuses.map(status => {
                                 if (!status) return null;
-                                
+                                const targetStatus = status.isCompleted ? 'completed' : 'onList';
+                                const isActive = filters.actionStatus === targetStatus;
                                 return (
-                                  <Chip
+                                  <Tooltip
                                     key={status.actionId}
-                                    label={status.actionName}
-                                    size="small"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      // Filter by this action's status when clicked
-                                      if (status.isCompleted) {
-                                        handleFilterChange('actionStatus', 'completed');
-                                      } else if (status.onList) {
-                                        handleFilterChange('actionStatus', 'onList');
-                                      }
-                                    }}
-                                    color={status.isCompleted ? 'success' : 'default'}
-                                    variant={status.isCompleted ? 'filled' : 'outlined'}
-                                    sx={{
-                                      fontSize: '0.65rem',
-                                      height: 22,
-                                      fontWeight: status.isCompleted ? 600 : 400,
-                                      '&:hover': {
-                                        opacity: 0.8
-                                      }
-                                    }}
-                                  />
+                                    title={isActive ? 'Clear action filter' : `Filter by "${status.actionName}"`}
+                                    placement="top"
+                                  >
+                                    <span
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleFilterChange('actionStatus', isActive ? 'all' : targetStatus);
+                                      }}
+                                      style={{
+                                        display: 'inline-block',
+                                        padding: '2px 7px',
+                                        borderRadius: 12,
+                                        fontSize: '0.65rem',
+                                        fontWeight: 600,
+                                        cursor: 'pointer',
+                                        whiteSpace: 'nowrap',
+                                        transition: 'all 0.15s',
+                                        backgroundColor: isActive
+                                          ? (status.isCompleted ? '#2e7d32' : '#1565c0')
+                                          : (status.isCompleted ? '#c8e6c9' : '#e3f2fd'),
+                                        color: isActive
+                                          ? '#fff'
+                                          : (status.isCompleted ? '#1b5e20' : '#1565c0'),
+                                        border: `1px solid ${status.isCompleted ? '#a5d6a7' : '#90caf9'}`,
+                                      }}
+                                    >
+                                      {status.actionName}
+                                    </span>
+                                  </Tooltip>
                                 );
                               });
                               
@@ -3334,6 +3460,51 @@ const PeoplePanel: React.FC<PeoplePanelProps> = ({
         availableChapters={availableSections}
         availableOrganizers={dialogOrganizers}
       />
+
+      {/* LOE chip context menu */}
+      <Menu
+        anchorEl={loeMenuAnchorEl}
+        open={Boolean(loeMenuAnchorEl)}
+        onClose={() => { setLoeMenuAnchorEl(null); setLoeMenuPersonId(null); }}
+        onClick={(e) => e.stopPropagation()}
+        PaperProps={{ sx: { minWidth: 180, borderRadius: 2, boxShadow: 3 } }}
+        transformOrigin={{ horizontal: 'left', vertical: 'top' }}
+        anchorOrigin={{ horizontal: 'left', vertical: 'bottom' }}
+      >
+        {loeMenuCurrentLoe && loeMenuCurrentLoe !== 'Unknown' && (
+          <MenuItem
+            dense
+            onClick={(e) => {
+              e.stopPropagation();
+              handleFilterChange('loeStatus', [loeMenuCurrentLoe]);
+              setLoeMenuAnchorEl(null);
+              setLoeMenuPersonId(null);
+            }}
+          >
+            <ListItemIcon><FilterListIcon fontSize="small" /></ListItemIcon>
+            <ListItemText
+              primary={`Filter by "${loeMenuCurrentLoe.replace(/^\d+[_.]/, '')}"`}
+              primaryTypographyProps={{ fontSize: '0.8rem' }}
+            />
+          </MenuItem>
+        )}
+        {loeMenuCurrentLoe && loeMenuCurrentLoe !== 'Unknown' && <Divider />}
+        <MenuItem
+          dense
+          onClick={(e) => {
+            e.stopPropagation();
+            if (loeMenuPersonId) setEditingLoeId(loeMenuPersonId);
+            setLoeMenuAnchorEl(null);
+            setLoeMenuPersonId(null);
+          }}
+        >
+          <ListItemIcon><EditIcon fontSize="small" /></ListItemIcon>
+          <ListItemText
+            primary="Edit LOE"
+            primaryTypographyProps={{ fontSize: '0.8rem' }}
+          />
+        </MenuItem>
+      </Menu>
     </Box>
   );
 };
