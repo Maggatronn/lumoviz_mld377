@@ -356,7 +356,7 @@ export const fetchMeetingsByContacts = async (
 
 export const fetchMeetings = async (startDate: string, endDate: string, chapter?: string, page?: number, limit?: number): Promise<any[]> => {
   try {
-    const url = new URL(`${API_URL}/conversations`);
+    const url = new URL(`${API_URL}/conversations`, window.location.origin);
     url.searchParams.append('startDate', startDate);
     url.searchParams.append('endDate', endDate);
     if (chapter) {
@@ -405,7 +405,7 @@ export interface HistogramResponse {
 
 export const fetchMeetingsHistogram = async (params: HistogramParams = {}): Promise<HistogramResponse> => {
   try {
-    const url = new URL(`${API_URL}/meetings/histogram`);
+    const url = new URL(`${API_URL}/meetings/histogram`, window.location.origin);
     
     if (params.granularity) url.searchParams.append('granularity', params.granularity);
     if (params.scope) url.searchParams.append('scope', params.scope);
@@ -430,7 +430,7 @@ export const fetchMeetingsHistogram = async (params: HistogramParams = {}): Prom
 
 export const fetchConversations = async (startDate: string, endDate: string, chapter?: string, page?: number, limit?: number): Promise<any[]> => {
   try {
-    const url = new URL(`${API_URL}/conversations`);
+    const url = new URL(`${API_URL}/conversations`, window.location.origin);
     url.searchParams.append('startDate', startDate);
     url.searchParams.append('endDate', endDate);
     if (chapter) {
