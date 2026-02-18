@@ -35,6 +35,7 @@ const port = process.env.PORT || 3003;
 const corsOptions = {
   origin: [
     'https://lumoviz.carolinafederation.org',
+    /\.run\.app$/,   // any Cloud Run URL
     'http://localhost:3000',
     'http://localhost:3001'
   ],

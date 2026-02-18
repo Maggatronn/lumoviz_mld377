@@ -4,8 +4,8 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm install --legacy-peer-deps
 COPY . .
-# Set the API URL for the frontend build
-ENV REACT_APP_API_URL=https://lumoviz.carolinafederation.org/api
+# Use relative path so the frontend hits whichever domain it's served from
+ENV REACT_APP_API_URL=/api
 RUN npm run build
 
 # Build stage for the backend
