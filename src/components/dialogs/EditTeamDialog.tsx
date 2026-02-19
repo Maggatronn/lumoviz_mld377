@@ -81,10 +81,7 @@ const EditTeamDialog: React.FC<EditTeamDialogProps> = ({
   const [normCorrection, setNormCorrection] = useState<string>('');
   const [constituency, setConstituency] = useState<string>('');
   const [changeReason, setChangeReason] = useState<string>('');
-  // Track individual member roles and turfs
-  const [memberConstituentRoles, setMemberConstituentRoles] = useState<Map<string, string>>(new Map());
-  const [memberFunctionalRoles, setMemberFunctionalRoles] = useState<Map<string, string>>(new Map());
-  const [memberTurfs, setMemberTurfs] = useState<Map<string, string>>(new Map());
+  const [memberTurfs] = useState<Map<string, string>>(new Map());
   const [isSaving, setIsSaving] = useState<boolean>(false);
   const [saveError, setSaveError] = useState<string>('');
   const [leadSearchQuery, setLeadSearchQuery] = useState('');
@@ -122,25 +119,6 @@ const EditTeamDialog: React.FC<EditTeamDialogProps> = ({
         organizer => organizer.id !== teamToEdit.lead?.id
       );
       setTeamMembers(membersExcludingLead);
-      
-      // Initialize member roles and turfs from existing data
-      const constituentRolesMap = new Map<string, string>();
-      const functionalRolesMap = new Map<string, string>();
-      const turfsMap = new Map<string, string>();
-      teamToEdit.organizers.forEach(organizer => {
-        if (organizer.constituentRole) {
-          constituentRolesMap.set(organizer.id, organizer.constituentRole);
-        }
-        if (organizer.functionalRole) {
-          functionalRolesMap.set(organizer.id, organizer.functionalRole);
-        }
-        if (organizer.turf) {
-          turfsMap.set(organizer.id, organizer.turf);
-        }
-      });
-      setMemberConstituentRoles(constituentRolesMap);
-      setMemberFunctionalRoles(functionalRolesMap);
-      setMemberTurfs(turfsMap);
       
       setSaveError('');
     }
@@ -201,9 +179,7 @@ const EditTeamDialog: React.FC<EditTeamDialogProps> = ({
     setNormCorrection('');
     setConstituency('');
     setChangeReason('');
-    setMemberConstituentRoles(new Map());
-    setMemberFunctionalRoles(new Map());
-    setMemberTurfs(new Map());
+    
     setIsSaving(false);
     setSaveError('');
     setLeadSearchQuery('');
@@ -231,14 +207,10 @@ const EditTeamDialog: React.FC<EditTeamDialogProps> = ({
     setSaveError('');
 
     try {
-      // Combine all organizers (lead + members) with their roles and turfs
       const allOrganizers = [...(teamLead ? [teamLead] : []), ...teamMembers].filter(Boolean) as TeamMember[];
       const organizerDetails = allOrganizers.map(organizer => ({
         id: organizer.id,
-        name: organizer.name,
-        constituentRole: memberConstituentRoles.get(organizer.id) || '',
-        functionalRole: memberFunctionalRoles.get(organizer.id) || '',
-        turf: memberTurfs.get(organizer.id) || ''
+        name: organizer.name
       }));
       
       const updatedTeam = {
@@ -442,162 +414,6 @@ const EditTeamDialog: React.FC<EditTeamDialogProps> = ({
             )}
           />
 
-          {/* Team Member Details - Roles and Turfs */}
-          {(teamLead || teamMembers.length > 0) && (
-            <Box sx={{ 
-              p: 2, 
-              borderRadius: 1, 
-              backgroundColor: '#f8f9fa',
-              border: '1px solid #dee2e6'
-            }}>
-              <Typography variant="subtitle2" sx={{ mb: 2, fontWeight: 'bold', color: 'primary.main' }}>
-                Member Roles & Turfs
-              </Typography>
-              
-              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                {/* Team Lead */}
-                {teamLead && (
-                  <Box sx={{ 
-                    p: 1.5, 
-                    borderRadius: 1, 
-                    backgroundColor: '#e3f2fd',
-                    border: '1px solid #bbdefb'
-                  }}>
-                    <Typography variant="caption" sx={{ fontWeight: 600, color: 'primary.main', mb: 1, display: 'block' }}>
-                      {teamLead.name} (Coordinator)
-                    </Typography>
-                    <Box sx={{ display: 'flex', gap: 1.5, flexWrap: 'wrap' }}>
-                      <TextField
-                        label="Constituent Role"
-                        value={memberConstituentRoles.get(teamLead.id) || ''}
-                        onChange={(e) => {
-                          const newRoles = new Map(memberConstituentRoles);
-                          newRoles.set(teamLead.id, e.target.value);
-                          setMemberConstituentRoles(newRoles);
-                        }}
-                        placeholder="e.g., Leader, Potential Leader"
-                        size="small"
-                        sx={{
-                          minWidth: '200px',
-                          flex: 1,
-                          '& .MuiOutlinedInput-root': {
-                            backgroundColor: '#fff'
-                          }
-                        }}
-                      />
-                      <TextField
-                        label="Functional Role"
-                        value={memberFunctionalRoles.get(teamLead.id) || ''}
-                        onChange={(e) => {
-                          const newRoles = new Map(memberFunctionalRoles);
-                          newRoles.set(teamLead.id, e.target.value);
-                          setMemberFunctionalRoles(newRoles);
-                        }}
-                        placeholder="e.g., Team Lead, Coordinator"
-                        size="small"
-                        sx={{
-                          minWidth: '200px',
-                          flex: 1,
-                          '& .MuiOutlinedInput-root': {
-                            backgroundColor: '#fff'
-                          }
-                        }}
-                      />
-                      <TextField
-                        label="Turf"
-                        value={memberTurfs.get(teamLead.id) || ''}
-                        onChange={(e) => {
-                          const newTurfs = new Map(memberTurfs);
-                          newTurfs.set(teamLead.id, e.target.value);
-                          setMemberTurfs(newTurfs);
-                        }}
-                        placeholder="e.g., Downtown, East Side"
-                        size="small"
-                        sx={{
-                          minWidth: '200px',
-                          flex: 1,
-                          '& .MuiOutlinedInput-root': {
-                            backgroundColor: '#fff'
-                          }
-                        }}
-                      />
-                    </Box>
-                  </Box>
-                )}
-                
-                {/* Team Members */}
-                {teamMembers.map((member) => (
-                  <Box key={member.id} sx={{ 
-                    p: 1.5, 
-                    borderRadius: 1, 
-                    backgroundColor: '#fff',
-                    border: '1px solid #dee2e6'
-                  }}>
-                    <Typography variant="caption" sx={{ fontWeight: 600, color: 'text.secondary', mb: 1, display: 'block' }}>
-                      {member.name}
-                    </Typography>
-                    <Box sx={{ display: 'flex', gap: 1.5, flexWrap: 'wrap' }}>
-                      <TextField
-                        label="Constituent Role"
-                        value={memberConstituentRoles.get(member.id) || ''}
-                        onChange={(e) => {
-                          const newRoles = new Map(memberConstituentRoles);
-                          newRoles.set(member.id, e.target.value);
-                          setMemberConstituentRoles(newRoles);
-                        }}
-                        placeholder="e.g., Member, Supporter"
-                        size="small"
-                        sx={{
-                          minWidth: '200px',
-                          flex: 1,
-                          '& .MuiOutlinedInput-root': {
-                            backgroundColor: '#f8f9fa'
-                          }
-                        }}
-                      />
-                      <TextField
-                        label="Functional Role"
-                        value={memberFunctionalRoles.get(member.id) || ''}
-                        onChange={(e) => {
-                          const newRoles = new Map(memberFunctionalRoles);
-                          newRoles.set(member.id, e.target.value);
-                          setMemberFunctionalRoles(newRoles);
-                        }}
-                        placeholder="e.g., Deputy, Member"
-                        size="small"
-                        sx={{
-                          minWidth: '200px',
-                          flex: 1,
-                          '& .MuiOutlinedInput-root': {
-                            backgroundColor: '#f8f9fa'
-                          }
-                        }}
-                      />
-                      <TextField
-                        label="Turf"
-                        value={memberTurfs.get(member.id) || ''}
-                        onChange={(e) => {
-                          const newTurfs = new Map(memberTurfs);
-                          newTurfs.set(member.id, e.target.value);
-                          setMemberTurfs(newTurfs);
-                        }}
-                        placeholder="e.g., West Side, North End"
-                        size="small"
-                        sx={{
-                          minWidth: '200px',
-                          flex: 1,
-                          '& .MuiOutlinedInput-root': {
-                            backgroundColor: '#f8f9fa'
-                          }
-                        }}
-                      />
-                    </Box>
-                  </Box>
-                ))}
-              </Box>
-            </Box>
-          )}
-
           {/* Chapter Dropdown */}
           <FormControl fullWidth>
             <InputLabel>Chapter *</InputLabel>
@@ -680,7 +496,7 @@ const EditTeamDialog: React.FC<EditTeamDialogProps> = ({
             label="Constituency"
             value={constituency}
             onChange={(e) => setConstituency(e.target.value)}
-            placeholder="e.g., Student activists, Community leaders, etc."
+            placeholder="Turf"
             fullWidth
             sx={{
               '& .MuiOutlinedInput-root': {

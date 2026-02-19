@@ -50,6 +50,8 @@ app.options('*', cors(corsOptions));
 
 app.use(express.json());
 
+// Rate limiting removed - root cause of infinite loop was fixed in React useEffect hooks
+
 // Serve static files from the React app build directory
 app.use(express.static(path.join(__dirname, 'public')));
 
@@ -2130,24 +2132,13 @@ app.get('/api/contact-history-network', checkDataAccess, async (req, res) => {
 // Add a new endpoint to get date range from contact_history
 app.get('/api/contact-history-date-range', async (req, res) => {
   try {
-    // console.log('Retrieving contact_history date range...');
-    
-    // Query to get min and max dates
-    const query = `
-      SELECT 
-        MIN(utc_datecanvassed) as min_date,
-        MAX(utc_datecanvassed) as max_date
-      FROM 
-        \`${PROJECT_ID}.${DATASET_ID}.contact_history\`
-      WHERE 
-        utc_datecanvassed IS NOT NULL
-    `;
-
-    const [result] = await bigquery.query({ query });
-    
-    if (result.length === 0) {
-      return res.status(404).json({ error: 'No date range found' });
-    }
+    // Stub: Return default date range (contact_history table doesn't exist in PostgreSQL yet)
+    console.log('[/api/contact-history-date-range] Returning default date range (stubbed)');
+    res.json({
+      min_date: '2024-01-01',
+      max_date: new Date().toISOString().split('T')[0]
+    });
+    return;
     
     // Format the dates
     const minDate = result[0].min_date ? result[0].min_date.value : null;
@@ -2324,41 +2315,42 @@ app.get('/api/org-ids', async (req, res) => {
   }
 });
 
-// Simplified endpoint for org_ids to ensure we can access the data
+// Simplified endpoint for org_ids - falls back to contacts table if org_ids is empty
 app.get('/api/org-ids-simple', async (req, res) => {
   try {
-    // console.log('Fetching org_ids data (simple)...');
+    console.log('[/api/org-ids-simple] Fetching org_ids data from PostgreSQL...');
     
-    // Simple direct query of the org_ids table
-    const query = `
-      SELECT 
-        vanid,
-        userid,
-        firstname,
-        lastname,
-        supervisorid,
-        type,
-        turf,
-        team_role
-        -- email,
-        -- chapter
-      FROM \`${PROJECT_ID}.${DATASET_ID}.org_ids\`
-      LIMIT 5000
-    `;
-
-    // console.log('Executing org_ids query:', query);
-    const [rows] = await bigquery.query({ query });
+    // Try org_ids first
+    let result = await pool.query(`
+      SELECT vanid, userid, firstname, lastname, supervisorid, type, turf, team_role, email, chapter
+      FROM org_ids LIMIT 5000
+    `);
     
-    // console.log(`Retrieved ${rows.length} rows from org_ids table (simple endpoint)`);
-    if (rows.length > 0) {
-      // console.log('First row sample:', JSON.stringify(rows[0], null, 2));
+    // If org_ids is empty, fall back to contacts table
+    if (result.rows.length === 0) {
+      console.log('[/api/org-ids-simple] org_ids empty, falling back to contacts table');
+      result = await pool.query(`
+        SELECT 
+          vanid,
+          vanid as userid,
+          first_name as firstname,
+          last_name as lastname,
+          NULL as supervisorid,
+          COALESCE(member_status, 'constituent') as type,
+          NULL as turf,
+          NULL as team_role,
+          email,
+          chapter
+        FROM contacts
+        LIMIT 5000
+      `);
     }
     
-    // Return direct results without wrapping in an object
-    res.json(rows);
+    console.log(`[/api/org-ids-simple] Found ${result.rows.length} records`);
+    res.json(result.rows);
   } catch (error) {
-    // console.error('Error fetching org_ids data:', error);
-    res.status(500).json({ error: error.message });
+    console.error('[/api/org-ids-simple] Error:', error.message);
+    res.json([]);
   }
 });
 
@@ -4471,6 +4463,112 @@ app.post('/api/meetings', async (req, res) => {
   }
 });
 
+// ============================================
+// CONTACT-ORGANIZER ASSIGNMENT ENDPOINTS
+// ============================================
+
+// GET /api/contact-organizers - Fetch all organizer assignments (bulk) or for a single contact
+app.get('/api/contact-organizers', async (req, res) => {
+  try {
+    const { contact_vanid } = req.query;
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS lumoviz_contact_organizers (
+        contact_vanid TEXT NOT NULL,
+        organizer_vanid TEXT NOT NULL,
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (contact_vanid, organizer_vanid)
+      )
+    `);
+
+    if (contact_vanid) {
+      const result = await pool.query(
+        `SELECT co.contact_vanid, co.organizer_vanid, co.created_at,
+                o.firstname, o.lastname
+         FROM lumoviz_contact_organizers co
+         LEFT JOIN org_ids o ON CAST(o.vanid AS TEXT) = co.organizer_vanid
+         WHERE co.contact_vanid = $1
+         ORDER BY co.created_at`,
+        [contact_vanid.toString()]
+      );
+      return res.json({ success: true, data: result.rows });
+    }
+
+    // Bulk: return all assignments (used for populating the People table)
+    const result = await pool.query(
+      `SELECT co.contact_vanid, co.organizer_vanid,
+              o.firstname, o.lastname
+       FROM lumoviz_contact_organizers co
+       LEFT JOIN org_ids o ON CAST(o.vanid AS TEXT) = co.organizer_vanid
+       ORDER BY co.contact_vanid`
+    );
+    res.json({ success: true, data: result.rows });
+  } catch (error) {
+    console.error('Error fetching contact organizers:', error);
+    if (error.message?.includes('does not exist')) {
+      res.json({ success: true, data: [] });
+    } else {
+      res.status(500).json({ success: false, error: error.message });
+    }
+  }
+});
+
+// POST /api/contact-organizers - Add organizer to a contact
+app.post('/api/contact-organizers', async (req, res) => {
+  try {
+    const { contact_vanid, organizer_vanid } = req.body;
+
+    if (!contact_vanid || !organizer_vanid) {
+      return res.status(400).json({ success: false, error: 'contact_vanid and organizer_vanid are required' });
+    }
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS lumoviz_contact_organizers (
+        contact_vanid TEXT NOT NULL,
+        organizer_vanid TEXT NOT NULL,
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (contact_vanid, organizer_vanid)
+      )
+    `);
+
+    await pool.query(
+      `INSERT INTO lumoviz_contact_organizers (contact_vanid, organizer_vanid)
+       VALUES ($1, $2)
+       ON CONFLICT (contact_vanid, organizer_vanid) DO NOTHING`,
+      [contact_vanid.toString(), organizer_vanid.toString()]
+    );
+
+    console.log(`[contact-organizers] Added organizer ${organizer_vanid} to contact ${contact_vanid}`);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error adding contact organizer:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// DELETE /api/contact-organizers - Remove organizer from a contact
+app.delete('/api/contact-organizers', async (req, res) => {
+  try {
+    const { contact_vanid, organizer_vanid } = req.body;
+
+    if (!contact_vanid || !organizer_vanid) {
+      return res.status(400).json({ success: false, error: 'contact_vanid and organizer_vanid are required' });
+    }
+
+    await pool.query(
+      `DELETE FROM lumoviz_contact_organizers
+       WHERE contact_vanid = $1 AND organizer_vanid = $2`,
+      [contact_vanid.toString(), organizer_vanid.toString()]
+    );
+
+    console.log(`[contact-organizers] Removed organizer ${organizer_vanid} from contact ${contact_vanid}`);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error removing contact organizer:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 // GET /api/organizer-goals - Fetch organizer's personal goals
 app.get('/api/organizer-goals', async (req, res) => {
   try {
@@ -4480,29 +4578,34 @@ app.get('/api/organizer-goals', async (req, res) => {
       return res.status(400).json({ success: false, error: 'organizer_vanid is required' });
     }
     
-    const query = `
-      SELECT 
-        organizer_vanid,
-        action_id,
-        goal_value,
-        campaign_id,
-        created_at,
-        updated_at
-      FROM \`${PROJECT_ID}.${DATASET_ID}.organizer_goals\`
-      WHERE organizer_vanid = @organizer_vanid
-    `;
+    const result = await pool.query(
+      `SELECT organizer_vanid, action_id, goal_value, campaign_id, created_at, updated_at
+       FROM organizer_goals
+       WHERE organizer_vanid = $1`,
+      [organizer_vanid]
+    );
     
-    const [rows] = await bigquery.query({
-      query,
-      params: { organizer_vanid }
-    });
-    
-    res.json({ success: true, data: rows });
+    res.json({ success: true, data: result.rows });
   } catch (error) {
     console.error('Error fetching organizer goals:', error);
-    // If table doesn't exist, return empty array
-    if (error.message?.includes('Not found: Table')) {
-      console.warn('[organizer-goals] Table does not exist yet, returning empty array');
+    if (error.message?.includes('does not exist')) {
+      // Table doesn't exist yet — create it and return empty
+      console.warn('[organizer-goals] Table does not exist, creating it...');
+      try {
+        await pool.query(`
+          CREATE TABLE IF NOT EXISTS organizer_goals (
+            organizer_vanid TEXT NOT NULL,
+            action_id TEXT NOT NULL,
+            goal_value NUMERIC,
+            campaign_id TEXT,
+            created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (organizer_vanid, action_id)
+          )
+        `);
+      } catch (createErr) {
+        console.error('Error creating organizer_goals table:', createErr);
+      }
       res.json({ success: true, data: [] });
     } else {
       res.status(500).json({ success: false, error: error.message });
@@ -4524,40 +4627,29 @@ app.post('/api/organizer-goals', async (req, res) => {
     
     console.log(`[organizer-goals] Saving goal for organizer ${organizer_vanid}, action ${action_id}, goal ${goal_value}`);
     
-    // Use MERGE to insert or update the goal
-    const query = `
-      MERGE \`${PROJECT_ID}.${DATASET_ID}.organizer_goals\` AS target
-      USING (
-        SELECT 
-          @organizer_vanid AS organizer_vanid,
-          @action_id AS action_id,
-          @goal_value AS goal_value,
-          ${campaign_id ? '@campaign_id' : 'CAST(NULL AS STRING)'} AS campaign_id,
-          CURRENT_TIMESTAMP AS updated_at
-      ) AS source
-      ON target.organizer_vanid = source.organizer_vanid 
-        AND target.action_id = source.action_id
-      WHEN MATCHED THEN
-        UPDATE SET 
-          goal_value = source.goal_value,
-          campaign_id = source.campaign_id,
-          updated_at = source.updated_at
-      WHEN NOT MATCHED THEN
-        INSERT (organizer_vanid, action_id, goal_value, campaign_id, created_at, updated_at)
-        VALUES (source.organizer_vanid, source.action_id, source.goal_value, source.campaign_id, CURRENT_TIMESTAMP, source.updated_at)
-    `;
+    // Ensure table exists
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS organizer_goals (
+        organizer_vanid TEXT NOT NULL,
+        action_id TEXT NOT NULL,
+        goal_value NUMERIC,
+        campaign_id TEXT,
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (organizer_vanid, action_id)
+      )
+    `);
     
-    const params = {
-      organizer_vanid,
-      action_id,
-      goal_value
-    };
-    
-    if (campaign_id) {
-      params.campaign_id = campaign_id;
-    }
-    
-    await bigquery.query({ query, params });
+    await pool.query(
+      `INSERT INTO organizer_goals (organizer_vanid, action_id, goal_value, campaign_id, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+       ON CONFLICT (organizer_vanid, action_id)
+       DO UPDATE SET
+         goal_value = EXCLUDED.goal_value,
+         campaign_id = EXCLUDED.campaign_id,
+         updated_at = CURRENT_TIMESTAMP`,
+      [organizer_vanid, action_id, goal_value, campaign_id || null]
+    );
     
     res.json({ success: true, message: 'Goal saved successfully' });
   } catch (error) {

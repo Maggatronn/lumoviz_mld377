@@ -362,28 +362,6 @@ const AddTeamDialog: React.FC<AddTeamDialogProps> = ({
               }}
             />
             
-            {/* Team Coordinator Roles */}
-            {teamLead && (
-              <Box sx={{ mt: 2, display: 'flex', gap: 2 }}>
-                <TextField
-                  fullWidth
-                  size="small"
-                  label="Constituent Role"
-                  placeholder="e.g., Leader, Potential Leader, Member, Supporter"
-                  value={teamLead.constituentRole || ''}
-                  onChange={(e) => setTeamLead({ ...teamLead, constituentRole: e.target.value })}
-                />
-                
-                <TextField
-                  fullWidth
-                  size="small"
-                  label="Functional Role"
-                  placeholder="e.g., Team Lead, Co-Lead, Facilitator, Communications"
-                  value={teamLead.functionalRole || ''}
-                  onChange={(e) => setTeamLead({ ...teamLead, functionalRole: e.target.value })}
-                />
-              </Box>
-            )}
           </Box>
 
           {/* Team Members – type to search; same Contacts/People list when onSearchPeople provided */}
@@ -450,53 +428,6 @@ const AddTeamDialog: React.FC<AddTeamDialogProps> = ({
               }}
             />
             
-            {/* Team Member Roles */}
-            {teamMembers.length > 0 && (
-              <Box sx={{ mt: 2, display: 'flex', flexDirection: 'column', gap: 2 }}>
-                <Typography variant="caption" color="text.secondary" fontWeight="bold">
-                  Assign Roles to Team Members:
-                </Typography>
-                {teamMembers.map((member, index) => (
-                  <Box key={member.id} sx={{ 
-                    p: 2, 
-                    border: '1px solid #e0e0e0', 
-                    borderRadius: 1,
-                    bgcolor: '#fafafa'
-                  }}>
-                    <Typography variant="body2" fontWeight="bold" sx={{ mb: 1.5 }}>
-                      {member.name}
-                    </Typography>
-                    <Box sx={{ display: 'flex', gap: 2 }}>
-                      <TextField
-                        fullWidth
-                        size="small"
-                        label="Constituent Role"
-                        placeholder="e.g., Leader, Potential Leader, Member, Supporter"
-                        value={member.constituentRole || ''}
-                        onChange={(e) => {
-                          const updatedMembers = [...teamMembers];
-                          updatedMembers[index] = { ...member, constituentRole: e.target.value };
-                          setTeamMembers(updatedMembers);
-                        }}
-                      />
-                      
-                      <TextField
-                        fullWidth
-                        size="small"
-                        label="Functional Role"
-                        placeholder="e.g., Member, Co-Lead, Facilitator, Communications"
-                        value={member.functionalRole || ''}
-                        onChange={(e) => {
-                          const updatedMembers = [...teamMembers];
-                          updatedMembers[index] = { ...member, functionalRole: e.target.value };
-                          setTeamMembers(updatedMembers);
-                        }}
-                      />
-                    </Box>
-                  </Box>
-                ))}
-              </Box>
-            )}
           </Box>
 
           {/* Chapter Dropdown */}
@@ -592,7 +523,7 @@ const AddTeamDialog: React.FC<AddTeamDialogProps> = ({
             label="Constituency"
             value={constituency}
             onChange={(e) => setConstituency(e.target.value)}
-            placeholder="e.g., Student activists, Community leaders, etc."
+            placeholder="Turf"
             fullWidth
             sx={{
               '& .MuiOutlinedInput-root': {

@@ -727,6 +727,57 @@ export const saveOrganizerGoal = async (data: {
 };
 
 // ============================================
+// CONTACT-ORGANIZER ASSIGNMENT API
+// ============================================
+
+export interface ContactOrganizerAssignment {
+  contact_vanid: string;
+  organizer_vanid: string;
+  firstname?: string;
+  lastname?: string;
+}
+
+export const fetchAllContactOrganizers = async (): Promise<ContactOrganizerAssignment[]> => {
+  try {
+    const response = await fetch(`${API_URL}/contact-organizers`);
+    if (!response.ok) return [];
+    const result = await response.json();
+    return result.data || [];
+  } catch (error) {
+    console.error('Error fetching contact organizers:', error);
+    return [];
+  }
+};
+
+export const addContactOrganizer = async (contactVanid: string, organizerVanid: string): Promise<boolean> => {
+  try {
+    const response = await fetch(`${API_URL}/contact-organizers`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ contact_vanid: contactVanid, organizer_vanid: organizerVanid })
+    });
+    return response.ok;
+  } catch (error) {
+    console.error('Error adding contact organizer:', error);
+    return false;
+  }
+};
+
+export const removeContactOrganizer = async (contactVanid: string, organizerVanid: string): Promise<boolean> => {
+  try {
+    const response = await fetch(`${API_URL}/contact-organizers`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ contact_vanid: contactVanid, organizer_vanid: organizerVanid })
+    });
+    return response.ok;
+  } catch (error) {
+    console.error('Error removing contact organizer:', error);
+    return false;
+  }
+};
+
+// ============================================
 // LEADER HIERARCHY API
 // ============================================
 

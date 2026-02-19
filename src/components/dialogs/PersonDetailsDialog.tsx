@@ -358,6 +358,14 @@ const PersonDetailsDialog: React.FC<PersonDetailsDialogProps> = ({
                     </Typography>
                   </>
                 )}
+                {person.organizers && person.organizers.length > 0 && (
+                  <>
+                    <Typography variant="body2" color="text.secondary">•</Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      Organizer: {person.organizers.join(', ')}
+                    </Typography>
+                  </>
+                )}
               </Box>
             )}
             {person && (person.email || person.phone) && (

@@ -1,4 +1,4 @@
-import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import * as d3 from 'd3';
 import { Box, Typography, Paper, Chip, Button, LinearProgress, FormControl, InputLabel, Select, MenuItem, Collapse, IconButton, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Tooltip, ToggleButton, ToggleButtonGroup } from '@mui/material';
 import { Star as StarIcon, Person as PersonIcon, Business as BusinessIcon, Public as PublicIcon, Groups as GroupsIcon, KeyboardArrowRight, KeyboardArrowDown } from '@mui/icons-material';
@@ -110,15 +110,17 @@ const CampaignLineGraph: React.FC<CampaignLineGraphProps> = ({
     }
   }, [barometerGoalTypeFilters, onBarometerActionsChange]);
   
-  // 3-way display mode for LeaderMetricsTable
-  const [displayMode, setDisplayMode] = useState<'nothing' | 'conversions' | 'counts'>('nothing');
-  const showConversions = displayMode === 'conversions'; // kept for any legacy refs
+  // 2-way display mode for LeaderMetricsTable
+  const [displayMode, setDisplayMode] = useState<'progress' | 'conversions'>('progress');
+  const showConversions = displayMode === 'conversions';
   
   // State for organizer goals: Map<organizer_vanid, Map<action_id, goal_value>>
   const [organizerGoalsMap, setOrganizerGoalsMap] = useState<Map<string, Map<string, number>>>(new Map());
   
   // Get all available actions for the metric dropdown (active actions only, no Pledges)
   const [availableMetrics, setAvailableMetrics] = useState<Array<{value: string, label: string}>>([]);
+  // Full action objects fetched locally (used when actionsFromDB prop is empty)
+  const [localFetchedActions, setLocalFetchedActions] = useState<any[]>([]);
   
   // Fetch available actions - filtered by selected campaigns
   useEffect(() => {
@@ -145,6 +147,7 @@ const CampaignLineGraph: React.FC<CampaignLineGraphProps> = ({
         }));
         
         setAvailableMetrics(metrics);
+        setLocalFetchedActions(activeActions);
       } catch (error) {
         console.error('Failed to load actions for metrics:', error);
       }
@@ -152,6 +155,11 @@ const CampaignLineGraph: React.FC<CampaignLineGraphProps> = ({
     
     loadActions();
   }, [selectedParentCampaigns]);
+  
+  const effectiveActionsDB = useMemo(
+    () => actionsFromDB.length > 0 ? actionsFromDB : localFetchedActions,
+    [actionsFromDB, localFetchedActions]
+  );
   
   // Fetch organizer goals for all unique organizers
   useEffect(() => {
@@ -428,7 +436,7 @@ const CampaignLineGraph: React.FC<CampaignLineGraphProps> = ({
       } else if (metricValue.startsWith('action_')) {
         // Custom action — count based on goalFieldKey if defined, otherwise count all Named
         const actionId = metricValue.replace('action_', '');
-        const actionDef = (actionsFromDB || []).find((a: any) => a.action_id === actionId);
+        const actionDef = effectiveActionsDB.find((a: any) => a.action_id === actionId);
         const goalFieldKey: string | null = actionDef?.goal_field_key || null;
 
         (listsData || [])
@@ -474,9 +482,11 @@ const CampaignLineGraph: React.FC<CampaignLineGraphProps> = ({
         
         const dbActionId = actionId;
         
-        // Get goal from organizerGoalsMap, or default to 5
+        // Get goal from organizerGoalsMap, then action's default_individual_goal, then fallback to 5
         const organizerGoals = organizerGoalsMap.get(vanId);
-        const goal = organizerGoals?.get(dbActionId) || 5;
+        const actionDef = effectiveActionsDB.find((a: any) => a.action_id === dbActionId);
+        const defaultGoal = Number(actionDef?.default_individual_goal) || 5;
+        const goal = organizerGoals?.get(dbActionId) || defaultGoal;
         
         leaderGoalsMap[vanId][actionId] = goal;
         
@@ -815,7 +825,7 @@ const CampaignLineGraph: React.FC<CampaignLineGraphProps> = ({
       othersLeaders, // Individual "other" leaders (not in hierarchy)
       topLeadersWithOthers: sortLeadersRecursive([...topLeadersWithOthers]) // Alternative with others at top level if needed
     };
-  }, [barometerGoalTypeFilters, meetingsData, listsData, userMap, leaderHierarchy, organizerGoalsMap, actionsFromDB]);
+  }, [barometerGoalTypeFilters, meetingsData, listsData, userMap, leaderHierarchy, organizerGoalsMap, effectiveActionsDB]);
 
   // Which data-source line a goal type drives (for filter: only show line when its goal type is selected)
   const goalTypeDataSource = (gt: CampaignGoalType): 'pledges' | 'meetings_membership' | 'meetings_leadership' | null => {
@@ -1965,7 +1975,7 @@ const CampaignLineGraph: React.FC<CampaignLineGraphProps> = ({
                   </Select>
                 </FormControl>
 
-                {/* 3-way display toggle — visible for all views */}
+                {/* 2-way display toggle — visible for all views */}
                 <ToggleButtonGroup
                   value={displayMode}
                   exclusive
@@ -1973,14 +1983,11 @@ const CampaignLineGraph: React.FC<CampaignLineGraphProps> = ({
                   size="small"
                   sx={{ height: 40 }}
                 >
-                  <ToggleButton value="nothing" sx={{ fontSize: '0.65rem', px: 1.5, textTransform: 'none' }}>
-                    None
+                  <ToggleButton value="progress" sx={{ fontSize: '0.65rem', px: 1.5, textTransform: 'none' }}>
+                    Progress
                   </ToggleButton>
                   <ToggleButton value="conversions" sx={{ fontSize: '0.65rem', px: 1.5, textTransform: 'none' }}>
                     Conversions
-                  </ToggleButton>
-                  <ToggleButton value="counts" sx={{ fontSize: '0.65rem', px: 1.5, textTransform: 'none' }}>
-                    Counts
                   </ToggleButton>
                 </ToggleButtonGroup>
               </Box>
@@ -2001,13 +2008,13 @@ const CampaignLineGraph: React.FC<CampaignLineGraphProps> = ({
                   // Get ACTIONS array based on selected metrics
                   const actionsForTable = unifiedActionIds.map(actionId => {
                     // First try to find the full action from the actions database
-                    const fullAction: any = actionsFromDB.find((a: any) => a.action_id === actionId);
+                    const fullAction: any = effectiveActionsDB.find((a: any) => a.action_id === actionId);
                     if (fullAction && fullAction.action_id) {
                       return {
                         id: actionId,
                         name: fullAction.action_name || fullAction.name || actionId,
                         has_goal: fullAction.has_goal !== false,
-                        fields: fullAction.fields || [] // Include fields for conversion tracking
+                        fields: fullAction.fields || []
                       };
                     }
                     // Fallback to metric
@@ -2017,7 +2024,7 @@ const CampaignLineGraph: React.FC<CampaignLineGraphProps> = ({
                     return {
                       id: actionId,
                       name: metric?.label || actionId,
-                      has_goal: true // Default to true for metrics
+                      has_goal: true
                     };
                   });
                   
@@ -2036,7 +2043,7 @@ const CampaignLineGraph: React.FC<CampaignLineGraphProps> = ({
                       leaderGoalsMap={leadersForTable.leaderGoalsMap}
                       unifiedActionIds={unifiedActionIds}
                       ACTIONS={actionsForTable}
-                      availableActions={actionsFromDB}
+                      availableActions={effectiveActionsDB}
                       pledgeSubmissions={pledgeSubmissions}
                       peopleRecords={Array.from(userMap.values())}
                       listsData={listsData}
@@ -2067,13 +2074,13 @@ const CampaignLineGraph: React.FC<CampaignLineGraphProps> = ({
                   // Get ACTIONS array based on selected metrics
                   const actionsForTable = unifiedActionIds.map(actionId => {
                     // First try to find the full action from the actions database
-                    const fullAction: any = actionsFromDB.find((a: any) => a.action_id === actionId);
+                    const fullAction: any = effectiveActionsDB.find((a: any) => a.action_id === actionId);
                     if (fullAction && fullAction.action_id) {
                       return {
                         id: actionId,
                         name: fullAction.action_name || fullAction.name || actionId,
                         has_goal: fullAction.has_goal !== false,
-                        fields: fullAction.fields || [] // Include fields for conversion tracking
+                        fields: fullAction.fields || []
                       };
                     }
                     // Fallback to metric
@@ -2083,14 +2090,10 @@ const CampaignLineGraph: React.FC<CampaignLineGraphProps> = ({
                     return {
                       id: actionId,
                       name: metric?.label || actionId,
-                      has_goal: true // Default to true for metrics
+                      has_goal: true
                     };
                   });
                   
-                  // For Leadership view: use topLeadersWithOthers to include:
-                  // 1. Core team members with their sub-leaders properly nested (e.g., Springer under Courtney)
-                  // 2. Individual "others" (people not in hierarchy, like unmatched names) flat at top level
-                  // The hierarchy structure from step 1 should be fully preserved
                   const leadersToDisplay = leadersForTable.topLeadersWithOthers || leadersForTable.leaders;
                   
                   if (leadersToDisplay.length === 0) {
@@ -2108,7 +2111,7 @@ const CampaignLineGraph: React.FC<CampaignLineGraphProps> = ({
                       leaderGoalsMap={leadersForTable.leaderGoalsMap}
                       unifiedActionIds={unifiedActionIds}
                       ACTIONS={actionsForTable}
-                      availableActions={actionsFromDB}
+                      availableActions={effectiveActionsDB}
                       pledgeSubmissions={pledgeSubmissions}
                       peopleRecords={Array.from(userMap.values())}
                       listsData={listsData}
@@ -2130,183 +2133,506 @@ const CampaignLineGraph: React.FC<CampaignLineGraphProps> = ({
                 })()}
               </>
             ) : barometerView === 'teams' ? (
-              /* ── By Team view ── */
-              <>
-              <Box sx={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
-              {barometerGoalTypeFilters.map((currentMetricFilter) => {
-                const isCustomMetric = currentMetricFilter.startsWith('action_');
-                const customActionId = isCustomMetric ? currentMetricFilter.replace('action_', '') : null;
-                const metricLabel = (() => {
-                  if (currentMetricFilter === 'meetings_membership') return 'Member 1:1s';
-                  if (currentMetricFilter === 'meetings_leadership') return 'Leader 1:1s';
-                  const m = availableMetrics.find(m => m.value === currentMetricFilter);
-                  return m?.label || currentMetricFilter;
-                })();
+              /* ── By Team view (table) ── */
+              (() => {
+                // Build per-metric data for all teams
+                const metricDefs = barometerGoalTypeFilters.map((currentMetricFilter) => {
+                  const isCustomMetric = currentMetricFilter.startsWith('action_');
+                  const customActionId = isCustomMetric ? currentMetricFilter.replace('action_', '') : null;
+                  const metricLabel = (() => {
+                    if (currentMetricFilter === 'meetings_membership') return 'Member 1:1s';
+                    if (currentMetricFilter === 'meetings_leadership') return 'Leader 1:1s';
+                    const m = availableMetrics.find(m => m.value === currentMetricFilter);
+                    return m?.label || currentMetricFilter;
+                  })();
 
-                // For each team, aggregate progress from its members
-                const actionDef = customActionId ? (actionsFromDB || []).find((a: any) => a.action_id === customActionId) : null;
-                const actionFields: Array<{ key: string; label: string }> = (actionDef?.fields || []).filter((f: any) => f.type === 'boolean' || !f.type);
-                const goalFieldKey: string | null = actionDef?.goal_field_key || null;
+                  const actionDef = customActionId ? effectiveActionsDB.find((a: any) => a.action_id === customActionId) : null;
+                  const actionFields: Array<{ key: string; label: string }> = (actionDef?.fields || []).filter((f: any) => f.type === 'boolean' || !f.type);
+                  const goalFieldKey: string | null = actionDef?.goal_field_key || null;
 
-                const teamLeaderboard = (teamsData || [])
-                  .filter((team: any) => team.isActive !== false)
-                  .map((team: any) => {
-                    const memberVanIds = new Set<string>();
-                    (team.organizers || []).forEach((o: any) => { const vid = o.id || o.vanId; if (vid) memberVanIds.add(vid.toString()); });
-                    if (team.lead?.id) memberVanIds.add(team.lead.id.toString());
-                    (team.bigQueryData?.teamMembersWithRoles || []).forEach((m: any) => { if (m.id) memberVanIds.add(m.id.toString()); });
+                  const teamLeaderboard = (teamsData || [])
+                    .filter((team: any) => team.isActive !== false)
+                    .map((team: any) => {
+                      const memberVanIds = new Set<string>();
+                      (team.organizers || []).forEach((o: any) => { const vid = o.id || o.vanId; if (vid) memberVanIds.add(vid.toString()); });
+                      if (team.lead?.id) memberVanIds.add(team.lead.id.toString());
+                      (team.bigQueryData?.teamMembersWithRoles || []).forEach((m: any) => { if (m.id) memberVanIds.add(m.id.toString()); });
 
-                    let count = 0;
-                    let namedCount = 0;
-                    const fieldCounts: Record<string, number> = {};
-                    actionFields.forEach((f: any) => { fieldCounts[f.key] = 0; });
+                      let count = 0;
+                      let namedCount = 0;
+                      const fieldCounts: Record<string, number> = {};
+                      actionFields.forEach((f: any) => { fieldCounts[f.key] = 0; });
 
-                    if (isCustomMetric && customActionId) {
-                      const namedPeople = new Set<string>();
-                      const goalPeople = new Set<string>();
-                      const fieldPeople: Record<string, Set<string>> = {};
-                      actionFields.forEach((f: any) => { fieldPeople[f.key] = new Set(); });
+                      if (isCustomMetric && customActionId) {
+                        const namedPeople = new Set<string>();
+                        const goalPeople = new Set<string>();
+                        const fieldPeople: Record<string, Set<string>> = {};
+                        actionFields.forEach((f: any) => { fieldPeople[f.key] = new Set(); });
 
-                      (listsData || [])
-                        .filter((entry: any) => entry.action_id === customActionId && memberVanIds.has(entry.organizer_vanid?.toString()))
-                        .forEach((entry: any) => {
-                          const personVanId = entry.vanid?.toString();
-                          if (!personVanId) return;
-                          namedPeople.add(personVanId);
-                          const meetsGoal = goalFieldKey
-                            ? (entry.progress?.[goalFieldKey] === true || entry.fields?.[goalFieldKey] === true)
-                            : true;
-                          if (meetsGoal) goalPeople.add(personVanId);
-                          actionFields.forEach((f: any) => {
-                            if (entry.progress?.[f.key] === true || entry.fields?.[f.key] === true) fieldPeople[f.key].add(personVanId);
+                        (listsData || [])
+                          .filter((entry: any) => entry.action_id === customActionId && memberVanIds.has(entry.organizer_vanid?.toString()))
+                          .forEach((entry: any) => {
+                            const personVanId = entry.vanid?.toString();
+                            if (!personVanId) return;
+                            namedPeople.add(personVanId);
+                            const meetsGoal = goalFieldKey
+                              ? (entry.progress?.[goalFieldKey] === true || entry.fields?.[goalFieldKey] === true)
+                              : true;
+                            if (meetsGoal) goalPeople.add(personVanId);
+                            actionFields.forEach((f: any) => {
+                              if (entry.progress?.[f.key] === true || entry.fields?.[f.key] === true) fieldPeople[f.key].add(personVanId);
+                            });
                           });
-                        });
-                      count = goalPeople.size;
-                      namedCount = namedPeople.size;
-                      actionFields.forEach((f: any) => { fieldCounts[f.key] = fieldPeople[f.key].size; });
-                    } else if (currentMetricFilter === 'meetings_membership') {
-                      count = (meetingsData || []).filter((m: any) => {
-                        const t = (m.meeting_type || '').toLowerCase();
-                        return t.includes('membership') && t.includes('one-on-one') && memberVanIds.has(m.organizer_vanid?.toString());
-                      }).length;
-                      namedCount = count;
-                    } else {
-                      count = (meetingsData || []).filter((m: any) => {
-                        const t = (m.meeting_type || '').toLowerCase();
-                        return t.includes('leadership') && t.includes('one-on-one') && memberVanIds.has(m.organizer_vanid?.toString());
-                      }).length;
-                      namedCount = count;
-                    }
+                        count = goalPeople.size;
+                        namedCount = namedPeople.size;
+                        actionFields.forEach((f: any) => { fieldCounts[f.key] = fieldPeople[f.key].size; });
+                      } else if (currentMetricFilter === 'meetings_membership') {
+                        count = (meetingsData || []).filter((m: any) => {
+                          const t = (m.meeting_type || '').toLowerCase();
+                          return t.includes('membership') && t.includes('one-on-one') && memberVanIds.has(m.organizer_vanid?.toString());
+                        }).length;
+                        namedCount = count;
+                      } else {
+                        count = (meetingsData || []).filter((m: any) => {
+                          const t = (m.meeting_type || '').toLowerCase();
+                          return t.includes('leadership') && t.includes('one-on-one') && memberVanIds.has(m.organizer_vanid?.toString());
+                        }).length;
+                        namedCount = count;
+                      }
 
-                    return { teamId: team.id, teamName: team.teamName, chapter: team.chapter, count, namedCount, fieldCounts, memberCount: memberVanIds.size };
-                  })
-                  .filter(t => t.memberCount > 0)
-                  .sort((a, b) => b.count - a.count);
+                      return { teamId: team.id, teamName: team.teamName, chapter: team.chapter, count, namedCount, fieldCounts, memberCount: memberVanIds.size };
+                    })
+                    .filter(t => t.memberCount > 0)
+                    .sort((a, b) => b.count - a.count);
 
-                const totalCount = teamLeaderboard.reduce((s, t) => s + t.count, 0);
+                  return { metricFilter: currentMetricFilter, metricLabel, actionFields, teamLeaderboard };
+                });
 
-                // Inline badges helper
-                const renderTeamBadges = (namedCount: number, fieldCounts: Record<string, number>) => {
-                  if (displayMode === 'nothing' || actionFields.length === 0) return null;
+                // Merge teams across metrics (use first metric's order)
+                const allTeamIds = new Set<string>();
+                metricDefs.forEach(md => md.teamLeaderboard.forEach(t => allTeamIds.add(t.teamId)));
+                const teamDataMap = new Map<string, Record<string, any>>();
+                metricDefs.forEach(md => {
+                  md.teamLeaderboard.forEach(t => {
+                    if (!teamDataMap.has(t.teamId)) teamDataMap.set(t.teamId, { teamName: t.teamName, chapter: t.chapter, memberCount: t.memberCount });
+                    teamDataMap.get(t.teamId)![md.metricFilter] = t;
+                  });
+                });
+                const sortedTeamIds = metricDefs[0]?.teamLeaderboard.map(t => t.teamId) || [];
+                allTeamIds.forEach(id => { if (!sortedTeamIds.includes(id)) sortedTeamIds.push(id); });
+
+                // Render extra columns helper
+                const renderExtraCells = (actionFields: Array<{ key: string; label: string }>, namedCount: number, fieldCounts: Record<string, number>) => {
+                  if (actionFields.length < 2) return null;
                   if (displayMode === 'conversions') {
-                    const pairs: Array<{ from: string; to: string; rate: number }> = [];
+                    const cells: React.ReactNode[] = [];
                     if (actionFields.length > 0) {
                       const firstCount = fieldCounts[actionFields[0].key] ?? 0;
-                      pairs.push({ from: 'Named', to: actionFields[0].label, rate: namedCount > 0 ? (firstCount / namedCount) * 100 : 0 });
+                      const rate = namedCount > 0 ? (firstCount / namedCount) * 100 : 0;
+                      cells.push(
+                        <TableCell key="conv-named" align="center" sx={{ bgcolor: '#fffef0' }}>
+                          <Typography variant="body2" sx={{ fontWeight: 600, fontSize: '0.75rem', color: rate >= 50 ? '#4caf50' : rate >= 25 ? '#ff9800' : '#f44336' }}>
+                            {rate > 0 ? `${Math.round(rate)}%` : '—'}
+                          </Typography>
+                        </TableCell>
+                      );
                     }
-                    actionFields.slice(0, -1).forEach((f: any, i: number) => {
+                    actionFields.slice(0, -1).forEach((f, i) => {
                       const nextF = actionFields[i + 1];
                       const fromCount = fieldCounts[f.key] ?? 0;
                       const toCount = fieldCounts[nextF.key] ?? 0;
-                      pairs.push({ from: f.label, to: nextF.label, rate: fromCount > 0 ? (toCount / fromCount) * 100 : 0 });
+                      const rate = fromCount > 0 ? (toCount / fromCount) * 100 : 0;
+                      cells.push(
+                        <TableCell key={`conv-${f.key}`} align="center" sx={{ bgcolor: '#fffef0' }}>
+                          <Typography variant="body2" sx={{ fontWeight: 600, fontSize: '0.75rem', color: rate >= 50 ? '#4caf50' : rate >= 25 ? '#ff9800' : '#f44336' }}>
+                            {rate > 0 ? `${Math.round(rate)}%` : '—'}
+                          </Typography>
+                        </TableCell>
+                      );
                     });
-                    return (
-                      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mt: 0.5 }}>
-                        {pairs.map(({ from, to, rate }) => (
-                          <Chip key={`${from}-${to}`} size="small" label={`${from}→${to}: ${rate > 0 ? Math.round(rate) + '%' : '—'}`}
-                            sx={{ fontSize: '0.6rem', height: 18, bgcolor: rate >= 50 ? '#e8f5e9' : rate >= 25 ? '#fff8e1' : '#ffebee',
-                              color: rate >= 50 ? '#2e7d32' : rate >= 25 ? '#f57f17' : '#c62828' }} />
-                        ))}
-                      </Box>
-                    );
+                    return cells;
                   } else {
-                    const items = [{ label: 'Named', count: namedCount }, ...actionFields.map((f: any) => ({ label: f.label, count: fieldCounts[f.key] ?? 0 }))];
-                    return (
-                      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mt: 0.5 }}>
-                        {items.map(({ label, count: c }) => (
-                          <Chip key={label} size="small" label={`${label}: ${c}`}
-                            sx={{ fontSize: '0.6rem', height: 18, bgcolor: '#f0f4ff', color: 'primary.main' }} />
-                        ))}
-                      </Box>
+                    // Progress: Named | →f1% | f1 | →f2% | f2 | ...
+                    const cells: React.ReactNode[] = [];
+                    cells.push(
+                      <TableCell key="prog-named" align="center" sx={{ bgcolor: '#f0f4ff' }}>
+                        <Typography variant="body2" sx={{ fontWeight: 600, fontSize: '0.75rem', color: 'primary.main' }}>{namedCount}</Typography>
+                      </TableCell>
                     );
+                    actionFields.forEach((f, i) => {
+                      const fromCount = i === 0 ? namedCount : (fieldCounts[actionFields[i - 1].key] ?? 0);
+                      const toCount = fieldCounts[f.key] ?? 0;
+                      const rate = fromCount > 0 ? (toCount / fromCount) * 100 : 0;
+                      cells.push(
+                        <TableCell key={`prog-conv-${f.key}`} align="center" sx={{ bgcolor: '#fffef0' }}>
+                          <Typography variant="body2" sx={{ fontWeight: 600, fontSize: '0.7rem', color: rate >= 50 ? '#4caf50' : rate >= 25 ? '#ff9800' : '#f44336' }}>
+                            {rate > 0 ? `${Math.round(rate)}%` : '—'}
+                          </Typography>
+                        </TableCell>
+                      );
+                      cells.push(
+                        <TableCell key={`prog-cnt-${f.key}`} align="center" sx={{ bgcolor: '#f0f4ff' }}>
+                          <Typography variant="body2" sx={{ fontWeight: 600, fontSize: '0.75rem' }}>{toCount}</Typography>
+                        </TableCell>
+                      );
+                    });
+                    return cells;
+                  }
+                };
+
+                // Extra header columns helper
+                const renderExtraHeaders = (actionFields: Array<{ key: string; label: string }>) => {
+                  if (actionFields.length < 2) return null;
+                  if (displayMode === 'conversions') {
+                    const headers: React.ReactNode[] = [];
+                    if (actionFields.length > 0) {
+                      headers.push(
+                        <TableCell key="conv-hdr-named" align="center" sx={{ fontWeight: 600, py: 1, minWidth: 70, bgcolor: '#fffef0', fontSize: '0.65rem' }}>
+                          Named→{actionFields[0].label}
+                        </TableCell>
+                      );
+                    }
+                    actionFields.slice(0, -1).forEach((f, i) => {
+                      const nextF = actionFields[i + 1];
+                      headers.push(
+                        <TableCell key={`conv-hdr-${f.key}`} align="center" sx={{ fontWeight: 600, py: 1, minWidth: 70, bgcolor: '#fffef0', fontSize: '0.65rem' }}>
+                          {f.label}→{nextF.label}
+                        </TableCell>
+                      );
+                    });
+                    return headers;
+                  } else {
+                    const headers: React.ReactNode[] = [];
+                    headers.push(
+                      <TableCell key="prog-hdr-named" align="center" sx={{ fontWeight: 600, py: 1, minWidth: 50, bgcolor: '#f0f4ff', fontSize: '0.65rem' }}>Named</TableCell>
+                    );
+                    actionFields.forEach((f, i) => {
+                      const fromLabel = i === 0 ? 'Named' : actionFields[i - 1].label;
+                      headers.push(
+                        <TableCell key={`prog-hdr-conv-${f.key}`} align="center" sx={{ fontWeight: 600, py: 1, minWidth: 50, bgcolor: '#fffef0', fontSize: '0.6rem' }}>
+                          →{f.label}
+                        </TableCell>
+                      );
+                      headers.push(
+                        <TableCell key={`prog-hdr-cnt-${f.key}`} align="center" sx={{ fontWeight: 600, py: 1, minWidth: 50, bgcolor: '#f0f4ff', fontSize: '0.65rem' }}>
+                          {f.label}
+                        </TableCell>
+                      );
+                    });
+                    return headers;
                   }
                 };
 
                 return (
-                  <Box key={currentMetricFilter} sx={{
-                    flex: barometerGoalTypeFilters.length === 1 ? '1' : '1 1 calc(50% - 12px)',
-                    minWidth: barometerGoalTypeFilters.length > 1 ? '400px' : 'auto',
-                    border: barometerGoalTypeFilters.length > 1 ? '1px solid' : 'none',
-                    borderColor: 'divider',
-                    borderRadius: barometerGoalTypeFilters.length > 1 ? 1 : 0,
-                    p: barometerGoalTypeFilters.length > 1 ? 2 : 0,
-                    display: 'flex', flexDirection: 'column', gap: 2, py: 1
-                  }}>
-                    {barometerGoalTypeFilters.length > 1 && (
-                      <Typography variant="h6" fontWeight="bold" color="primary" sx={{ mb: 1 }}>{metricLabel}</Typography>
-                    )}
-
-                    {/* Total bar */}
-                    <Box sx={{ width: '100%', mb: 2, pb: 2, borderBottom: '2px solid #1976d2' }}>
-                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 0.5 }}>
-                        <Typography variant="h6" sx={{ fontWeight: 700, color: 'primary.main' }}>Total</Typography>
-                        <Typography variant="h6" sx={{ fontWeight: 700, color: 'primary.main' }}>
-                          {totalCount} people
-                        </Typography>
-                      </Box>
-                      <LinearProgress variant="determinate" value={100}
-                        sx={{ height: 16, borderRadius: 1, backgroundColor: '#e0e0e0', '& .MuiLinearProgress-bar': { borderRadius: 1, backgroundColor: '#1976d2' } }} />
-                    </Box>
-
-                    {/* Team rows */}
-                    {teamLeaderboard.length === 0 ? (
-                      <Typography variant="body2" color="text.secondary">No team data available.</Typography>
-                    ) : (
-                      teamLeaderboard.map((team, idx) => {
-                        const maxCount = teamLeaderboard[0].count || 1;
-                        const pct = (team.count / maxCount) * 100;
-                        const chapterColor = getChapterColor(team.chapter?.replace(' for All', '') || '');
-                        return (
-                          <Box key={team.teamId} sx={{ width: '100%' }}>
-                            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 0.25 }}>
-                              <Box>
-                                <Typography variant="body2" fontWeight="medium">#{idx + 1} {team.teamName}</Typography>
-                                {team.chapter && (
-                                  <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.65rem' }}>
-                                    {team.chapter} · {team.memberCount} {team.memberCount === 1 ? 'member' : 'members'}
+                  <TableContainer sx={{ maxHeight: 'calc(100vh - 360px)', minHeight: '400px' }}>
+                    <Table size="small" stickyHeader>
+                      <TableHead>
+                        <TableRow>
+                          <TableCell sx={{ fontWeight: 600, py: 1, minWidth: 150 }}>Team</TableCell>
+                          <TableCell align="center" sx={{ fontWeight: 600, py: 1, minWidth: 70 }}>Members</TableCell>
+                          {metricDefs.map(md => (
+                            <React.Fragment key={md.metricFilter}>
+                              <TableCell align="center" sx={{ fontWeight: 600, py: 1, minWidth: 80 }}>{md.metricLabel}</TableCell>
+                              {renderExtraHeaders(md.actionFields)}
+                            </React.Fragment>
+                          ))}
+                        </TableRow>
+                      </TableHead>
+                      <TableBody>
+                        {/* Summary row */}
+                        <TableRow sx={{ bgcolor: '#e3f2fd', borderBottom: '2px solid #1976d2' }}>
+                          <TableCell sx={{ py: 1, fontWeight: 700, color: 'primary.main' }}>Total</TableCell>
+                          <TableCell align="center" sx={{ py: 1 }}>
+                            <Typography variant="body2" sx={{ fontWeight: 700, color: 'primary.main' }}>
+                              {sortedTeamIds.reduce((sum, id) => sum + (teamDataMap.get(id)?.memberCount || 0), 0)}
+                            </Typography>
+                          </TableCell>
+                          {metricDefs.map(md => {
+                            const totalCount = md.teamLeaderboard.reduce((s, t) => s + t.count, 0);
+                            const totalNamed = md.teamLeaderboard.reduce((s, t) => s + t.namedCount, 0);
+                            const totalFieldCounts: Record<string, number> = {};
+                            md.actionFields.forEach(f => {
+                              totalFieldCounts[f.key] = md.teamLeaderboard.reduce((s, t) => s + (t.fieldCounts[f.key] ?? 0), 0);
+                            });
+                            return (
+                              <React.Fragment key={md.metricFilter}>
+                                <TableCell align="center" sx={{ py: 1 }}>
+                                  <Typography variant="body2" sx={{ fontWeight: 700, color: 'primary.main' }}>{totalCount}</Typography>
+                                </TableCell>
+                                {md.actionFields.length >= 2 && renderExtraCells(md.actionFields, totalNamed, totalFieldCounts)}
+                              </React.Fragment>
+                            );
+                          })}
+                        </TableRow>
+                        {/* Team rows */}
+                        {sortedTeamIds.map((teamId) => {
+                          const teamInfo = teamDataMap.get(teamId);
+                          if (!teamInfo) return null;
+                          return (
+                            <TableRow key={teamId} hover>
+                              <TableCell>
+                                <Typography variant="body2" sx={{ fontWeight: 500, fontSize: '0.8rem' }}>{teamInfo.teamName}</Typography>
+                                {teamInfo.chapter && (
+                                  <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.65rem', display: 'block' }}>
+                                    {teamInfo.chapter}
                                   </Typography>
                                 )}
-                              </Box>
-                              <Typography variant="body2" color="text.secondary">{team.count} people</Typography>
-                            </Box>
-                            <LinearProgress variant="determinate" value={Math.min(100, pct)}
-                              sx={{ height: 10, borderRadius: 1, backgroundColor: 'action.hover',
-                                '& .MuiLinearProgress-bar': { borderRadius: 1, backgroundColor: chapterColor || '#1976d2' } }} />
-                            {renderTeamBadges(team.namedCount, team.fieldCounts)}
-                          </Box>
-                        );
-                      })
-                    )}
-                  </Box>
+                              </TableCell>
+                              <TableCell align="center">
+                                <Typography variant="body2" sx={{ fontSize: '0.8rem' }}>{teamInfo.memberCount}</Typography>
+                              </TableCell>
+                              {metricDefs.map(md => {
+                                const teamData = teamInfo[md.metricFilter];
+                                const count = teamData?.count ?? 0;
+                                const namedCount = teamData?.namedCount ?? 0;
+                                const fieldCounts = teamData?.fieldCounts ?? {};
+                                return (
+                                  <React.Fragment key={md.metricFilter}>
+                                    <TableCell align="center">
+                                      <Typography variant="body2" sx={{ fontWeight: 600, fontSize: '0.8rem' }}>{count}</Typography>
+                                    </TableCell>
+                                    {md.actionFields.length >= 2 && renderExtraCells(md.actionFields, namedCount, fieldCounts)}
+                                  </React.Fragment>
+                                );
+                              })}
+                            </TableRow>
+                          );
+                        })}
+                      </TableBody>
+                    </Table>
+                  </TableContainer>
                 );
-              })}
-              </Box>
-              </>
+              })()
+            ) : barometerView === 'chapters' ? (
+              /* ── By Section/Class table view ── */
+              (() => {
+                const metricDefs = barometerGoalTypeFilters.map((currentMetricFilter) => {
+                  const isCustomMetric = currentMetricFilter.startsWith('action_');
+                  const customActionId = isCustomMetric ? currentMetricFilter.replace('action_', '') : null;
+                  const metricLabel = (() => {
+                    if (currentMetricFilter === 'meetings_membership') return 'Member 1:1s';
+                    if (currentMetricFilter === 'meetings_leadership') return 'Leader 1:1s';
+                    const m = availableMetrics.find(m => m.value === currentMetricFilter);
+                    return m?.label || currentMetricFilter;
+                  })();
+
+                  const actionDef = customActionId ? effectiveActionsDB.find((a: any) => a.action_id === customActionId) : null;
+                  const actionFields: Array<{ key: string; label: string }> = (actionDef?.fields || []).filter((f: any) => f.type === 'boolean' || !f.type);
+                  const goalFieldKey: string | null = actionDef?.goal_field_key || null;
+
+                  type ChapterRowData = { chapter: string; count: number; goal: number; namedCount: number; fieldCounts: Record<string, number> };
+                  let chapterRows: ChapterRowData[] = [];
+
+                  if (isCustomMetric && customActionId) {
+                    type ChData = { count: number; goal: number; namedPeople: Set<string>; goalPeople: Set<string>; fieldPeople: Map<string, Set<string>> };
+                    const chapterMap = new Map<string, ChData>();
+                    const mkCh = (goal = 0): ChData => ({
+                      count: 0, goal, namedPeople: new Set(), goalPeople: new Set(),
+                      fieldPeople: new Map(actionFields.map(f => [f.key, new Set<string>()])),
+                    });
+
+                    if (actionDef?.goal_type) {
+                      selectedCampaignObjs.forEach(campaign => {
+                        const mg = campaign.goalTypes.find(gt => gt.id === actionDef.goal_type);
+                        if (mg?.chapterGoals) {
+                          Object.entries(mg.chapterGoals).forEach(([ch, g]) => chapterMap.set(ch, mkCh(g as number)));
+                        }
+                      });
+                    }
+
+                    (listsData || [])
+                      .filter((entry: any) => entry.action_id === customActionId)
+                      .forEach((entry: any) => {
+                        const pid = entry.vanid?.toString();
+                        if (!pid) return;
+                        let chapter = 'Unknown';
+                        if (entry.chapter) chapter = entry.chapter;
+                        else if (userMap.has(pid)) chapter = userMap.get(pid)?.chapter || 'Unknown';
+                        if (!chapterMap.has(chapter)) chapterMap.set(chapter, mkCh());
+                        const ch = chapterMap.get(chapter)!;
+                        ch.namedPeople.add(pid);
+                        const meetsGoal = goalFieldKey
+                          ? (entry.progress?.[goalFieldKey] === true || entry.fields?.[goalFieldKey] === true)
+                          : true;
+                        if (meetsGoal) ch.goalPeople.add(pid);
+                        actionFields.forEach(f => {
+                          if (entry.progress?.[f.key] === true || entry.fields?.[f.key] === true) ch.fieldPeople.get(f.key)?.add(pid);
+                        });
+                        ch.count = ch.goalPeople.size;
+                      });
+
+                    chapterRows = Array.from(chapterMap.entries())
+                      .map(([chapter, data]) => ({
+                        chapter, count: data.count, goal: data.goal,
+                        namedCount: data.namedPeople.size,
+                        fieldCounts: Object.fromEntries(Array.from(data.fieldPeople.entries()).map(([k, s]) => [k, s.size])),
+                      }))
+                      .sort((a, b) => b.count - a.count);
+                  } else {
+                    chapterRows = chapterLeaderboard.map(c => ({
+                      chapter: c.chapter, count: c.count, goal: c.goal, namedCount: c.count, fieldCounts: {},
+                    }));
+                  }
+
+                  return { metricFilter: currentMetricFilter, metricLabel, actionFields, chapterRows };
+                });
+
+                // Merge chapters across metrics
+                const allChapters = new Set<string>();
+                metricDefs.forEach(md => md.chapterRows.forEach(r => allChapters.add(r.chapter)));
+                const chapterDataMap = new Map<string, Record<string, any>>();
+                metricDefs.forEach(md => {
+                  md.chapterRows.forEach(r => {
+                    if (!chapterDataMap.has(r.chapter)) chapterDataMap.set(r.chapter, { chapter: r.chapter });
+                    chapterDataMap.get(r.chapter)![md.metricFilter] = r;
+                  });
+                });
+                const sortedChapters = metricDefs[0]?.chapterRows.map(r => r.chapter) || [];
+                allChapters.forEach(ch => { if (!sortedChapters.includes(ch)) sortedChapters.push(ch); });
+
+                const renderExtraCells = (actionFields: Array<{ key: string; label: string }>, namedCount: number, fieldCounts: Record<string, number>) => {
+                  if (actionFields.length < 2) return null;
+                  if (displayMode === 'conversions') {
+                    const cells: React.ReactNode[] = [];
+                    if (actionFields.length > 0) {
+                      const fc = fieldCounts[actionFields[0].key] ?? 0;
+                      const rate = namedCount > 0 ? (fc / namedCount) * 100 : 0;
+                      cells.push(<TableCell key="conv-named" align="center" sx={{ bgcolor: '#fffef0' }}>
+                        <Typography variant="body2" sx={{ fontWeight: 600, fontSize: '0.75rem', color: rate >= 50 ? '#4caf50' : rate >= 25 ? '#ff9800' : '#f44336' }}>{rate > 0 ? `${Math.round(rate)}%` : '—'}</Typography>
+                      </TableCell>);
+                    }
+                    actionFields.slice(0, -1).forEach((f, i) => {
+                      const nextF = actionFields[i + 1];
+                      const fromC = fieldCounts[f.key] ?? 0;
+                      const toC = fieldCounts[nextF.key] ?? 0;
+                      const rate = fromC > 0 ? (toC / fromC) * 100 : 0;
+                      cells.push(<TableCell key={`conv-${f.key}`} align="center" sx={{ bgcolor: '#fffef0' }}>
+                        <Typography variant="body2" sx={{ fontWeight: 600, fontSize: '0.75rem', color: rate >= 50 ? '#4caf50' : rate >= 25 ? '#ff9800' : '#f44336' }}>{rate > 0 ? `${Math.round(rate)}%` : '—'}</Typography>
+                      </TableCell>);
+                    });
+                    return cells;
+                  } else {
+                    const cells: React.ReactNode[] = [];
+                    cells.push(<TableCell key="prog-named" align="center" sx={{ bgcolor: '#f0f4ff' }}>
+                      <Typography variant="body2" sx={{ fontWeight: 600, fontSize: '0.75rem', color: 'primary.main' }}>{namedCount}</Typography>
+                    </TableCell>);
+                    actionFields.forEach((f, i) => {
+                      const fromC = i === 0 ? namedCount : (fieldCounts[actionFields[i - 1].key] ?? 0);
+                      const toC = fieldCounts[f.key] ?? 0;
+                      const rate = fromC > 0 ? (toC / fromC) * 100 : 0;
+                      cells.push(<TableCell key={`prog-conv-${f.key}`} align="center" sx={{ bgcolor: '#fffef0' }}>
+                        <Typography variant="body2" sx={{ fontWeight: 600, fontSize: '0.7rem', color: rate >= 50 ? '#4caf50' : rate >= 25 ? '#ff9800' : '#f44336' }}>{rate > 0 ? `${Math.round(rate)}%` : '—'}</Typography>
+                      </TableCell>);
+                      cells.push(<TableCell key={`prog-cnt-${f.key}`} align="center" sx={{ bgcolor: '#f0f4ff' }}>
+                        <Typography variant="body2" sx={{ fontWeight: 600, fontSize: '0.75rem' }}>{toC}</Typography>
+                      </TableCell>);
+                    });
+                    return cells;
+                  }
+                };
+
+                const renderExtraHeaders = (actionFields: Array<{ key: string; label: string }>) => {
+                  if (actionFields.length < 2) return null;
+                  if (displayMode === 'conversions') {
+                    const headers: React.ReactNode[] = [];
+                    if (actionFields.length > 0) {
+                      headers.push(<TableCell key="conv-hdr-named" align="center" sx={{ fontWeight: 600, py: 1, minWidth: 70, bgcolor: '#fffef0', fontSize: '0.65rem' }}>Named→{actionFields[0].label}</TableCell>);
+                    }
+                    actionFields.slice(0, -1).forEach((f, i) => {
+                      const nextF = actionFields[i + 1];
+                      headers.push(<TableCell key={`conv-hdr-${f.key}`} align="center" sx={{ fontWeight: 600, py: 1, minWidth: 70, bgcolor: '#fffef0', fontSize: '0.65rem' }}>{f.label}→{nextF.label}</TableCell>);
+                    });
+                    return headers;
+                  } else {
+                    const headers: React.ReactNode[] = [];
+                    headers.push(<TableCell key="prog-hdr-named" align="center" sx={{ fontWeight: 600, py: 1, minWidth: 50, bgcolor: '#f0f4ff', fontSize: '0.65rem' }}>Named</TableCell>);
+                    actionFields.forEach((f, i) => {
+                      headers.push(<TableCell key={`prog-hdr-conv-${f.key}`} align="center" sx={{ fontWeight: 600, py: 1, minWidth: 50, bgcolor: '#fffef0', fontSize: '0.6rem' }}>→{f.label}</TableCell>);
+                      headers.push(<TableCell key={`prog-hdr-cnt-${f.key}`} align="center" sx={{ fontWeight: 600, py: 1, minWidth: 50, bgcolor: '#f0f4ff', fontSize: '0.65rem' }}>{f.label}</TableCell>);
+                    });
+                    return headers;
+                  }
+                };
+
+                return (
+                  <TableContainer sx={{ maxHeight: 'calc(100vh - 360px)', minHeight: '400px' }}>
+                    <Table size="small" stickyHeader>
+                      <TableHead>
+                        <TableRow>
+                          <TableCell sx={{ fontWeight: 600, py: 1, minWidth: 150 }}>Section</TableCell>
+                          {metricDefs.map(md => (
+                            <React.Fragment key={md.metricFilter}>
+                              <TableCell align="center" sx={{ fontWeight: 600, py: 1, minWidth: 80 }}>{md.metricLabel}</TableCell>
+                              <TableCell align="center" sx={{ fontWeight: 600, py: 1, minWidth: 60, fontSize: '0.65rem' }}>Goal</TableCell>
+                              {renderExtraHeaders(md.actionFields)}
+                            </React.Fragment>
+                          ))}
+                        </TableRow>
+                      </TableHead>
+                      <TableBody>
+                        {/* Summary row */}
+                        <TableRow sx={{ bgcolor: '#e3f2fd', borderBottom: '2px solid #1976d2' }}>
+                          <TableCell sx={{ py: 1, fontWeight: 700, color: 'primary.main' }}>Total</TableCell>
+                          {metricDefs.map(md => {
+                            const totalCount = md.chapterRows.reduce((s, r) => s + r.count, 0);
+                            const totalGoal = md.chapterRows.reduce((s, r) => s + r.goal, 0);
+                            const totalNamed = md.chapterRows.reduce((s, r) => s + r.namedCount, 0);
+                            const totalFieldCounts: Record<string, number> = {};
+                            md.actionFields.forEach(f => {
+                              totalFieldCounts[f.key] = md.chapterRows.reduce((s, r) => s + (r.fieldCounts[f.key] ?? 0), 0);
+                            });
+                            return (
+                              <React.Fragment key={md.metricFilter}>
+                                <TableCell align="center" sx={{ py: 1 }}>
+                                  <Typography variant="body2" sx={{ fontWeight: 700, color: 'primary.main' }}>{totalCount}</Typography>
+                                </TableCell>
+                                <TableCell align="center" sx={{ py: 1 }}>
+                                  <Typography variant="body2" sx={{ fontWeight: 700, color: 'primary.main' }}>{totalGoal > 0 ? totalGoal : '—'}</Typography>
+                                </TableCell>
+                                {md.actionFields.length >= 2 && renderExtraCells(md.actionFields, totalNamed, totalFieldCounts)}
+                              </React.Fragment>
+                            );
+                          })}
+                        </TableRow>
+                        {/* Chapter rows */}
+                        {sortedChapters.map((chapter) => {
+                          const chapterInfo = chapterDataMap.get(chapter);
+                          if (!chapterInfo) return null;
+                          return (
+                            <TableRow key={chapter} hover>
+                              <TableCell>
+                                <Typography variant="body2" sx={{ fontWeight: 500, fontSize: '0.8rem' }}>{chapter}</Typography>
+                              </TableCell>
+                              {metricDefs.map(md => {
+                                const row = chapterInfo[md.metricFilter];
+                                const count = row?.count ?? 0;
+                                const goal = row?.goal ?? 0;
+                                const namedCount = row?.namedCount ?? 0;
+                                const fieldCounts = row?.fieldCounts ?? {};
+                                return (
+                                  <React.Fragment key={md.metricFilter}>
+                                    <TableCell align="center">
+                                      <Typography variant="body2" sx={{ fontWeight: 600, fontSize: '0.8rem' }}>{count}</Typography>
+                                    </TableCell>
+                                    <TableCell align="center">
+                                      <Typography variant="body2" sx={{ fontSize: '0.75rem', color: 'text.secondary' }}>{goal > 0 ? goal : '—'}</Typography>
+                                    </TableCell>
+                                    {md.actionFields.length >= 2 && renderExtraCells(md.actionFields, namedCount, fieldCounts)}
+                                  </React.Fragment>
+                                );
+                              })}
+                            </TableRow>
+                          );
+                        })}
+                      </TableBody>
+                    </Table>
+                  </TableContainer>
+                );
+              })()
             ) : (
-              /* For federation/chapters views, render multiple barometers side-by-side */
+              /* Federation view - render barometers side-by-side */
               <Box sx={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
               {barometerGoalTypeFilters.map((currentMetricFilter, metricIndex) => {
-              // Helper to get metric-specific label
               const getMetricLabel = (metric: string) => {
                 if (metric === 'meetings_membership') return 'Member 1:1s';
                 if (metric === 'meetings_leadership') return 'Leader 1:1s';
@@ -2314,10 +2640,7 @@ const CampaignLineGraph: React.FC<CampaignLineGraphProps> = ({
                 return customMetric?.label || metric;
               };
               
-              // Helper to check if this is a custom action metric
               const isCustomAction = (metric: string) => metric.startsWith('action_');
-              
-              // Helper to get action ID from metric value
               const getActionId = (metric: string) => metric.replace('action_', '');
               
               const metricLabel = getMetricLabel(currentMetricFilter);
@@ -2330,14 +2653,13 @@ const CampaignLineGraph: React.FC<CampaignLineGraphProps> = ({
                   flexDirection: 'column', 
                   gap: 2, 
                   py: 1,
-                  flex: barometerGoalTypeFilters.length === 1 ? '1' : '1 1 calc(50% - 12px)', // Full width if single, 50% if multiple
-                  minWidth: barometerGoalTypeFilters.length > 1 ? '400px' : 'auto', // Minimum width for readability
+                  flex: barometerGoalTypeFilters.length === 1 ? '1' : '1 1 calc(50% - 12px)',
+                  minWidth: barometerGoalTypeFilters.length > 1 ? '400px' : 'auto',
                   border: barometerGoalTypeFilters.length > 1 ? '1px solid' : 'none',
                   borderColor: 'divider',
                   borderRadius: barometerGoalTypeFilters.length > 1 ? 1 : 0,
                   p: barometerGoalTypeFilters.length > 1 ? 2 : 0
                 }}>
-              {/* Metric Title */}
               {barometerGoalTypeFilters.length > 1 && (
                 <Typography variant="h6" fontWeight="bold" color="primary" sx={{ mb: 1 }}>
                   {metricLabel}
@@ -2345,59 +2667,71 @@ const CampaignLineGraph: React.FC<CampaignLineGraphProps> = ({
               )}
               
               {/* Full Federation View */}
-              {barometerView === 'federation' && (() => {
-                // Calculate total across all chapters/people
+              {(() => {
                 let totalCount = 0;
+                let totalNamed = 0;
+                const actionDef = isCustomMetric && customActionId
+                  ? effectiveActionsDB.find((a: any) => a.action_id === customActionId)
+                  : null;
+                const actionFields: Array<{ key: string; label: string }> = (actionDef?.fields || []).filter((f: any) => f.type === 'boolean' || !f.type);
+                const goalFieldKey: string | null = actionDef?.goal_field_key || null;
+                const fieldCounts: Record<string, number> = {};
+                actionFields.forEach(f => { fieldCounts[f.key] = 0; });
                 
                 if (isCustomMetric && customActionId) {
-                  // Count unique people — filtered by goalFieldKey if set on the action
-                  const actionDef = (actionsFromDB || []).find((a: any) => a.action_id === customActionId);
-                  const goalFieldKey: string | null = actionDef?.goal_field_key || null;
-                  const uniquePeople = new Set<string>();
+                  const namedPeople = new Set<string>();
+                  const goalPeople = new Set<string>();
+                  const fieldPeople: Record<string, Set<string>> = {};
+                  actionFields.forEach(f => { fieldPeople[f.key] = new Set(); });
+
                   (listsData || [])
                     .filter((entry: any) => entry.action_id === customActionId)
                     .forEach((entry: any) => {
                       const personVanId = entry.vanid?.toString();
                       if (!personVanId) return;
+                      namedPeople.add(personVanId);
                       const meetsGoal = goalFieldKey
                         ? (entry.progress?.[goalFieldKey] === true || entry.fields?.[goalFieldKey] === true)
                         : true;
-                      if (meetsGoal) uniquePeople.add(personVanId);
+                      if (meetsGoal) goalPeople.add(personVanId);
+                      actionFields.forEach(f => {
+                        if (entry.progress?.[f.key] === true || entry.fields?.[f.key] === true) fieldPeople[f.key].add(personVanId);
+                      });
                     });
-                  totalCount = uniquePeople.size;
-                  
-                  // Note: Custom actions already include "others" in uniquePeople count
-                  // since listsData includes all entries regardless of hierarchy
+                  totalCount = goalPeople.size;
+                  totalNamed = namedPeople.size;
+                  actionFields.forEach(f => { fieldCounts[f.key] = fieldPeople[f.key].size; });
                 } else if (currentMetricFilter === 'meetings_membership') {
                   totalCount = (meetingsData || []).filter(m => {
                     const t = (m.meeting_type || '').toLowerCase();
                     return t.includes('membership') && t.includes('one-on-one');
                   }).length;
+                  totalNamed = totalCount;
                 } else {
                   totalCount = (meetingsData || []).filter(m => {
                     const t = (m.meeting_type || '').toLowerCase();
                     return t.includes('leadership') && t.includes('one-on-one');
                   }).length;
+                  totalNamed = totalCount;
                 }
                 
-                // Use campaign goal from parent campaign instead of summing chapter goals
-                // Find the matching goal type from the selected campaigns
+                // Determine goal: campaign goal first, then default_individual_goal
                 let totalGoal = 0;
-                
-                // For custom actions, find the action's goal_type and match with campaign goals
-                if (isCustomMetric && customActionId && actionsFromDB) {
-                  const actionDef = actionsFromDB.find((a: any) => a.action_id === customActionId);
-                  if (actionDef && actionDef.goal_type) {
-                    // Find campaign goal that matches this action's goal_type
+                if (isCustomMetric && customActionId && effectiveActionsDB.length > 0) {
+                  const ad = effectiveActionsDB.find((a: any) => a.action_id === customActionId);
+                  if (ad && ad.goal_type) {
                     for (const campaign of selectedCampaignObjs) {
-                      const matchingGoal = campaign.goalTypes.find(gt => gt.id === actionDef.goal_type);
+                      const matchingGoal = campaign.goalTypes.find(gt => gt.id === ad.goal_type);
                       if (matchingGoal) {
                         totalGoal = Math.max(totalGoal, matchingGoal.totalTarget);
                       }
                     }
                   }
+                  // Fallback to default_individual_goal if no campaign goal
+                  if (totalGoal === 0 && ad?.default_individual_goal) {
+                    totalGoal = Number(ad.default_individual_goal);
+                  }
                 } else {
-                  // For built-in metrics (pledges, meetings), match by dataSource
                   for (const campaign of selectedCampaignObjs) {
                     const matchingGoal = campaign.goalTypes.find(gt => 
                       gt.dataSource === currentMetricFilter || gt.id === currentMetricFilter
@@ -2410,7 +2744,6 @@ const CampaignLineGraph: React.FC<CampaignLineGraphProps> = ({
                 
                 const pct = totalGoal > 0 ? Math.min(100, (totalCount / totalGoal) * 100) : 0;
                 const isComplete = totalGoal > 0 && totalCount >= totalGoal;
-                
                 const unitLabel = metricLabel;
 
                 return (
@@ -2427,12 +2760,12 @@ const CampaignLineGraph: React.FC<CampaignLineGraphProps> = ({
                           </Typography>
                         </Box>
                         <Typography variant="h6" color="text.secondary" fontWeight="medium">
-                          {totalCount.toLocaleString()} / {totalGoal.toLocaleString()} ({Math.round(pct)}%)
+                          {totalCount.toLocaleString()} / {totalGoal > 0 ? totalGoal.toLocaleString() : '—'} {totalGoal > 0 ? `(${Math.round(pct)}%)` : ''}
                         </Typography>
                       </Box>
                       <LinearProgress
                         variant="determinate"
-                        value={pct}
+                        value={totalGoal > 0 ? pct : 0}
                         sx={{
                           height: 16,
                           borderRadius: 2,
@@ -2450,405 +2783,66 @@ const CampaignLineGraph: React.FC<CampaignLineGraphProps> = ({
                             label="Goal Achieved!"
                             onClick={(e) => e.stopPropagation()} 
                             size="small"
-                            sx={{ 
-                              backgroundColor: '#4caf50',
-                              color: 'white',
-                              fontWeight: 'bold'
-                            }}
+                            sx={{ backgroundColor: '#4caf50', color: 'white', fontWeight: 'bold' }}
                           />
                         </Box>
                       )}
                     </Box>
-                    <Typography variant="body2" color="text.secondary" sx={{ mt: 2, fontStyle: 'italic' }}>
-                      This represents the combined progress across all teams and individuals in the class.
-                    </Typography>
+
+                    {/* Phase breakdown table */}
+                    {actionFields.length >= 2 && (
+                      <TableContainer sx={{ mt: 2 }}>
+                        <Table size="small">
+                          <TableHead>
+                            <TableRow>
+                              <TableCell sx={{ fontWeight: 600, bgcolor: '#f0f4ff', fontSize: '0.75rem' }}>Named</TableCell>
+                              {actionFields.map((f, i) => {
+                                const fromLabel = i === 0 ? 'Named' : actionFields[i - 1].label;
+                                return (
+                                  <React.Fragment key={f.key}>
+                                    <TableCell align="center" sx={{ fontWeight: 600, bgcolor: '#fffef0', fontSize: '0.7rem' }}>
+                                      {fromLabel}→{f.label}
+                                    </TableCell>
+                                    <TableCell align="center" sx={{ fontWeight: 600, bgcolor: '#f0f4ff', fontSize: '0.75rem' }}>
+                                      {f.label}
+                                    </TableCell>
+                                  </React.Fragment>
+                                );
+                              })}
+                            </TableRow>
+                          </TableHead>
+                          <TableBody>
+                            <TableRow>
+                              <TableCell sx={{ bgcolor: '#f0f4ff' }}>
+                                <Typography variant="body2" sx={{ fontWeight: 700, fontSize: '0.85rem', color: 'primary.main' }}>
+                                  {totalNamed}
+                                </Typography>
+                              </TableCell>
+                              {actionFields.map((f, i) => {
+                                const fromCount = i === 0 ? totalNamed : fieldCounts[actionFields[i - 1].key];
+                                const toCount = fieldCounts[f.key];
+                                const rate = fromCount > 0 ? (toCount / fromCount) * 100 : 0;
+                                return (
+                                  <React.Fragment key={f.key}>
+                                    <TableCell align="center" sx={{ bgcolor: '#fffef0' }}>
+                                      <Typography variant="body2" sx={{ fontWeight: 600, fontSize: '0.8rem', color: rate >= 50 ? '#4caf50' : rate >= 25 ? '#ff9800' : '#f44336' }}>
+                                        {rate > 0 ? `${Math.round(rate)}%` : '—'}
+                                      </Typography>
+                                    </TableCell>
+                                    <TableCell align="center" sx={{ bgcolor: '#f0f4ff' }}>
+                                      <Typography variant="body2" sx={{ fontWeight: 700, fontSize: '0.85rem' }}>
+                                        {toCount}
+                                      </Typography>
+                                    </TableCell>
+                                  </React.Fragment>
+                                );
+                              })}
+                            </TableRow>
+                          </TableBody>
+                        </Table>
+                      </TableContainer>
+                    )}
                   </>
-                );
-              })()}
-              
-              {/* Chapters Leaderboard */}
-              {barometerView === 'chapters' && (() => {
-                // For custom actions, calculate chapter leaderboard from listsData
-                if (isCustomMetric && customActionId) {
-                  const actionDef = (actionsFromDB || []).find((a: any) => a.action_id === customActionId);
-                  const actionFields: Array<{ key: string; label: string }> = (actionDef?.fields || []).filter((f: any) => f.type === 'boolean' || !f.type);
-                  const goalFieldKey: string | null = actionDef?.goal_field_key || null;
-
-                  type ChapterData = { count: number; goal: number; namedPeople: Set<string>; goalPeople: Set<string>; fieldPeople: Map<string, Set<string>> };
-                  const chapterMap = new Map<string, ChapterData>();
-
-                  const mkChapter = (goal = 0): ChapterData => ({
-                    count: 0, goal,
-                    namedPeople: new Set(),
-                    goalPeople: new Set(),
-                    fieldPeople: new Map(actionFields.map((f: any) => [f.key, new Set<string>()])),
-                  });
-
-                  // Initialize with campaign chapter goals
-                  if (actionDef?.goal_type) {
-                    selectedCampaignObjs.forEach(campaign => {
-                      const matchingGoal = campaign.goalTypes.find(gt => gt.id === actionDef.goal_type);
-                      if (matchingGoal?.chapterGoals) {
-                        Object.entries(matchingGoal.chapterGoals).forEach(([chapter, chapterGoal]) => {
-                          chapterMap.set(chapter, mkChapter(chapterGoal as number));
-                        });
-                      }
-                    });
-                  }
-
-                  // Aggregate per-person, per-field counts
-                  (listsData || [])
-                    .filter((entry: any) => entry.action_id === customActionId)
-                    .forEach((entry: any) => {
-                      const personVanId = entry.vanid?.toString();
-                      if (!personVanId) return;
-                      let chapter = 'Unknown';
-                      if (entry.chapter) chapter = entry.chapter;
-                      else if (userMap.has(personVanId)) chapter = userMap.get(personVanId)?.chapter || 'Unknown';
-                      if (!chapterMap.has(chapter)) chapterMap.set(chapter, mkChapter());
-                      const ch = chapterMap.get(chapter)!;
-                      ch.namedPeople.add(personVanId);
-                      const meetsGoal = goalFieldKey
-                        ? (entry.progress?.[goalFieldKey] === true || entry.fields?.[goalFieldKey] === true)
-                        : true;
-                      if (meetsGoal) ch.goalPeople.add(personVanId);
-                      actionFields.forEach((f: any) => {
-                        if (entry.progress?.[f.key] === true || entry.fields?.[f.key] === true) {
-                          ch.fieldPeople.get(f.key)?.add(personVanId);
-                        }
-                      });
-                      ch.count = ch.goalPeople.size;
-                    });
-
-                  const customChapterLeaderboard = Array.from(chapterMap.entries())
-                    .map(([chapter, data]) => ({
-                      chapter,
-                      count: data.count,
-                      goal: data.goal,
-                      namedCount: data.namedPeople.size,
-                      fieldCounts: Object.fromEntries(Array.from(data.fieldPeople.entries()).map(([k, s]) => [k, s.size])),
-                    }))
-                    .sort((a, b) => b.count - a.count);
-
-                  if (customChapterLeaderboard.length === 0) {
-                    return <Typography variant="body2" color="text.secondary">No data available.</Typography>;
-                  }
-
-                  // Helper: render inline conversion/count badges for a row
-                  const renderInlineBadges = (namedCount: number, fieldCounts: Record<string, number>, goal: number) => {
-                    if (displayMode === 'nothing' || actionFields.length === 0) return null;
-                    if (displayMode === 'conversions') {
-                      const pairs: Array<{ from: string; to: string; rate: number }> = [];
-                      // Named → first field
-                      if (actionFields.length > 0) {
-                        const firstCount = fieldCounts[actionFields[0].key] ?? 0;
-                        pairs.push({ from: 'Named', to: actionFields[0].label, rate: namedCount > 0 ? (firstCount / namedCount) * 100 : 0 });
-                      }
-                      // Consecutive field pairs
-                      actionFields.slice(0, -1).forEach((f: any, i: number) => {
-                        const nextF = actionFields[i + 1];
-                        const fromCount = fieldCounts[f.key] ?? 0;
-                        const toCount = fieldCounts[nextF.key] ?? 0;
-                        pairs.push({ from: f.label, to: nextF.label, rate: fromCount > 0 ? (toCount / fromCount) * 100 : 0 });
-                      });
-                      return (
-                        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mt: 0.5 }}>
-                          {pairs.map(({ from, to, rate }) => (
-                            <Chip key={`${from}-${to}`} size="small" label={`${from}→${to}: ${rate > 0 ? Math.round(rate) + '%' : '—'}`}
-                              sx={{ fontSize: '0.6rem', height: 18, bgcolor: rate >= 50 ? '#e8f5e9' : rate >= 25 ? '#fff8e1' : '#ffebee',
-                                color: rate >= 50 ? '#2e7d32' : rate >= 25 ? '#f57f17' : '#c62828' }} />
-                          ))}
-                        </Box>
-                      );
-                    } else { // counts
-                      const items = [
-                        { label: 'Named', count: namedCount },
-                        ...actionFields.map((f: any) => ({ label: f.label, count: fieldCounts[f.key] ?? 0 })),
-                      ];
-                      return (
-                        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mt: 0.5 }}>
-                          {items.map(({ label, count: c }) => (
-                            <Chip key={label} size="small" label={`${label}: ${c}${goal > 0 ? '/' + goal : ''}`}
-                              sx={{ fontSize: '0.6rem', height: 18, bgcolor: '#f0f4ff', color: 'primary.main' }} />
-                          ))}
-                        </Box>
-                      );
-                    }
-                  };
-                  
-                  return (
-                    <>
-                      {/* Total Summary */}
-                      {(() => {
-                        let totalCount = customChapterLeaderboard.reduce((sum, c) => sum + c.count, 0);
-                        let totalGoal = customChapterLeaderboard.reduce((sum, c) => sum + c.goal, 0);
-                        if (leadersForTable.othersAggregate && customActionId) {
-                          const othersProgress = leadersForTable.othersAggregate.actionProgress?.[customActionId];
-                          if (othersProgress) { totalCount += othersProgress.count || 0; totalGoal += othersProgress.goal || 0; }
-                        }
-                        const totalPct = totalGoal > 0 ? (totalCount / totalGoal) * 100 : 0;
-                        return (
-                          <Box sx={{ width: '100%', mb: 3, pb: 2, borderBottom: '2px solid #1976d2' }}>
-                            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 0.5 }}>
-                              <Typography variant="h6" sx={{ fontWeight: 700, color: 'primary.main' }}>Total</Typography>
-                              <Typography variant="h6" sx={{ fontWeight: 700, color: 'primary.main' }}>
-                                {totalCount} {totalGoal > 0 ? `/ ${totalGoal} (${Math.round(totalPct)}%)` : 'people'}
-                              </Typography>
-                            </Box>
-                            <LinearProgress variant="determinate" value={totalGoal > 0 ? Math.min(100, totalPct) : 100}
-                              sx={{ height: 16, borderRadius: 1, backgroundColor: '#e0e0e0',
-                                '& .MuiLinearProgress-bar': { borderRadius: 1, backgroundColor: totalGoal > 0 && totalCount >= totalGoal ? '#4caf50' : '#1976d2' } }} />
-                          </Box>
-                        );
-                      })()}
-                      
-                      {/* Chapter Breakdown */}
-                      {customChapterLeaderboard.map(({ chapter, count, goal, namedCount, fieldCounts }, index) => {
-                        const baseChapterName = chapter.replace(' for All', '');
-                        const chapterColor = getChapterColor(baseChapterName);
-                        return (
-                          <Box key={chapter} sx={{ width: '100%' }}>
-                            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 0.25 }}>
-                              <Typography variant="body2" fontWeight="medium">#{index + 1} {chapter}</Typography>
-                              <Typography variant="body2" color="text.secondary">
-                                {count} {goal > 0 ? `/ ${goal}` : ''} {count === 1 ? 'person' : 'people'}
-                              </Typography>
-                            </Box>
-                            <LinearProgress variant="determinate"
-                              value={Math.min(100, (count / Math.max(...customChapterLeaderboard.map(c => c.count), 1)) * 100)}
-                              sx={{ height: 12, borderRadius: 1, backgroundColor: 'action.hover',
-                                '& .MuiLinearProgress-bar': { borderRadius: 1, backgroundColor: chapterColor } }} />
-                            {renderInlineBadges(namedCount, fieldCounts, goal)}
-                          </Box>
-                        );
-                      })}
-                      
-                      {/* Other / Canvassers Entry for Custom Actions */}
-                      {leadersForTable.othersAggregate && (() => {
-                        const othersData = leadersForTable.othersAggregate;
-                        const actionId = customActionId;
-                        const othersProgress = othersData.actionProgress?.[actionId];
-                        
-                        if (!othersProgress || othersProgress.count === 0) return null;
-                        
-                        const count = othersProgress.count;
-                        
-                        return (
-                          <Tooltip
-                            title={
-                              <Box sx={{ maxWidth: 400 }}>
-                                <Typography variant="caption" sx={{ fontWeight: 600, display: 'block', mb: 1 }}>
-                                  {othersData.metadata?.othersCount} {othersData.metadata?.othersCount === 1 ? 'Person' : 'People'} not in formal team structure:
-                                </Typography>
-                                <Typography variant="caption" sx={{ fontSize: '0.7rem', lineHeight: 1.4 }}>
-                                  {othersData.metadata?.othersNames}
-                                </Typography>
-                              </Box>
-                            }
-                            placement="left"
-                          >
-                            <Box sx={{ width: '100%', mt: 2, pt: 2, borderTop: '1px dashed #ccc', cursor: 'help' }}>
-                              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 0.5 }}>
-                                <Typography variant="body2" fontWeight="medium" sx={{ fontStyle: 'italic', color: '#666' }}>
-                                  Other / Canvassers
-                                </Typography>
-                                <Typography variant="body2" color="text.secondary">
-                                  {count} {count === 1 ? 'person' : 'people'}
-                                </Typography>
-                              </Box>
-                              <LinearProgress
-                                variant="determinate"
-                                value={100}
-                                sx={{
-                                  height: 12,
-                                  borderRadius: 1,
-                                  backgroundColor: '#f5f5f5',
-                                  '& .MuiLinearProgress-bar': {
-                                    borderRadius: 1,
-                                    backgroundColor: '#999'
-                                  }
-                                }}
-                              />
-                            </Box>
-                          </Tooltip>
-                        );
-                      })()}
-                    </>
-                  );
-                }
-                
-                // Note: chapterLeaderboard is calculated at top level using first metric only
-                // For now, this works but ideally should be recalculated per metric
-                // The data shown will be based on the currently selected metric filter
-                return (
-              <>
-                {chapterLeaderboard.length === 0 ? (
-                  <Typography variant="body2" color="text.secondary">
-                    No data available.
-                  </Typography>
-                ) : (
-                  <>
-                    {/* Total Summary */}
-                    {(() => {
-                      let totalCount = chapterLeaderboard.reduce((sum, c) => sum + c.count, 0);
-                      let totalGoal = chapterLeaderboard.reduce((sum, c) => sum + c.goal, 0);
-                      
-                      // Add "others" count to total
-                      if (leadersForTable.othersAggregate) {
-                        const actionId = barometerGoalTypeFilter;
-                        const othersProgress = leadersForTable.othersAggregate.actionProgress?.[actionId];
-                        if (othersProgress) {
-                          totalCount += othersProgress.count || 0;
-                          totalGoal += othersProgress.goal || 0;
-                        }
-                      }
-                      
-                      const totalPct = totalGoal > 0 ? (totalCount / totalGoal) * 100 : 0;
-                      
-                      return (
-                        <Box sx={{ width: '100%', mb: 3, pb: 2, borderBottom: '2px solid #1976d2' }}>
-                          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 0.5 }}>
-                            <Typography variant="h6" sx={{ fontWeight: 700, color: 'primary.main' }}>
-                              Total
-                            </Typography>
-                            <Typography variant="h6" sx={{ fontWeight: 700, color: 'primary.main' }}>
-                              {totalCount} / {totalGoal} ({Math.round(totalPct)}%)
-                            </Typography>
-                          </Box>
-                          <LinearProgress
-                            variant="determinate"
-                            value={Math.min(100, totalPct)}
-                            sx={{
-                              height: 16,
-                              borderRadius: 1,
-                              backgroundColor: '#e0e0e0',
-                              '& .MuiLinearProgress-bar': {
-                                borderRadius: 1,
-                                backgroundColor: totalCount >= totalGoal ? '#4caf50' : '#1976d2'
-                              }
-                            }}
-                          />
-                        </Box>
-                      );
-                    })()}
-                    
-                    {/* Chapter Breakdown */}
-                    {chapterLeaderboard.map(({ chapter, count, goal }, index) => {
-                    const pct = goal > 0 ? Math.min(100, (count / goal) * 100) : 0;
-                    const isComplete = goal > 0 && count >= goal;
-                    
-                    // Extract base chapter name for color lookup (e.g., "Durham for All" -> "Durham")
-                    const baseChapterName = chapter.replace(' for All', '');
-                    const chapterColor = getChapterColor(baseChapterName);
-                    
-                    return (
-                      <Box key={chapter} sx={{ width: '100%' }}>
-                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 0.5 }}>
-                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                            {isComplete && (
-                              <StarIcon 
-                                sx={{ 
-                                  color: '#FFD700', 
-                                  fontSize: '1.2rem',
-                                  filter: 'drop-shadow(0 0 2px rgba(255, 215, 0, 0.5))'
-                                }} 
-                              />
-                            )}
-                            <Typography variant="body2" fontWeight="medium">
-                              #{index + 1} {chapter}
-                            </Typography>
-                            {isComplete && (
-                              <Chip 
-            size="small"
-                                label="Goal Met" 
-                                onClick={(e) => e.stopPropagation()}
-            sx={{ 
-                                  height: 20, 
-                                  fontSize: '0.7rem',
-                                  backgroundColor: '#FFD700',
-                                  color: '#000',
-                                  fontWeight: 'bold',
-                                  cursor: 'default'
-                                }} 
-                              />
-        )}
-      </Box>
-                          <Typography variant="body2" color="text.secondary">
-                            {count} {goal > 0 ? `/ ${goal}` : ''} ({goal > 0 ? Math.round(pct) : 0}%)
-                          </Typography>
-                        </Box>
-                        <LinearProgress
-                          variant="determinate"
-                          value={goal > 0 ? pct : Math.min(100, (count / Math.max(...chapterLeaderboard.map(c => c.count))) * 100)}
-                          sx={{
-                            height: 12,
-                            borderRadius: 1,
-                            backgroundColor: 'action.hover',
-                            '& .MuiLinearProgress-bar': {
-                              borderRadius: 1,
-                              backgroundColor: isComplete ? '#FFD700' : chapterColor
-                            }
-                          }}
-                        />
-                      </Box>
-                    );
-                  })}
-                  
-                  {/* Other / Canvassers Entry */}
-                  {leadersForTable.othersAggregate && (() => {
-                    const othersData = leadersForTable.othersAggregate;
-                    const actionId = barometerGoalTypeFilter;
-                    const othersProgress = othersData.actionProgress?.[actionId];
-                    
-                    if (!othersProgress || othersProgress.count === 0) return null;
-                    
-                    const count = othersProgress.count;
-                    const goal = othersProgress.goal;
-                    const pct = goal > 0 ? (count / goal) * 100 : 0;
-                    
-                    return (
-                      <Tooltip
-                        title={
-                          <Box sx={{ maxWidth: 400 }}>
-                            <Typography variant="caption" sx={{ fontWeight: 600, display: 'block', mb: 1 }}>
-                              {othersData.metadata?.othersCount} {othersData.metadata?.othersCount === 1 ? 'Person' : 'People'} not in formal team structure:
-                            </Typography>
-                            <Typography variant="caption" sx={{ fontSize: '0.7rem', lineHeight: 1.4 }}>
-                              {othersData.metadata?.othersNames}
-                            </Typography>
-                          </Box>
-                        }
-                        placement="left"
-                      >
-                        <Box sx={{ width: '100%', mt: 2, pt: 2, borderTop: '1px dashed #ccc', cursor: 'help' }}>
-                          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 0.5 }}>
-                            <Typography variant="body2" fontWeight="medium" sx={{ fontStyle: 'italic', color: '#666' }}>
-                              Other / Canvassers
-                            </Typography>
-                            <Typography variant="body2" color="text.secondary">
-                              {count} {goal > 0 ? `/ ${goal}` : ''} {goal > 0 ? `(${Math.round(pct)}%)` : ''}
-                            </Typography>
-                          </Box>
-                          <LinearProgress
-                            variant="determinate"
-                            value={goal > 0 ? Math.min(100, pct) : 100}
-                            sx={{
-                              height: 12,
-                              borderRadius: 1,
-                              backgroundColor: '#f5f5f5',
-                              '& .MuiLinearProgress-bar': {
-                                borderRadius: 1,
-                                backgroundColor: '#999'
-                              }
-                            }}
-                          />
-                        </Box>
-                      </Tooltip>
-                    );
-                  })()}
-                  </>
-                )}
-              </>
                 );
               })()}
 

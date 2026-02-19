@@ -150,7 +150,7 @@ interface PeoplePanelProps {
   meetings: MeetingNote[];
   contacts?: any[]; // Add contacts prop
   selectedNodeId: string | null;
-  currentDateRange: [Date, Date] | null;
+  currentDateRange?: [Date, Date] | null;
   userMap: Map<number, UserInfo>;
   organizerMappings?: any[];
   onFilterByOrganizer?: (name: string, vanId?: string) => void;
@@ -195,6 +195,10 @@ interface PeoplePanelProps {
   onQuickAddToList?: (person: any) => void;
   // Teams data for team column
   teamsData?: any[];
+  // Organizer assignment
+  contactOrganizerMap?: Map<string, Array<{ organizer_vanid: string; name: string }>>;
+  onAddOrganizer?: (contactVanId: string, contactName: string) => void;
+  onRemoveOrganizer?: (contactVanId: string, organizerVanId: string) => void;
 }
 
 interface PersonRecord {
@@ -267,6 +271,9 @@ const PeoplePanel: React.FC<PeoplePanelProps> = ({
   onAddToAction,
   chapters: availableSections = [],
   teamsData = [],
+  contactOrganizerMap,
+  onAddOrganizer,
+  onRemoveOrganizer,
 }) => {
   // Normalize actions from database format to component format
   const ACTIONS = React.useMemo(() => {
@@ -1261,7 +1268,6 @@ const PeoplePanel: React.FC<PeoplePanelProps> = ({
       
       // If contact has primary_organizer_vanid, look up the name
       if (contact.primary_organizer_vanid) {
-        // Try both string and number keys (userMap might have either)
         const vanidStr = contact.primary_organizer_vanid.toString();
         const vanidNum = parseInt(contact.primary_organizer_vanid);
         
@@ -1274,6 +1280,16 @@ const PeoplePanel: React.FC<PeoplePanelProps> = ({
             organizers.push(organizerName);
           }
         }
+      }
+      
+      // Merge in explicitly-assigned organizers from contactOrganizerMap
+      const assignedOrgs = contactOrganizerMap?.get(contactId);
+      if (assignedOrgs) {
+        assignedOrgs.forEach(org => {
+          if (org.name && !organizers.includes(org.name)) {
+            organizers.push(org.name);
+          }
+        });
       }
       
       // Infer section from primary organizer when contact's own section is missing
@@ -1541,7 +1557,7 @@ const PeoplePanel: React.FC<PeoplePanelProps> = ({
     
     // Otherwise, compute them from paginated contacts enriched with contact-specific meetings
     return computePeopleRecordsFromMeetings();
-  }, [externalPeopleRecords, contactMeetings, selectedNodeId, userMap, orgIds, paginatedContacts, pledgeSubmissions, filters.organizer]);
+  }, [externalPeopleRecords, contactMeetings, selectedNodeId, userMap, orgIds, paginatedContacts, pledgeSubmissions, filters.organizer, contactOrganizerMap]);
 
   // Focus on people data processing only
 
@@ -2740,36 +2756,67 @@ const PeoplePanel: React.FC<PeoplePanelProps> = ({
                           );
                         })()}
 
-                        {/* Organizers - Plain Text Names */}
+                        {/* Organizers */}
                         {!hideColumns.includes('organizer') && (
                           <td style={{ padding: '6px 16px', fontSize: '0.75rem', borderBottom: '1px solid rgba(224, 224, 224, 1)' }}>
-                            {person.organizers.length > 0 ? (
-                              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
-                                {person.organizers.map((organizerName: string, idx: number) => {
-                                  // Find the organizer vanId from this person's meetings
-                                  const meeting = person.allMeetings?.find(m => {
-                                    const meetingOrgName = m.organizer || 
-                                      `${m.organizer_first_name || m.organizer_firstname || ''} ${m.organizer_last_name || m.organizer_lastname || ''}`.trim();
-                                    return meetingOrgName === organizerName;
-                                  });
-                                  const organizerVanId = meeting?.organizer_vanid?.toString();
-                                  
-                                  return (
-                                    <OrganizerChip
-                                      key={idx}
-                                      name={organizerName}
-                                      vanId={organizerVanId}
-                                      size="small"
-                                      onFilterBy={onFilterByOrganizer}
-                                      onEditMapping={onEditOrganizerMapping}
-                                      onViewDetails={handleViewOrganizerDetails}
-                                    />
-                                  );
-                                })}
-                              </Box>
-                            ) : (
-                              <span style={{ color: '#999' }}>-</span>
-                            )}
+                            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, alignItems: 'center' }}>
+                              {person.organizers.map((organizerName: string, idx: number) => {
+                                const meeting = person.allMeetings?.find(m => {
+                                  const meetingOrgName = m.organizer || 
+                                    `${m.organizer_first_name || m.organizer_firstname || ''} ${m.organizer_last_name || m.organizer_lastname || ''}`.trim();
+                                  return meetingOrgName === organizerName;
+                                });
+                                let organizerVanId = meeting?.organizer_vanid?.toString();
+                                // Also check assigned organizers for vanId
+                                if (!organizerVanId) {
+                                  const assigned = contactOrganizerMap?.get(person.id);
+                                  const match = assigned?.find(a => a.name === organizerName);
+                                  if (match) organizerVanId = match.organizer_vanid;
+                                }
+                                
+                                return (
+                                  <OrganizerChip
+                                    key={idx}
+                                    name={organizerName}
+                                    vanId={organizerVanId}
+                                    contactVanId={person.id}
+                                    size="small"
+                                    onFilterBy={onFilterByOrganizer}
+                                    onEditMapping={onEditOrganizerMapping}
+                                    onViewDetails={handleViewOrganizerDetails}
+                                    onRemoveOrganizer={onRemoveOrganizer}
+                                  />
+                                );
+                              })}
+                              {onAddOrganizer && (
+                                <Chip
+                                  icon={<PersonAddIcon sx={{ fontSize: '0.85rem !important' }} />}
+                                  label={person.organizers.length === 0 ? 'Add' : ''}
+                                  size="small"
+                                  variant="outlined"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    onAddOrganizer(person.id, person.name);
+                                  }}
+                                  sx={{
+                                    height: 22,
+                                    fontSize: '0.65rem',
+                                    borderStyle: 'dashed',
+                                    color: 'text.secondary',
+                                    cursor: 'pointer',
+                                    '&:hover': { borderColor: 'primary.main', color: 'primary.main' },
+                                    ...(person.organizers.length > 0 ? { 
+                                      '& .MuiChip-label': { display: 'none' },
+                                      '& .MuiChip-icon': { mx: 0 },
+                                      px: 0, minWidth: 24
+                                    } : {})
+                                  }}
+                                />
+                              )}
+                              {!onAddOrganizer && person.organizers.length === 0 && (
+                                <span style={{ color: '#999' }}>-</span>
+                              )}
+                            </Box>
                           </td>
                         )}
                         

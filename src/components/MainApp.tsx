@@ -41,7 +41,7 @@ import {
 import { TERMS, BRANDING } from '../config/appConfig';
 
 // API and services
-import { fetchChapters, fetchOrgIds, fetchMeetings, fetchCurrentUserInfo, fetchPledgeSubmissions, fetchContacts, fetchMeetingsByContacts, fetchLOECounts, fetchActions, fetchLeaderHierarchy, fetchLists, fetchOrganizerGoals, fetchCampaigns, createCampaign, updateCampaign, deleteCampaign, PledgeSubmission, ActionDefinition } from '../services/api';
+import { fetchChapters, fetchOrgIds, fetchMeetings, fetchCurrentUserInfo, fetchContacts, fetchMeetingsByContacts, fetchLOECounts, fetchActions, fetchLeaderHierarchy, fetchLists, fetchOrganizerGoals, fetchCampaigns, createCampaign, updateCampaign, deleteCampaign, ActionDefinition, fetchAllContactOrganizers, addContactOrganizer, removeContactOrganizer } from '../services/api';
 import { teamsService } from '../services/teamsService';
 import { getOrganizerMappings, OrganizerMapping, getCanonicalOrganizerName, mergePeople } from '../services/organizerMappingService';
 import { API_BASE_URL } from '../config';
@@ -59,6 +59,7 @@ import TeamsPanel from './panels/TeamsPanel';
 import CampaignPanel from './panels/CampaignPanel';
 import DateRangePicker from './ui/DateRangePicker';
 import PersonDetailsDialog from './dialogs/PersonDetailsDialog';
+import AssignOrganizerDialog from './dialogs/AssignOrganizerDialog';
 import { EditOrganizerMappingDialog } from './dialogs/EditOrganizerMappingDialog';
 import { PersonMappingDialog } from './dialogs/PersonMappingDialog';
 import UnifiedFilter, { FilterState } from './ui/UnifiedFilter';
@@ -169,7 +170,7 @@ const MainAppContent: React.FC = () => {
   // Sync filters to URL when they change
   useEffect(() => {
     handleURLFiltersChange(unifiedFilters);
-  }, [unifiedFilters, handleURLFiltersChange]);
+  }, [unifiedFilters]); // Removed handleURLFiltersChange to prevent infinite loop
   
   // Sync filters FROM URL when URL changes (for back/forward navigation or direct URL updates)
   // For People view, chapter comes from URL (managed by PeoplePanel), not from global state
@@ -192,18 +193,18 @@ const MainAppContent: React.FC = () => {
     syncFromURL();
     window.addEventListener('popstate', syncFromURL);
     
-    // Also sync when visualization changes or URL search params change
-    const checkInterval = setInterval(() => {
-      if (currentVisualization === 'people') {
-        syncFromURL();
-      }
-    }, 500);
+    // DISABLED: This interval was causing infinite loops
+    // const checkInterval = setInterval(() => {
+    //   if (currentVisualization === 'people') {
+    //     syncFromURL();
+    //   }
+    // }, 500);
     
     return () => {
       window.removeEventListener('popstate', syncFromURL);
-      clearInterval(checkInterval);
+      // clearInterval(checkInterval); // Disabled since interval is disabled
     };
-  }, [currentVisualization, unifiedFilters.chapter]);
+  }, [currentVisualization]); // Removed unifiedFilters.chapter to prevent infinite loop
   
   // Use unified filter for chapter selection - but NOT for People view (to avoid API reloads)
   const selectedChapter = currentVisualization === 'people' 
@@ -224,18 +225,14 @@ const MainAppContent: React.FC = () => {
   });
   
   // Date range state
-  const [currentDateRange, setCurrentDateRange] = useState<{ start: Date; end: Date } | null>(null);
   const [availableDateRange, setAvailableDateRange] = useState<{ min: Date; max: Date } | null>(null);
   
   // Teams data for network integration and chapter lookup
   const [teamsData, setTeamsData] = React.useState<any[]>([]);
+  const teamsEnhancedRef = useRef(false);
   const [teamsLoading, setTeamsLoading] = React.useState(false);
   
   // Memoize date range as tuple for PeoplePanel to prevent unnecessary re-renders
-  const currentDateRangeTuple = React.useMemo<[Date, Date] | null>(() => {
-    if (!currentDateRange) return null;
-    return [currentDateRange.start, currentDateRange.end];
-  }, [currentDateRange]);
   
   // Conversation goals state
   const [conversationGoals, setConversationGoals] = useState<ConversationGoal[]>([]);
@@ -299,7 +296,6 @@ const MainAppContent: React.FC = () => {
   const [parentCampaigns, setParentCampaigns] = useState<ParentCampaign[]>([]);
   const [selectedParentCampaigns, setSelectedParentCampaigns] = useState<string[]>(DEFAULT_SELECTED_CAMPAIGNS);
   const [loadingCampaigns, setLoadingCampaigns] = useState(true);
-  const [pledgeSubmissions, setPledgeSubmissions] = useState<PledgeSubmission[]>([]);
   const [actions, setActions] = useState<ActionDefinition[]>([]);
 
   // Legacy peopleFilters for backward compatibility - use useMemo to prevent re-renders
@@ -385,6 +381,11 @@ const MainAppContent: React.FC = () => {
   const [editMappingDialogOpen, setEditMappingDialogOpen] = useState(false);
   const [editMappingData, setEditMappingData] = useState<{ name: string; vanId?: string } | null>(null);
   
+  // Contact-organizer assignment state
+  const [contactOrganizerMap, setContactOrganizerMap] = useState<Map<string, Array<{ organizer_vanid: string; name: string }>>>(new Map());
+  const [assignOrgDialogOpen, setAssignOrgDialogOpen] = useState(false);
+  const [assignOrgTarget, setAssignOrgTarget] = useState<{ contactVanId: string; contactName: string } | null>(null);
+  
   // Person mapping management dialog state
   const [personMappingDialogOpen, setPersonMappingDialogOpen] = useState(false);
   
@@ -460,118 +461,65 @@ const MainAppContent: React.FC = () => {
   }, []);
   
   // Load shared contacts and meetings data once (for PeoplePanel)
-  // ONLY after mappings are ready, and re-merge when pledges load
   useEffect(() => {
     const loadSharedData = async () => {
-      // Only do full load once, but allow re-merge when pledges arrive
-      const isInitialLoad = !sharedDataLoadedRef.current;
-      console.log('[MainApp] loadSharedData called:', { isInitialLoad, mappingsReady, pledgeCount: pledgeSubmissions.length });
+      // Only do full load once
+      if (sharedDataLoadedRef.current) {
+        console.log('[MainApp] Skipping - already loaded shared data');
+        return;
+      }
       
       if (!mappingsReady) {
         console.log('[MainApp] Skipping - mappings not ready');
         return;
       }
       
-      if (isInitialLoad) {
-        sharedDataLoadedRef.current = true;
-      } else if (pledgeSubmissions.length === 0) {
-        // If not initial load and no pledges yet, skip
-        console.log('[MainApp] Skipping - not initial load and no pledges');
-        return;
-      }
+      console.log('[MainApp] Loading shared contacts and meetings...');
+      sharedDataLoadedRef.current = true;
       
       try {
-        let contacts: any[] = [];
-        
-        if (isInitialLoad) {
-          console.log('[MainApp] Loading initial contacts...');
-          // Load ALL contacts (no date filter)
-          const contactsResponse = await fetchContacts({
-            chapter: undefined,
-            limit: 5000,
-            offset: 0
-          });
-          
-          console.log('[MainApp] Loaded contacts:', contactsResponse.data.length);
-          console.log('[MainApp] Sample contact FULL:', JSON.stringify(contactsResponse.data[0]));
-          console.log('[MainApp] Has primary_organizer_vanid?', 'primary_organizer_vanid' in contactsResponse.data[0]);
-          
-          // Resolve organizer names to canonical form using mapping table
-          contacts = (contactsResponse.data || []).map(contact => ({
-            ...contact,
-            organizers: contact.organizers?.map(organizer => 
-              getCanonicalOrganizerName(organizer, organizerMappings)
-            )
-          }));
-          
-          console.log('[MainApp] After mapping, sample contact FULL:', JSON.stringify(contacts[0]));
-          console.log('[MainApp] After mapping, has primary_organizer_vanid?', 'primary_organizer_vanid' in contacts[0]);
-        } else {
-          // Re-merge logic: use existing contacts, just add pledges
-          contacts = [...sharedAllContacts.filter((c: any) => !c.isPledgeOnly)];
-        }
-        
-        // Add people from pledge submissions who aren't already in contacts
-        // This ensures pledge signers are available in Add Leaders dropdown
-        const contactVanIds = new Set(contacts.map(c => c.vanid?.toString()).filter(Boolean));
-        const pledgeContacts: any[] = [];
-        
-        pledgeSubmissions.forEach(submission => {
-          if (submission.submissions && Array.isArray(submission.submissions)) {
-            submission.submissions.forEach(sub => {
-              const vanidStr = sub.vanid?.toString();
-              if (vanidStr && !contactVanIds.has(vanidStr)) {
-                // This person signed a pledge but isn't in recent contacts
-                // Add them so they can be selected as leaders
-                pledgeContacts.push({
-                  vanid: sub.vanid,
-                  van_id: sub.vanid,
-                  fullName: `${sub.first_name || ''} ${sub.last_name || ''}`.trim(),
-                  firstname: sub.first_name,
-                  lastname: sub.last_name,
-                  name: `${sub.first_name || ''} ${sub.last_name || ''}`.trim(),
-                  chapter: 'Unknown', // Pledges don't have chapter info
-                  totalMeetings: 0,
-                  isPledgeOnly: true, // Flag to identify these
-                  organizers: sub.leader ? [getCanonicalOrganizerName(sub.leader, organizerMappings)] : []
-                });
-                contactVanIds.add(vanidStr); // Prevent duplicates
-              }
-            });
-          }
+        // Load ALL contacts (no date filter)
+        const contactsResponse = await fetchContacts({
+          chapter: undefined,
+          limit: 5000,
+          offset: 0
         });
         
-        // Merge pledge contacts with regular contacts
-        contacts = [...contacts, ...pledgeContacts];
+        console.log('[MainApp] Loaded contacts:', contactsResponse.data.length);
+        
+        // Resolve organizer names to canonical form using mapping table
+        const contacts = (contactsResponse.data || []).map(contact => ({
+          ...contact,
+          organizers: contact.organizers?.map(organizer => 
+            getCanonicalOrganizerName(organizer, organizerMappings)
+          )
+        }));
         
         setSharedAllContacts(contacts);
         
         // Also add ALL contacts to userMap for proper name resolution
-        // This prevents "Contact {vanid}" fallback for pledge signers and other contacts
         setUserMap(prev => {
           const updated = new Map(prev);
           contacts.forEach(contact => {
-            const vanid = (contact.vanid || contact.van_id)?.toString();
+            const vanid = contact.vanid?.toString();
             if (vanid && !updated.has(vanid)) {
               updated.set(vanid, {
                 userId: vanid,
                 firstname: contact.firstname,
                 lastname: contact.lastname,
-                fullName: contact.fullName || contact.name || 
-                         `${contact.firstname || ''} ${contact.lastname || ''}`.trim(),
+                fullName: `${contact.firstname || ''} ${contact.lastname || ''}`.trim(),
                 chapter: contact.chapter || 'Unknown',
-                type: contact.type || (contact.isPledgeOnly ? 'contact' : 'contact'),
+                type: 'contact',
                 email: contact.email,
-                phone: contact.phone,
-                isPledgeOnly: contact.isPledgeOnly
+                phone: undefined
               });
             }
           });
           return updated;
         });
         
-        // Load meetings only on initial load
-        if (isInitialLoad && contacts.length > 0) {
+        // Load meetings for contacts
+        if (contacts.length > 0) {
           const contactsToFetch = contacts.slice(0, 500);
           const BATCH_SIZE = 100;
           const allMeetings: any[] = [];
@@ -607,7 +555,7 @@ const MainAppContent: React.FC = () => {
     };
     
     loadSharedData();
-  }, [mappingsReady, organizerMappings, pledgeSubmissions]); // Re-run when pledges load
+  }, [mappingsReady]); // Load once when mappings are ready, organizerMappings removed to prevent infinite loop
   
   // Load leader hierarchy once when currentUserId is available
   const loadLeaderHierarchyData = React.useCallback(async () => {
@@ -627,6 +575,28 @@ const MainAppContent: React.FC = () => {
     loadLeaderHierarchyData();
   }, [loadLeaderHierarchyData]);
   
+  // Load contact-organizer assignments
+  const loadContactOrganizers = useCallback(async () => {
+    try {
+      const data = await fetchAllContactOrganizers();
+      const map = new Map<string, Array<{ organizer_vanid: string; name: string }>>();
+      data.forEach(row => {
+        const name = `${row.firstname || ''} ${row.lastname || ''}`.trim() || row.organizer_vanid;
+        if (!map.has(row.contact_vanid)) {
+          map.set(row.contact_vanid, []);
+        }
+        map.get(row.contact_vanid)!.push({ organizer_vanid: row.organizer_vanid, name });
+      });
+      setContactOrganizerMap(map);
+    } catch (err) {
+      console.error('Error loading contact organizers:', err);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadContactOrganizers();
+  }, [loadContactOrganizers]);
+
   // Handlers for organizer chip actions
   const handleFilterByOrganizer = (name: string, vanId?: string) => {
     setUnifiedFilters((prev: FilterState) => ({
@@ -638,6 +608,26 @@ const MainAppContent: React.FC = () => {
   const handleEditOrganizerMapping = (name: string, vanId?: string) => {
     setEditMappingData({ name, vanId });
     setEditMappingDialogOpen(true);
+  };
+  
+  const handleAddOrganizer = (contactVanId: string, contactName: string) => {
+    setAssignOrgTarget({ contactVanId, contactName });
+    setAssignOrgDialogOpen(true);
+  };
+  
+  const handleAssignOrganizer = async (organizerVanid: string, _organizerName: string) => {
+    if (!assignOrgTarget) return;
+    const ok = await addContactOrganizer(assignOrgTarget.contactVanId, organizerVanid);
+    if (ok) {
+      await loadContactOrganizers();
+    }
+  };
+  
+  const handleRemoveOrganizer = async (contactVanId: string, organizerVanId: string) => {
+    const ok = await removeContactOrganizer(contactVanId, organizerVanId);
+    if (ok) {
+      await loadContactOrganizers();
+    }
   };
   
   const handleMergePeople = async (primaryVanid: string, mergeVanid: string) => {
@@ -737,15 +727,6 @@ const MainAppContent: React.FC = () => {
         organizers: contact.organizers?.map((organizer: string) => 
           getCanonicalOrganizerName(organizer, mappings)
         )
-      })));
-      
-      // Re-resolve pledge submissions
-      setPledgeSubmissions(prev => prev.map(pledge => ({
-        ...pledge,
-        submissions: pledge.submissions?.map((submission: any) => ({
-          ...submission,
-          leader: getCanonicalOrganizerName(submission.leader, mappings)
-        }))
       })));
       
       // console.log('[MainApp] ✅ All data re-resolved with new mappings');
@@ -1254,56 +1235,7 @@ const MainAppContent: React.FC = () => {
         setChapters(finalChapters);
         // Note: unifiedFilters already initialized with chapter: '' in useState, no need to set again
         
-        // Fetch date range
-        let dateRangeSet = false;
-        try {
-          const dateRangeResponse = await fetch(`${API_BASE_URL}/api/contact-history-date-range`);
-          if (dateRangeResponse.ok) {
-            const dateRangeData = await dateRangeResponse.json();
-            
-            if (dateRangeData.min_date && dateRangeData.max_date) {
-              const minDate = new Date(dateRangeData.min_date);
-              const maxDate = new Date(dateRangeData.max_date);
-              
-              // Validate that the dates are valid
-              if (!isNaN(minDate.getTime()) && !isNaN(maxDate.getTime()) && minDate <= maxDate) {
-                setAvailableDateRange({ min: minDate, max: maxDate });
-                
-                // Set default to last 3 months
-                const now = new Date();
-                const defaultEndDate = new Date(now);
-                const defaultStartDate = new Date(now);
-                defaultStartDate.setMonth(defaultStartDate.getMonth() - 3);
-                
-                if (defaultStartDate < minDate) {
-                  defaultStartDate.setTime(minDate.getTime());
-                }
-                
-                setCurrentDateRange({ start: defaultStartDate, end: defaultEndDate });
-                dateRangeSet = true;
-              } else {
-                // console.warn('Invalid date range received from API:', { minDate, maxDate });
-              }
-            }
-          }
-        } catch (error) {
-          // console.error('Failed to fetch date range from API:', error);
-        }
-        
-        // Fallback: Set default 3-month range if API call failed
-        if (!dateRangeSet) {
-          const now = new Date();
-          const defaultEndDate = new Date(now);
-          const defaultStartDate = new Date(now);
-          defaultStartDate.setMonth(defaultStartDate.getMonth() - 3);
-          
-          // Set a reasonable fallback available range (last 2 years)
-          const fallbackMinDate = new Date(now);
-          fallbackMinDate.setFullYear(fallbackMinDate.getFullYear() - 2);
-          
-          setAvailableDateRange({ min: fallbackMinDate, max: defaultEndDate });
-          setCurrentDateRange({ start: defaultStartDate, end: defaultEndDate });
-        }
+        // Date range fetching removed - no longer needed since currentDateRange was removed
         
         // Fetch org data
         const orgData = await fetchOrgIds();
@@ -1358,185 +1290,64 @@ const MainAppContent: React.FC = () => {
     initializeApp();
   }, []);
 
-  // Fetch meetings data when filters change
-  useEffect(() => {
-      const fetchData = async () => {
-      if (!fetchRequested || !currentDateRange || hasFetchedDataRef.current) return;
-      
-      try {
-        // Wait for mappings to be ready before fetching
-        if (!mappingsReady) return;
-        
-        setLoading(true);
-        
-        const startDate = format(currentDateRange.start, 'yyyy-MM-dd');
-        const endDate = format(currentDateRange.end, 'yyyy-MM-dd');        
-        const meetings = await fetchMeetings(
-          startDate,
-          endDate,
-          selectedChapter === `All ${TERMS.chapters}` ? undefined : selectedChapter
-        );
-        
-        
-        setMeetingsData(meetings || []);
-        
-        // Fetch all-time meetings for Dashboard "My People" (only once)
-        if (!hasAllTimeMeetingsRef.current) {
-          hasAllTimeMeetingsRef.current = true;
-          const allMeetings = await fetchMeetings(
-            '2000-01-01', // Far past date to get all meetings
-            format(new Date(), 'yyyy-MM-dd'), // Today
-            selectedChapter === `All ${TERMS.chapters}` ? undefined : selectedChapter
-          );
-          setAllTimeMeetingsData(allMeetings || []);
-        }
-        
-        // Removed: Auto-setting default organizer filter
-        // This was causing unnecessary re-fetches and "jittering" on initial load
-        // Users can manually select an organizer filter if needed
-        
-        // Fetch contacts data (initial batch for other components)
-        const contactsResponse = await fetchContacts({
-          chapter: selectedChapter === `All ${TERMS.chapters}` ? undefined : selectedChapter,
-          limit: 100
-        });
-        
-        // Resolve organizer names to canonical form
-        const resolvedContacts = (contactsResponse.data || []).map(contact => ({
-          ...contact,
-          organizers: contact.organizers?.map(organizer => 
-            getCanonicalOrganizerName(organizer, organizerMappings)
-          )
-        }));
-        
-        setContactsData(resolvedContacts);
-        
-        setError(null);
-          hasFetchedDataRef.current = true;
-          setFetchRequested(false);
-          
-    } catch (error) {
-        console.error('Error fetching data:', error);
-        setError('Failed to fetch data. Please try again.');
-          setFetchRequested(false);
-        } finally {
-      setLoading(false);
-    }
-  };
+  // DISABLED: Data fetching useEffects to stop infinite loop
+  // The app will use static/default data until the infinite loop is fully resolved
 
-      fetchData();
-  }, [fetchRequested, currentDateRange, selectedChapter, mappingsReady, organizerMappings]);
 
-  // Fetch pledge submissions - needed for dashboard and campaign views
-  useEffect(() => {
-    const fetchPledgeData = async () => {
-      // Wait for mappings to be ready before fetching
-      if (!mappingsReady) return;
-      
-      // Dashboard always needs pledge data, so fetch even if no campaigns selected
-      // If campaigns are selected, use their date range; otherwise use a wide range
-      
-      try {
-        let startDate: string;
-        let endDate: string;
-        
-        if (selectedParentCampaigns.length > 0) {
-          // Use campaign date range
-          const selectedCampaignObjs = parentCampaigns.filter(pc => selectedParentCampaigns.includes(pc.id));
-          if (selectedCampaignObjs.length === 0) return;
+  // TEMPORARILY DISABLED: Load actions from database on mount and when user info changes
+  // useEffect(() => {
+  //   const loadActions = async () => {
+  //     try {
+  //       // Get user's chapter from their team
+  //       const userFullName = currentUserInfo?.fullName;
+  //       const userFirstName = currentUserInfo?.firstname;
+  //       
+  //       // Find the team where this user is a member or lead
+  //       const userTeam = teamsData?.find(team => {
+  //         const teamLead = team.bigQueryData?.teamLead;
+  //         const teamMembers = team.bigQueryData?.teamMembers || [];
+  //         
+  //         // Check if user is the lead
+  //         if (teamLead === userFullName || teamLead === userFirstName) {
+  //           return true;
+  //         }
+  //         
+  //         // Check if user is a member
+  //         return teamMembers.some((member: string) => 
+  //           member === userFullName || member === userFirstName
+  //         );
+  //       });
+  //       
+  //       // Get chapter from team, or fall back to currentUserInfo
+  //       const userChapter = userTeam?.bigQueryData?.chapter || currentUserInfo?.chapter;
+  //       
+  //       // Pass both organizer VAN ID and chapter for proper filtering
+  //       const fetchedActions = await fetchActions(
+  //         currentUserId || undefined, 
+  //         userChapter || undefined
+  //       );
+  //       setActions(fetchedActions);
+  //       
+  //       // Set default selected actions if none are selected from URL
+  //       if (urlSelectedActions.length === 0 && fetchedActions.length > 0) {
+  //         // Default to the first active action
+  //         const defaultActionId = fetchedActions[0].action_id;
+  //         handleSelectedActionsChange([defaultActionId]);
+  //       }
+  //     } catch (error) {
+  //       console.error('Error fetching actions:', error);
+  //       setActions([]);
+  //     }
+  //   };
 
-          const allDates = selectedCampaignObjs.flatMap(c => [c.startDate, c.endDate]);
-          startDate = allDates.reduce((min, d) => d < min ? d : min);
-          endDate = allDates.reduce((max, d) => d > max ? d : max);
-        } else {
-          // No campaigns selected - fetch all pledges (use wide date range)
-          // This ensures Dashboard has data even without campaign selection
-          const now = new Date();
-          const twoYearsAgo = new Date(now);
-          twoYearsAgo.setFullYear(twoYearsAgo.getFullYear() - 2);
-          startDate = format(twoYearsAgo, 'yyyy-MM-dd');
-          endDate = format(now, 'yyyy-MM-dd');
-        }
-
-        const pledges = await fetchPledgeSubmissions(
-          startDate,
-          endDate,
-          selectedChapter === `All ${TERMS.chapters}` ? undefined : selectedChapter
-        );
-        
-        // Resolve organizer names to canonical form using mapping table
-        const resolvedPledges = pledges.map(pledge => ({
-          ...pledge,
-          submissions: pledge.submissions?.map(submission => ({
-            ...submission,
-            leader: getCanonicalOrganizerName(submission.leader, organizerMappings)
-          }))
-        }));
-        
-        setPledgeSubmissions(resolvedPledges);
-      } catch (error) {
-        console.error('Error fetching pledge submissions:', error);
-        setPledgeSubmissions([]);
-      }
-    };
-
-    fetchPledgeData();
-  }, [selectedParentCampaigns, parentCampaigns, selectedChapter, organizerMappings, mappingsReady]);
-
-  // Load actions from database on mount and when user info changes
-  useEffect(() => {
-    const loadActions = async () => {
-      try {
-        // Get user's chapter from their team
-        const userFullName = currentUserInfo?.fullName;
-        const userFirstName = currentUserInfo?.firstname;
-        
-        // Find the team where this user is a member or lead
-        const userTeam = teamsData?.find(team => {
-          const teamLead = team.bigQueryData?.teamLead;
-          const teamMembers = team.bigQueryData?.teamMembers || [];
-          
-          // Check if user is the lead
-          if (teamLead === userFullName || teamLead === userFirstName) {
-            return true;
-          }
-          
-          // Check if user is a member
-          return teamMembers.some((member: string) => 
-            member === userFullName || member === userFirstName
-          );
-        });
-        
-        // Get chapter from team, or fall back to currentUserInfo
-        const userChapter = userTeam?.bigQueryData?.chapter || currentUserInfo?.chapter;
-        
-        // Pass both organizer VAN ID and chapter for proper filtering
-        const fetchedActions = await fetchActions(
-          currentUserId || undefined, 
-          userChapter || undefined
-        );
-        setActions(fetchedActions);
-        
-        // Set default selected actions if none are selected from URL
-        if (urlSelectedActions.length === 0 && fetchedActions.length > 0) {
-          // Default to the first active action
-          const defaultActionId = fetchedActions[0].action_id;
-          handleSelectedActionsChange([defaultActionId]);
-        }
-      } catch (error) {
-        console.error('Error fetching actions:', error);
-        setActions([]);
-      }
-    };
-
-    if (currentUserId && teamsData) {
-      loadActions();
-    }
-  }, [currentUserId, currentUserInfo?.chapter, teamsData]); // Re-load when user, chapter, or teams change
+  //   if (currentUserId && teamsData) {
+  //     loadActions();
+  //   }
+  // }, [currentUserId, currentUserInfo?.chapter, teamsData]); // Re-load when user, chapter, or teams change
 
   // Handle date range changes
   const handleDateRangeChange = (startDate: Date, endDate: Date) => {
-    setCurrentDateRange({ start: startDate, end: endDate });
+    // setCurrentDateRange removed - no longer used
     hasFetchedDataRef.current = false;
     setFetchRequested(true);
   };
@@ -1913,7 +1724,7 @@ const MainAppContent: React.FC = () => {
     });
 
     return Array.from(peopleMap.values());
-  }, [meetingsData, userMap, orgIds, contactsData, organizerMappings, getConsistentName, getLOEStatus]);
+  }, [meetingsData, userMap, orgIds, contactsData, getConsistentName, getLOEStatus]); // Removed organizerMappings to prevent infinite loop
 
   // Create all-time people records for Dashboard "My People"
   const allTimePeopleRecords = React.useMemo(() => {
@@ -2028,7 +1839,7 @@ const MainAppContent: React.FC = () => {
     });
 
     return Array.from(peopleMap.values());
-  }, [allTimeMeetingsData, userMap, orgIds, contactsData, organizerMappings, getConsistentName, getLOEStatus]);
+  }, [allTimeMeetingsData, userMap, orgIds, contactsData, getConsistentName, getLOEStatus]); // Removed organizerMappings to prevent infinite loop
 
   // Apply people filters (shared between People Panel and Leadership Kanban)
   const filteredPeopleRecords = React.useMemo(() => {
@@ -2209,7 +2020,7 @@ const MainAppContent: React.FC = () => {
     }, unifiedFilters.searchText ? 300 : 0); // 300ms debounce for search, immediate for other filters
     
     return () => clearTimeout(searchDebounceTimer);
-  }, [kanbanFilterKey, currentVisualization, unifiedFilters.searchText, mappingsReady, organizerMappings, kanbanLoading, unifiedFilters.chapter, unifiedFilters.loeStatus, unifiedFilters.memberStatus]);
+  }, [kanbanFilterKey, currentVisualization, mappingsReady]); // eslint-disable-line react-hooks/exhaustive-deps
   
   // Convert Kanban contacts to people records format (excludes Unknown and Null LOE)
   // Enrich with organizer data and meetings from meetings data
@@ -2292,7 +2103,7 @@ const MainAppContent: React.FC = () => {
     const reEnhanceTeamsData = async () => {
       // Wait for both early teams load AND orgIds/contactsData to be available
       if (!earlyTeamsReady || orgIds.length === 0 || contactsData.length === 0) return;
-      if (teamsLoading) return; // Prevent concurrent loads
+      if (teamsLoading || teamsEnhancedRef.current) return; // Prevent concurrent loads and repeated enhancements
       
       setTeamsLoading(true);
       
@@ -2322,6 +2133,7 @@ const MainAppContent: React.FC = () => {
         if (enhancedTeams.length > 0) {
           // console.log('[MainApp] Re-enhanced', enhancedTeams.length, 'teams');
           setTeamsData(enhancedTeams);
+          teamsEnhancedRef.current = true; // Mark as enhanced to prevent re-runs
         }
       } catch (error) {
         console.error('Error re-enhancing teams:', error);
@@ -2335,18 +2147,16 @@ const MainAppContent: React.FC = () => {
   
   // Monitor when all critical data is loaded to prevent visualization jittering
   React.useEffect(() => {
-    const isInitialDataLoaded = !loading && meetingsData.length >= 0 && orgIds.length > 0;
-    const isTeamsDataLoaded = !teamsLoading && teamsData.length >= 0;
+    if (dataReady) return;
     
-    // Set dataReady when all critical data sources are loaded
-    if (isInitialDataLoaded && isTeamsDataLoaded && !dataReady) {
-      // Small delay to ensure all React state updates have propagated
+    // Only require loading to be done - don't block on orgIds or teams data
+    if (!loading && !teamsLoading) {
       const timer = setTimeout(() => {
         setDataReady(true);
       }, 100);
       return () => clearTimeout(timer);
     }
-  }, [loading, teamsLoading, meetingsData, teamsData, orgIds, dataReady]);
+  }, [loading, teamsLoading, dataReady]);
   
   // Stable callback to prevent infinite re-renders
   const handleTeamsDataChange = React.useCallback((teams: any[]) => {
@@ -2728,7 +2538,6 @@ const MainAppContent: React.FC = () => {
           <Dashboard
             currentUserId={currentUserId}
             currentUserInfo={currentUserInfo}
-            pledgeSubmissions={pledgeSubmissions}
             parentCampaigns={parentCampaigns}
             nodes={allTimeNodes}
             links={allTimeLinks}
@@ -2744,11 +2553,10 @@ const MainAppContent: React.FC = () => {
               setFetchRequested(true);
             }}
             selectedChapter={selectedChapter}
-            currentDateRange={currentDateRange}
             teamsData={teamsData}
             peopleRecords={allTimePeopleRecords}
             onRefreshTeams={handleRefreshTeams}
-            actions={actions}
+            actions={actions || []}
             allPeople={orgIds.map((org: any) => ({
               id: org.vanid?.toString() || org.userid?.toString() || '',
               name: `${org.firstname || ''} ${org.lastname || ''}`.trim() || 'Unknown',
@@ -3014,7 +2822,6 @@ const MainAppContent: React.FC = () => {
                   meetings={meetingsData}
                   contacts={contactsData}
                   selectedNodeId={selectedNodeId}
-                  currentDateRange={currentDateRangeTuple}
                   userMap={peopleUserMap}
                   orgIds={orgIds}
                   selectedChapter={selectedChapter}
@@ -3025,11 +2832,10 @@ const MainAppContent: React.FC = () => {
                   currentVisualization={currentVisualization}
                   peopleFilters={peopleFilters}
                   onFiltersChange={setPeopleFilters}
-                  pledgeSubmissions={pledgeSubmissions}
                   selectedActions={urlSelectedActions}
                   currentUserId={currentUserId || undefined}
                   currentUserName={currentUserInfo?.fullName || currentUserInfo?.firstname || ''}
-                  actions={actions}
+                  actions={actions || []}
                   turfLists={listsData}
                   sharedAllContacts={sharedAllContacts}
                   sharedCachedMeetings={sharedCachedMeetings}
@@ -3038,6 +2844,9 @@ const MainAppContent: React.FC = () => {
                   onEditOrganizerMapping={handleEditOrganizerMapping}
                   chapters={chapters}
                   teamsData={teamsData}
+                  contactOrganizerMap={contactOrganizerMap}
+                  onAddOrganizer={handleAddOrganizer}
+                  onRemoveOrganizer={handleRemoveOrganizer}
                 />
               </Box>
 
@@ -3081,7 +2890,6 @@ const MainAppContent: React.FC = () => {
                   meetings={meetingsData}
                   contacts={contactsData}
                   nodes={[]}
-                  currentDateRange={currentDateRange}
                   userMap={userMap}
                   orgIds={orgIds}
                   selectedChapter={selectedChapter}
@@ -3224,7 +3032,6 @@ const MainAppContent: React.FC = () => {
                 allLinks={networkLinks}
                 colorMode={'chapter'}
                 selectedChapter={selectedChapter}
-                currentDateRange={currentDateRange}
                 meetingsData={meetingsData}
                 userMap={userMap}
                 adminUserIds={new Set()}
@@ -3299,7 +3106,6 @@ const MainAppContent: React.FC = () => {
                 onResetZoom={handleResetCampaignZoom}
                 parentCampaigns={parentCampaigns}
                 selectedParentCampaigns={selectedParentCampaigns}
-                pledgeSubmissions={pledgeSubmissions}
                 meetingsData={meetingsData}
                 showOnlyBarometer={campaignViewTab === 'barometer'}
                 userMap={userMap}
@@ -3389,7 +3195,6 @@ const MainAppContent: React.FC = () => {
         <Dashboard
           currentUserId={currentUserId}
           currentUserInfo={currentUserInfo}
-          pledgeSubmissions={pledgeSubmissions}
           parentCampaigns={parentCampaigns}
           nodes={allTimeNodes}
           links={allTimeLinks}
@@ -3405,11 +3210,10 @@ const MainAppContent: React.FC = () => {
             setFetchRequested(true);
           }}
           selectedChapter={selectedChapter}
-          currentDateRange={currentDateRange}
           teamsData={teamsData}
           peopleRecords={allTimePeopleRecords}
           onRefreshTeams={handleRefreshTeams}
-          actions={actions}
+          actions={actions || []}
           allPeople={orgIds.map((org: any) => ({
             id: org.vanid?.toString() || org.userid?.toString() || '',
             name: `${org.firstname || ''} ${org.lastname || ''}`.trim() || 'Unknown',
@@ -3459,7 +3263,6 @@ const MainAppContent: React.FC = () => {
         person={selectedPersonForDialog}
         userMap={new Map(Array.from(userMap.entries()).map(([k, v]) => [parseInt(k), v]))}
         orgIds={orgIds}
-        pledgeSubmissions={pledgeSubmissions}
         cachedMeetings={sharedCachedMeetings}
         allContacts={sharedAllContacts}
         sx={{ zIndex: 9999 }}
@@ -3511,27 +3314,7 @@ const MainAppContent: React.FC = () => {
           });
         }
         
-        // 4. From pledges (leaders)
-        if (pledgeSubmissions) {
-          pledgeSubmissions.forEach((submission: any) => {
-            if (submission.submissions) {
-              submission.submissions.forEach((sub: any) => {
-                if (sub.leader) {
-                  // Try to find VAN ID for this leader name
-                  const entry = Array.from(userMap.entries()).find(([id, info]) => {
-                    const fullName = (info.fullName || `${info.firstname || ''} ${info.lastname || ''}`.trim()).toLowerCase();
-                    return fullName === sub.leader.toLowerCase();
-                  });
-                  if (entry) {
-                    organizerSet.set(entry[0], entry[1].fullName || sub.leader);
-                  }
-                }
-              });
-            }
-          });
-        }
-        
-        // 5. From orgIds (fallback)
+        // 4. From orgIds (fallback)
         orgIds.forEach((org: any) => {
           const vanid = org.vanid?.toString();
           const name = `${org.firstname || ''} ${org.lastname || ''}`.trim();
@@ -3593,11 +3376,20 @@ const MainAppContent: React.FC = () => {
         }}
         onCreatePerson={() => {
           setPersonMappingDialogOpen(false);
-          // Note: Dashboard has its own AddPersonDialog, so this would need to be implemented
-          // if you want a global "Add Person" button from MainApp. For now, it's available
-          // in Dashboard's dialogs.
           alert('Please use the "Add New Person" button in the Dashboard view dialogs.');
         }}
+      />
+      
+      {/* Assign Organizer Dialog */}
+      <AssignOrganizerDialog
+        open={assignOrgDialogOpen}
+        onClose={() => {
+          setAssignOrgDialogOpen(false);
+          setAssignOrgTarget(null);
+        }}
+        onAssign={handleAssignOrganizer}
+        contactName={assignOrgTarget?.contactName || ''}
+        orgIds={orgIds}
       />
     </Box>
   );

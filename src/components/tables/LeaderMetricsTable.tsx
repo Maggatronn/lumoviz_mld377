@@ -90,10 +90,10 @@ interface LeaderMetricsTableProps {
   userMap?: Map<number, any>; // User map for organizer details dialog
   allContacts?: any[]; // All contacts for organizer details dialog
   showConversions?: boolean; // Kept for backward compat — prefer displayMode
-  displayMode?: 'nothing' | 'conversions' | 'counts'; // 3-way display toggle
+  displayMode?: 'progress' | 'conversions'; // 2-way display toggle
   hideDisplayToggle?: boolean; // Hide internal toggle (when parent controls it)
   onToggleConversions?: (show: boolean) => void; // Kept for backward compat
-  onDisplayModeChange?: (mode: 'nothing' | 'conversions' | 'counts') => void;
+  onDisplayModeChange?: (mode: 'progress' | 'conversions') => void;
   initialSortColumn?: string | null; // Initial sort column (from URL)
   initialSortDirection?: 'asc' | 'desc'; // Initial sort direction (from URL)
   onSortChange?: (column: string | null, direction: 'asc' | 'desc') => void; // Callback when sort changes
@@ -125,13 +125,13 @@ const LeaderTableRow: React.FC<{
   availableActions?: any[];
   flatView?: boolean;
   listsData?: any[];
-  displayMode?: 'nothing' | 'conversions' | 'counts';
+  displayMode?: 'progress' | 'conversions';
   calculateCheckpointConversion?: (leaderId: string, actionId: string, fromFieldKey: string, toFieldKey: string) => number;
   calculateCheckpointCount?: (leaderId: string, actionId: string, fieldKey: string) => number;
   getGoalForAction?: (leaderId: string, actionId: string) => number;
-}> = ({ leader, depth, leaderActionsMap, leaderGoalsMap, unifiedActionIds, onRemove, onRemoveLeader, currentUserId, pledgeSubmissions = [], onAddToList, reloadTriggers = {}, peopleRecords = [], onPersonDetailsOpen, onFilterByOrganizer, onEditOrganizerMapping, onViewOrganizerDetails, ACTIONS, availableActions = [], flatView = false, listsData, displayMode = 'nothing', calculateCheckpointConversion, calculateCheckpointCount, getGoalForAction }) => {
+}> = ({ leader, depth, leaderActionsMap, leaderGoalsMap, unifiedActionIds, onRemove, onRemoveLeader, currentUserId, pledgeSubmissions = [], onAddToList, reloadTriggers = {}, peopleRecords = [], onPersonDetailsOpen, onFilterByOrganizer, onEditOrganizerMapping, onViewOrganizerDetails, ACTIONS, availableActions = [], flatView = false, listsData, displayMode = 'progress', calculateCheckpointConversion, calculateCheckpointCount, getGoalForAction }) => {
   const showConversions = displayMode === 'conversions';
-  const showCounts = displayMode === 'counts';
+  const showProgress = displayMode === 'progress';
   const [expanded, setExpanded] = useState(false);
   const [organizingListExpanded, setOrganizingListExpanded] = useState(false);
   const [organizingList, setOrganizingList] = useState<any[]>([]);
@@ -436,7 +436,10 @@ const LeaderTableRow: React.FC<{
         {unifiedActionIds.map(actionId => {
           const action = ACTIONS.find((a: any) => a.id === actionId);
           const actionHasGoal = action?.has_goal !== false;
-          const actionHasConversions = action && action.fields && action.fields.length >= 2;
+          const fullActionForConv = availableActions?.find((a: any) => a.action_id === actionId);
+          const boolFields = (f: any) => f.type === 'boolean' || !f.type;
+          const actionHasConversions = (action?.fields && action.fields.filter(boolFields).length >= 2) || 
+                                      (fullActionForConv?.fields && fullActionForConv.fields.filter(boolFields).length >= 2);
           
           // Personal stats - same for everyone (LoL or not)
           const hasAction = leaderActions.includes(actionId);
@@ -583,27 +586,27 @@ const LeaderTableRow: React.FC<{
             }
           }
           
-          // Conversion / Counts columns
+          // Extra columns for Progress or Conversions mode
           let conversionColumns = null;
-          if ((showConversions || showCounts) && actionHasConversions) {
+          if ((showConversions || showProgress) && actionHasConversions) {
             const fullAction = availableActions?.find((a: any) => a.action_id === actionId);
-            const fields = action?.fields || fullAction?.fields || [];
+            const rawFields = action?.fields || fullAction?.fields || [];
+            const fields = rawFields.filter((f: any) => f.type === 'boolean' || !f.type);
 
             if (!hasAction) {
               // No action — dashes for all extra columns
-              // Conversions: Named→first + pairs; Counts: named + each field
-              const numCols = showConversions ? fields.length : fields.length + 1;
+              // Progress: Named + (field count + conversion) interleaved = 1 + fields.length * 2 - but last field has no conversion after it = 1 + fields.length + (fields.length - 1) + 1 = fields.length * 2 + 1
+              // Conversions: Named→first + pairs = fields.length
+              const numCols = showProgress ? (1 + fields.length * 2) : fields.length;
               conversionColumns = Array.from({ length: numCols }).map((_, i) => (
-                <TableCell key={`extra-${actionId}-${i}`} align="center" sx={{ bgcolor: showCounts ? '#f0f4ff' : '#fffef0' }}>
+                <TableCell key={`extra-${actionId}-${i}`} align="center" sx={{ bgcolor: '#f8f9fa' }}>
                   <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.7rem' }}>—</Typography>
                 </TableCell>
               ));
             } else if (showConversions) {
-              // Named → first field, then each consecutive pair
-              // namedCount = raw total on list (before any goal-field filtering)
+              // Conversions only: Named→first field, then each consecutive pair
               const pairs: Array<{ fromLabel: string; toLabel: string; rate: number }> = [];
 
-              // Named → first checkpoint
               if (fields.length > 0) {
                 const firstField = fields[0];
                 const askedCount = calculateCheckpointCount
@@ -616,7 +619,6 @@ const LeaderTableRow: React.FC<{
                 });
               }
 
-              // Each consecutive checkpoint pair
               fields.slice(0, -1).forEach((field: any, idx: number) => {
                 const nextField = fields[idx + 1];
                 const convRate = calculateCheckpointConversion
@@ -640,25 +642,44 @@ const LeaderTableRow: React.FC<{
                 </TableCell>
               ));
             } else {
-              // Counts mode: Named/goal (raw total), then each checkpoint count/goal
+              // Progress mode: interleave counts and conversions
+              // Pattern: Named count | Named→f1 % | f1 count | f1→f2 % | f2 count | ...
               const fieldCounts = fields.map((f: any) =>
                 calculateCheckpointCount ? calculateCheckpointCount(leader.id, actionId, f.key) : 0
               );
+              const cols: React.ReactNode[] = [];
 
-              const cols = [
-                <TableCell key={`cnt-${actionId}-named`} align="center" sx={{ bgcolor: '#f0f4ff' }}>
+              // Named count
+              cols.push(
+                <TableCell key={`prog-${actionId}-named`} align="center" sx={{ bgcolor: '#f0f4ff' }}>
                   <Typography variant="body2" sx={{ fontWeight: 600, fontSize: '0.75rem', color: 'primary.main' }}>
-                    {namedCount}/{goal}
+                    {namedCount}
                   </Typography>
-                </TableCell>,
-                ...fields.map((f: any, i: number) => (
-                  <TableCell key={`cnt-${actionId}-${f.key}`} align="center" sx={{ bgcolor: '#f0f4ff' }}>
-                    <Typography variant="body2" sx={{ fontWeight: 600, fontSize: '0.75rem', color: 'text.secondary' }}>
-                      {fieldCounts[i]}/{goal}
+                </TableCell>
+              );
+
+              fields.forEach((f: any, i: number) => {
+                // Conversion from previous stage → this stage
+                const fromCount = i === 0 ? namedCount : fieldCounts[i - 1];
+                const toCount = fieldCounts[i];
+                const rate = fromCount > 0 ? (toCount / fromCount) * 100 : 0;
+                cols.push(
+                  <TableCell key={`prog-${actionId}-conv-${f.key}`} align="center" sx={{ bgcolor: '#fffef0' }}>
+                    <Typography variant="body2" sx={{ fontWeight: 600, fontSize: '0.7rem', color: rate >= 50 ? '#4caf50' : rate >= 25 ? '#ff9800' : '#f44336' }}>
+                      {rate > 0 ? `${Math.round(rate)}%` : '—'}
                     </Typography>
                   </TableCell>
-                )),
-              ];
+                );
+                // Count for this stage
+                cols.push(
+                  <TableCell key={`prog-${actionId}-cnt-${f.key}`} align="center" sx={{ bgcolor: '#f0f4ff' }}>
+                    <Typography variant="body2" sx={{ fontWeight: 600, fontSize: '0.75rem' }}>
+                      {fieldCounts[i]}
+                    </Typography>
+                  </TableCell>
+                );
+              });
+
               conversionColumns = cols;
             }
           }
@@ -979,12 +1000,12 @@ export const LeaderMetricsTable: React.FC<LeaderMetricsTableProps> = ({
   // Filter state
   const [showOnlyLoLs, setShowOnlyLoLs] = useState(false);
   
-  // 3-way display mode: 'nothing' | 'conversions' | 'counts'
-  const initialDisplayMode: 'nothing' | 'conversions' | 'counts' =
-    externalDisplayMode || (externalShowConversions ? 'conversions' : 'nothing');
-  const [internalDisplayMode, setInternalDisplayMode] = useState<'nothing' | 'conversions' | 'counts'>(initialDisplayMode);
+  // 2-way display mode: 'progress' | 'conversions'
+  const initialDisplayMode: 'progress' | 'conversions' =
+    externalDisplayMode || (externalShowConversions ? 'conversions' : 'progress');
+  const [internalDisplayMode, setInternalDisplayMode] = useState<'progress' | 'conversions'>(initialDisplayMode);
   const displayMode = externalDisplayMode ?? internalDisplayMode;
-  const showConversions = displayMode === 'conversions'; // kept for backward compat checks
+  const showConversions = displayMode === 'conversions';
   
   // Organizer details dialog state
   const [organizerDialogOpen, setOrganizerDialogOpen] = useState(false);
@@ -1083,9 +1104,8 @@ export const LeaderMetricsTable: React.FC<LeaderMetricsTableProps> = ({
       if (leaderGoals[actionId]) {
         baseGoal = leaderGoals[actionId];
       }
-      // Or use action's default individual goal if available
       else if (actionDef && actionDef.default_individual_goal) {
-        baseGoal = actionDef.default_individual_goal;
+        baseGoal = Number(actionDef.default_individual_goal);
       }
     }
     
@@ -1121,20 +1141,12 @@ export const LeaderMetricsTable: React.FC<LeaderMetricsTableProps> = ({
     }
   };
   
-  // 3-way display mode handler
-  const handleDisplayModeChange = (_: React.MouseEvent<HTMLElement>, newMode: 'nothing' | 'conversions' | 'counts' | null) => {
-    const mode = newMode ?? 'nothing';
+  // 2-way display mode handler
+  const handleDisplayModeChange = (_: React.MouseEvent<HTMLElement>, newMode: 'progress' | 'conversions' | null) => {
+    const mode = newMode ?? 'progress';
     setInternalDisplayMode(mode);
     if (onDisplayModeChange) onDisplayModeChange(mode);
-    if (onToggleConversions) onToggleConversions(mode !== 'nothing');
-  };
-
-  // Toggle conversions display (backward compat)
-  const handleToggleConversions = () => {
-    const newMode = displayMode !== 'nothing' ? 'nothing' : 'conversions';
-    setInternalDisplayMode(newMode);
-    if (onDisplayModeChange) onDisplayModeChange(newMode);
-    if (onToggleConversions) onToggleConversions(newMode !== 'nothing');
+    if (onToggleConversions) onToggleConversions(mode === 'conversions');
   };
 
   // Handle organizer details dialog
@@ -1309,7 +1321,7 @@ export const LeaderMetricsTable: React.FC<LeaderMetricsTableProps> = ({
           {leaders.length} {leaders.length === 1 ? 'leader' : 'leaders'}
         </Typography>
         
-        {/* 3-way display toggle — hidden when parent controls it */}
+        {/* 2-way display toggle — hidden when parent controls it */}
         {!hideDisplayToggle && (
           <ToggleButtonGroup
             value={displayMode}
@@ -1318,14 +1330,11 @@ export const LeaderMetricsTable: React.FC<LeaderMetricsTableProps> = ({
             size="small"
             sx={{ height: 28 }}
           >
-            <ToggleButton value="nothing" sx={{ fontSize: '0.65rem', px: 1, py: 0.25, textTransform: 'none' }}>
-              None
+            <ToggleButton value="progress" sx={{ fontSize: '0.65rem', px: 1, py: 0.25, textTransform: 'none' }}>
+              Progress
             </ToggleButton>
             <ToggleButton value="conversions" sx={{ fontSize: '0.65rem', px: 1, py: 0.25, textTransform: 'none' }}>
               Conversions
-            </ToggleButton>
-            <ToggleButton value="counts" sx={{ fontSize: '0.65rem', px: 1, py: 0.25, textTransform: 'none' }}>
-              Counts
             </ToggleButton>
           </ToggleButtonGroup>
         )}
@@ -1369,10 +1378,10 @@ export const LeaderMetricsTable: React.FC<LeaderMetricsTableProps> = ({
             {unifiedActionIds.map(actionId => {
               const action = ACTIONS.find((a: any) => a.id === actionId);
               const actionHasGoal = action?.has_goal !== false;
-              // Also check in availableActions for the full action definition with fields
               const fullAction = availableActions?.find((a: any) => a.action_id === actionId);
-              const actionHasConversions = (action?.fields && action.fields.length >= 2) || 
-                                          (fullAction?.fields && fullAction.fields.length >= 2);
+              const boolFieldFilter = (f: any) => f.type === 'boolean' || !f.type;
+              const actionHasConversions = (action?.fields && action.fields.filter(boolFieldFilter).length >= 2) || 
+                                          (fullAction?.fields && fullAction.fields.filter(boolFieldFilter).length >= 2);
               
               if (!actionHasGoal) {
                 return (
@@ -1387,12 +1396,11 @@ export const LeaderMetricsTable: React.FC<LeaderMetricsTableProps> = ({
                         <SortIndicator column={actionId} />
                       </Box>
                     </TableCell>
-                    {(displayMode === 'conversions' || displayMode === 'counts') && actionHasConversions && (() => {
+                    {actionHasConversions && (() => {
                       const fullAction = availableActions?.find((a: any) => a.action_id === actionId);
-                      const fields = action?.fields || fullAction?.fields || [];
+                      const fields = (action?.fields || fullAction?.fields || []).filter((f: any) => f.type === 'boolean' || !f.type);
 
                       if (displayMode === 'conversions') {
-                        // Named→first, then each consecutive pair
                         const headers: React.ReactNode[] = [];
                         if (fields.length > 0) {
                           headers.push(
@@ -1425,19 +1433,37 @@ export const LeaderMetricsTable: React.FC<LeaderMetricsTableProps> = ({
                         });
                         return headers;
                       } else {
-                        // Counts mode: Named, then each checkpoint label
-                        return [
-                          <TableCell key={`cnt-header-${actionId}-named`} align="center"
-                            sx={{ fontWeight: 600, py: 1, minWidth: 80, bgcolor: '#f0f4ff' }}>
+                        // Progress mode: interleaved Named | →f1 | f1 | →f2 | f2 | ...
+                        const headers: React.ReactNode[] = [];
+                        headers.push(
+                          <TableCell key={`prog-header-${actionId}-named`} align="center"
+                            sx={{ fontWeight: 600, py: 1, minWidth: 60, bgcolor: '#f0f4ff' }}>
                             <Typography variant="caption" sx={{ fontSize: '0.65rem' }}>Named</Typography>
-                          </TableCell>,
-                          ...fields.map((f: any) => (
-                            <TableCell key={`cnt-header-${actionId}-${f.key}`} align="center"
-                              sx={{ fontWeight: 600, py: 1, minWidth: 80, bgcolor: '#f0f4ff' }}>
-                              <Typography variant="caption" sx={{ fontSize: '0.65rem' }}>{f.label}</Typography>
+                          </TableCell>
+                        );
+                        fields.forEach((field: any, idx: number) => {
+                          const fromLabel = idx === 0 ? 'Named' : fields[idx - 1].label;
+                          const fromKey = idx === 0 ? 'named' : fields[idx - 1].key;
+                          headers.push(
+                            <TableCell key={`prog-header-${actionId}-conv-${fromKey}-${field.key}`} align="center"
+                              sx={{ fontWeight: 600, py: 1, minWidth: 70, bgcolor: '#fffef0', cursor: 'pointer', userSelect: 'none', '&:hover': { bgcolor: '#fff9c4' } }}
+                              onClick={() => handleSort(`conversion-${actionId}-${fromKey}-${field.key}`)}>
+                              <Tooltip title={`${fromLabel} → ${field.label}`}>
+                                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column' }}>
+                                  <Typography variant="caption" sx={{ fontSize: '0.6rem', lineHeight: 1.2 }}>→{field.label}</Typography>
+                                  <SortIndicator column={`conversion-${actionId}-${fromKey}-${field.key}`} />
+                                </Box>
+                              </Tooltip>
                             </TableCell>
-                          )),
-                        ];
+                          );
+                          headers.push(
+                            <TableCell key={`prog-header-${actionId}-cnt-${field.key}`} align="center"
+                              sx={{ fontWeight: 600, py: 1, minWidth: 60, bgcolor: '#f0f4ff' }}>
+                              <Typography variant="caption" sx={{ fontSize: '0.65rem' }}>{field.label}</Typography>
+                            </TableCell>
+                          );
+                        });
+                        return headers;
                       }
                     })()}
                     {!flatView && (
@@ -1465,10 +1491,9 @@ export const LeaderMetricsTable: React.FC<LeaderMetricsTableProps> = ({
                     </Box>
                   </TableCell>
                   
-                  {/* Conversion / Counts header columns */}
-                  {(displayMode === 'conversions' || displayMode === 'counts') && actionHasConversions && (() => {
+                  {actionHasConversions && (() => {
                     const fullAction = availableActions?.find((a: any) => a.action_id === actionId);
-                    const fields = action?.fields || fullAction?.fields || [];
+                    const fields = (action?.fields || fullAction?.fields || []).filter((f: any) => f.type === 'boolean' || !f.type);
 
                     if (displayMode === 'conversions') {
                       const headers: React.ReactNode[] = [];
@@ -1503,16 +1528,37 @@ export const LeaderMetricsTable: React.FC<LeaderMetricsTableProps> = ({
                       });
                       return headers;
                     } else {
-                      return [
-                        <TableCell key={`cnt-hdr2-${actionId}-named`} align="center" sx={{ fontWeight: 600, py: 1, minWidth: 80, bgcolor: '#f0f4ff' }}>
+                      // Progress mode: interleaved Named | →f1 | f1 | →f2 | f2 | ...
+                      const headers: React.ReactNode[] = [];
+                      headers.push(
+                        <TableCell key={`prog-hdr2-${actionId}-named`} align="center"
+                          sx={{ fontWeight: 600, py: 1, minWidth: 60, bgcolor: '#f0f4ff' }}>
                           <Typography variant="caption" sx={{ fontSize: '0.65rem' }}>Named</Typography>
-                        </TableCell>,
-                        ...fields.map((f: any) => (
-                          <TableCell key={`cnt-hdr2-${actionId}-${f.key}`} align="center" sx={{ fontWeight: 600, py: 1, minWidth: 80, bgcolor: '#f0f4ff' }}>
-                            <Typography variant="caption" sx={{ fontSize: '0.65rem' }}>{f.label}</Typography>
+                        </TableCell>
+                      );
+                      fields.forEach((field: any, idx: number) => {
+                        const fromLabel = idx === 0 ? 'Named' : fields[idx - 1].label;
+                        const fromKey = idx === 0 ? 'named' : fields[idx - 1].key;
+                        headers.push(
+                          <TableCell key={`prog-hdr2-${actionId}-conv-${fromKey}-${field.key}`} align="center"
+                            sx={{ fontWeight: 600, py: 1, minWidth: 70, bgcolor: '#fffef0', cursor: 'pointer', userSelect: 'none', '&:hover': { bgcolor: '#fff9c4' } }}
+                            onClick={() => handleSort(`conversion-${actionId}-${fromKey}-${field.key}`)}>
+                            <Tooltip title={`${fromLabel} → ${field.label}`}>
+                              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column' }}>
+                                <Typography variant="caption" sx={{ fontSize: '0.6rem', lineHeight: 1.2 }}>→{field.label}</Typography>
+                                <SortIndicator column={`conversion-${actionId}-${fromKey}-${field.key}`} />
+                              </Box>
+                            </Tooltip>
                           </TableCell>
-                        )),
-                      ];
+                        );
+                        headers.push(
+                          <TableCell key={`prog-hdr2-${actionId}-cnt-${field.key}`} align="center"
+                            sx={{ fontWeight: 600, py: 1, minWidth: 60, bgcolor: '#f0f4ff' }}>
+                            <Typography variant="caption" sx={{ fontSize: '0.65rem' }}>{field.label}</Typography>
+                          </TableCell>
+                        );
+                      });
+                      return headers;
                     }
                   })()}
                   
@@ -1683,45 +1729,61 @@ export const LeaderMetricsTable: React.FC<LeaderMetricsTableProps> = ({
                       );
                     }
                     
-                    // Extra columns for conversions/counts display in summary row
-                    const actionHasConversions = action && action.fields && action.fields.length >= 2;
+                    const fullActionForConv2 = availableActions?.find((a: any) => a.action_id === actionId);
+                    const summaryBoolFilter = (f: any) => f.type === 'boolean' || !f.type;
+                    const actionHasConversions = (action?.fields && action.fields.filter(summaryBoolFilter).length >= 2) ||
+                                                (fullActionForConv2?.fields && fullActionForConv2.fields.filter(summaryBoolFilter).length >= 2);
                     let conversionColumns = null;
-                    if ((displayMode === 'conversions' || displayMode === 'counts') && actionHasConversions) {
+                    if (actionHasConversions) {
                       const fullAction = availableActions?.find((a: any) => a.action_id === actionId);
-                      const fields = action?.fields || fullAction?.fields || [];
+                      const fields = (action?.fields || fullAction?.fields || []).filter((f: any) => f.type === 'boolean' || !f.type);
+                      const totalNamed = allLeaders.reduce((sum, l) => {
+                        const p = l.actionProgress?.[actionId] as any;
+                        return sum + ((p?.namedCount ?? p?.count) || 0);
+                      }, 0);
+                      const fieldTotals = fields.map((f: any) =>
+                        allLeaders.reduce((sum, leader) => {
+                          return sum + (calculateCheckpointCount ? calculateCheckpointCount(leader.id, actionId, f.key) : 0);
+                        }, 0)
+                      );
+
                       if (displayMode === 'conversions') {
-                        // Named→first + pairs: show dashes in summary (can't aggregate rates)
-                        const numCols = fields.length; // Named→first + (fields-1) pairs
+                        const numCols = fields.length;
                         conversionColumns = Array.from({ length: numCols }).map((_, i) => (
                           <TableCell key={`conv-sum-${actionId}-${i}`} align="center" sx={{ py: 1, bgcolor: '#fffef0' }}>
                             <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.65rem' }}>—</Typography>
                           </TableCell>
                         ));
                       } else {
-                        // Counts mode: sum Named (raw) and each checkpoint count across all leaders
-                        const totalNamed = allLeaders.reduce((sum, l) => {
-                          const p = l.actionProgress?.[actionId] as any;
-                          return sum + ((p?.namedCount ?? p?.count) || 0);
-                        }, 0);
-                        const fieldTotals = fields.map((f: any) =>
-                          allLeaders.reduce((sum, leader) => {
-                            return sum + (calculateCheckpointCount ? calculateCheckpointCount(leader.id, actionId, f.key) : 0);
-                          }, 0)
-                        );
-                        conversionColumns = [
-                          <TableCell key={`cnt-sum-${actionId}-named`} align="center" sx={{ py: 1, bgcolor: '#f0f4ff' }}>
+                        // Progress mode: interleaved Named | →f1% | f1 | →f2% | f2 | ...
+                        const cols: React.ReactNode[] = [];
+                        cols.push(
+                          <TableCell key={`prog-sum-${actionId}-named`} align="center" sx={{ py: 1, bgcolor: '#f0f4ff' }}>
                             <Typography variant="body2" sx={{ fontSize: '0.8rem', fontWeight: 700, color: 'primary.main' }}>
-                              {totalNamed}/{stats.totalGoal}
+                              {totalNamed}
                             </Typography>
-                          </TableCell>,
-                          ...fields.map((f: any, i: number) => (
-                            <TableCell key={`cnt-sum-${actionId}-${f.key}`} align="center" sx={{ py: 1, bgcolor: '#f0f4ff' }}>
-                              <Typography variant="body2" sx={{ fontSize: '0.8rem', fontWeight: 700, color: 'text.secondary' }}>
-                                {fieldTotals[i]}/{stats.totalGoal}
+                          </TableCell>
+                        );
+                        fields.forEach((f: any, i: number) => {
+                          const fromCount = i === 0 ? totalNamed : fieldTotals[i - 1];
+                          const toCount = fieldTotals[i];
+                          const rate = fromCount > 0 ? (toCount / fromCount) * 100 : 0;
+                          cols.push(
+                            <TableCell key={`prog-sum-${actionId}-conv-${f.key}`} align="center" sx={{ py: 1, bgcolor: '#fffef0' }}>
+                              <Typography variant="body2" sx={{ fontSize: '0.75rem', fontWeight: 700, color: rate >= 50 ? '#4caf50' : rate >= 25 ? '#ff9800' : '#f44336' }}>
+                                {rate > 0 ? `${Math.round(rate)}%` : '—'}
                               </Typography>
                             </TableCell>
-                          )),
-                        ];
+                          );
+                          cols.push(
+                            <TableCell key={`prog-sum-${actionId}-cnt-${f.key}`} align="center" sx={{ py: 1, bgcolor: '#f0f4ff' }}>
+                              <Typography variant="body2" sx={{ fontSize: '0.8rem', fontWeight: 700 }}>
+                                {fieldTotals[i]}
+                              </Typography>
+                            </TableCell>
+                          );
+                        });
+                        conversionColumns = cols;
                       }
                     }
                     

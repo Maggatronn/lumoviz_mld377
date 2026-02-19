@@ -62,7 +62,7 @@ interface NetworkGraphProps {
   allLinks: GraphLink[];
   colorMode: 'status' | 'loe' | 'chapter';
   selectedChapter: string;
-  currentDateRange: { start: Date; end: Date } | null;
+  currentDateRange?: { start: Date; end: Date } | null;
   meetingsData?: any[];
   userMap: Map<string, any>;
   adminUserIds: Set<string>;
