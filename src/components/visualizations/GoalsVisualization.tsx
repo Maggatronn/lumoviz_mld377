@@ -31,7 +31,7 @@ interface ConversationsVisualizationProps {
   meetings: any[];
   contacts: any[];
   nodes: any[];
-  currentDateRange: { start: Date; end: Date} | null;
+  currentDateRange?: { start: Date; end: Date} | null;
   userMap: Map<string, any>;
   orgIds: any[];
   selectedChapter?: string;
@@ -136,7 +136,7 @@ const getPersonPatternIndex = (personName: string, allPersonNames: string[], his
 const ConversationSummaryView: React.FC<{
   meetings: any[];
   contacts: any[];
-  currentDateRange: { start: Date; end: Date } | null;
+  currentDateRange?: { start: Date; end: Date } | null;
   organizationalView: OrganizationalView;
   userMap: Map<string, any>;
   orgIds: any[];

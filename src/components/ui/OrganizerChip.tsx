@@ -5,36 +5,38 @@ import {
   MenuItem,
   ListItemIcon,
   ListItemText,
-  Tooltip
+  Tooltip,
+  Divider
 } from '@mui/material';
 import FilterListIcon from '@mui/icons-material/FilterList';
 import EditIcon from '@mui/icons-material/Edit';
 import InfoIcon from '@mui/icons-material/Info';
-import { OrganizerMapping } from '../../services/organizerMappingService';
+import DeleteIcon from '@mui/icons-material/Delete';
 
 interface OrganizerChipProps {
   name: string;
   vanId?: string;
+  contactVanId?: string;
   onFilterBy?: (name: string, vanId?: string) => void;
   onEditMapping?: (name: string, vanId?: string) => void;
   onViewDetails?: (name: string, vanId?: string) => void;
+  onRemoveOrganizer?: (contactVanId: string, organizerVanId: string) => void;
   size?: 'small' | 'medium';
   sx?: any;
   color?: any;
   variant?: 'filled' | 'outlined';
-  showMenu?: boolean; // Whether to show the Filter/Edit/Details menu
-  teamRole?: string; // Team role (displayed separately, not in chip)
+  showMenu?: boolean;
+  teamRole?: string;
 }
 
-/**
- * A chip component for organizer names with optional Filter/Edit menu
- */
 export const OrganizerChip: React.FC<OrganizerChipProps> = ({
   name,
   vanId,
+  contactVanId,
   onFilterBy,
   onEditMapping,
   onViewDetails,
+  onRemoveOrganizer,
   size = 'small',
   sx = {},
   color,
@@ -44,9 +46,11 @@ export const OrganizerChip: React.FC<OrganizerChipProps> = ({
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
   const menuOpen = Boolean(anchorEl);
 
+  const hasMenu = showMenu && (onFilterBy || onEditMapping || onViewDetails || onRemoveOrganizer);
+
   const handleClick = (event: React.MouseEvent<HTMLDivElement>) => {
-    event.stopPropagation(); // Prevent triggering parent row clicks
-    if (showMenu && (onFilterBy || onEditMapping || onViewDetails)) {
+    event.stopPropagation();
+    if (hasMenu) {
       setAnchorEl(event.currentTarget);
     }
   };
@@ -56,25 +60,27 @@ export const OrganizerChip: React.FC<OrganizerChipProps> = ({
   };
 
   const handleFilterBy = (event: React.MouseEvent) => {
-    event.stopPropagation(); // Prevent triggering parent row clicks
-    if (onFilterBy) {
-      onFilterBy(name, vanId);
-    }
+    event.stopPropagation();
+    onFilterBy?.(name, vanId);
     handleClose();
   };
 
   const handleEdit = (event: React.MouseEvent) => {
-    event.stopPropagation(); // Prevent triggering parent row clicks
-    if (onEditMapping) {
-      onEditMapping(name, vanId);
-    }
+    event.stopPropagation();
+    onEditMapping?.(name, vanId);
     handleClose();
   };
 
   const handleViewDetails = (event: React.MouseEvent) => {
-    event.stopPropagation(); // Prevent triggering parent row clicks
-    if (onViewDetails) {
-      onViewDetails(name, vanId);
+    event.stopPropagation();
+    onViewDetails?.(name, vanId);
+    handleClose();
+  };
+
+  const handleRemove = (event: React.MouseEvent) => {
+    event.stopPropagation();
+    if (onRemoveOrganizer && contactVanId && vanId) {
+      onRemoveOrganizer(contactVanId, vanId);
     }
     handleClose();
   };
@@ -87,10 +93,8 @@ export const OrganizerChip: React.FC<OrganizerChipProps> = ({
       variant={variant}
       onClick={handleClick}
       sx={{
-        cursor: showMenu && (onFilterBy || onEditMapping || onViewDetails) ? 'pointer' : 'default',
-        '&:hover': showMenu && (onFilterBy || onEditMapping || onViewDetails) ? {
-          opacity: 0.8
-        } : {},
+        cursor: hasMenu ? 'pointer' : 'default',
+        '&:hover': hasMenu ? { opacity: 0.8 } : {},
         ...sx
       }}
     />
@@ -98,7 +102,7 @@ export const OrganizerChip: React.FC<OrganizerChipProps> = ({
 
   return (
     <>
-      {showMenu && (onFilterBy || onEditMapping || onViewDetails) ? (
+      {hasMenu ? (
         <Tooltip title="Click for options">
           {chipElement}
         </Tooltip>
@@ -108,36 +112,37 @@ export const OrganizerChip: React.FC<OrganizerChipProps> = ({
         anchorEl={anchorEl}
         open={menuOpen}
         onClose={handleClose}
-        anchorOrigin={{
-          vertical: 'bottom',
-          horizontal: 'left',
-        }}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
       >
         {onViewDetails && (
           <MenuItem onClick={handleViewDetails}>
-            <ListItemIcon>
-              <InfoIcon fontSize="small" />
-            </ListItemIcon>
+            <ListItemIcon><InfoIcon fontSize="small" /></ListItemIcon>
             <ListItemText>View conversation details</ListItemText>
           </MenuItem>
         )}
         
         {onFilterBy && (
           <MenuItem onClick={handleFilterBy}>
-            <ListItemIcon>
-              <FilterListIcon fontSize="small" />
-            </ListItemIcon>
+            <ListItemIcon><FilterListIcon fontSize="small" /></ListItemIcon>
             <ListItemText>Filter by {name}</ListItemText>
           </MenuItem>
         )}
         
         {onEditMapping && (
           <MenuItem onClick={handleEdit}>
-            <ListItemIcon>
-              <EditIcon fontSize="small" />
-            </ListItemIcon>
+            <ListItemIcon><EditIcon fontSize="small" /></ListItemIcon>
             <ListItemText>Edit mapping...</ListItemText>
           </MenuItem>
+        )}
+
+        {onRemoveOrganizer && contactVanId && vanId && (
+          <>
+            <Divider />
+            <MenuItem onClick={handleRemove} sx={{ color: 'error.main' }}>
+              <ListItemIcon><DeleteIcon fontSize="small" color="error" /></ListItemIcon>
+              <ListItemText>Remove organizer</ListItemText>
+            </MenuItem>
+          </>
         )}
       </Menu>
     </>

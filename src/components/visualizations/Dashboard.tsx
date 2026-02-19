@@ -72,7 +72,6 @@ import {
   Close as CloseIcon,
   Chat as ChatIcon
 } from '@mui/icons-material';
-import { PledgeSubmission } from '../../services/api';
 import { ParentCampaign } from '../dialogs/ParentCampaignDialog';
 import AddTeamDialog from '../dialogs/AddTeamDialog';
 import EditTeamDialog from '../dialogs/EditTeamDialog';
@@ -95,7 +94,6 @@ import { API_BASE_URL } from '../../config';
 interface DashboardProps {
   currentUserId: string | null;
   currentUserInfo: any;
-  pledgeSubmissions: PledgeSubmission[];
   parentCampaigns: ParentCampaign[];
   // Network data for user's teams
   nodes: GraphNode[];
@@ -209,7 +207,6 @@ interface ActionGoal {
 const Dashboard: React.FC<DashboardProps> = ({
   currentUserId,
   currentUserInfo,
-  pledgeSubmissions,
   parentCampaigns,
   nodes,
   links,
@@ -242,6 +239,21 @@ const Dashboard: React.FC<DashboardProps> = ({
   onEditOrganizerMapping
 }) => {
   const { updateChapterColor } = useChapterColors();
+  
+  // Store latest prop values in refs to avoid useEffect dependency issues
+  const teamsDataRef = React.useRef(teamsData);
+  teamsDataRef.current = teamsData;
+  const selectedOrganizerInfoRef = React.useRef<any>(null);
+  const currentUserInfoRef = React.useRef(currentUserInfo);
+  currentUserInfoRef.current = currentUserInfo;
+  const userMapRef = React.useRef(userMap);
+  userMapRef.current = userMap;
+  const nodesRef = React.useRef(nodes);
+  nodesRef.current = nodes;
+  const peopleRecordsRef = React.useRef(peopleRecords);
+  peopleRecordsRef.current = peopleRecords;
+  const leaderHierarchyPropRef = React.useRef(leaderHierarchyProp);
+  leaderHierarchyPropRef.current = leaderHierarchyProp;
   
   // Convert userMap from string keys to number keys for PeoplePanel compatibility
   const peopleUserMap = React.useMemo(() => {
@@ -326,144 +338,71 @@ const Dashboard: React.FC<DashboardProps> = ({
     return params.get('organizer') || '';
   };
 
-  // Dynamically build organizer list from teams table names + organizer mappings
+  // Dynamically build organizer list from userMap (all people in org_ids/contacts)
   const dashboardOrganizers = React.useMemo(() => {
-    const organizerMap = new Map<string, string>(); // vanid -> name
+    const organizers: { vanid: string; name: string }[] = [];
+    const seen = new Set<string>();
     
-    if (!teamsData || !Array.isArray(teamsData)) {
-      return [];
-    }
-    
-    // Extract all team member NAMES from teams table
-    const teamMemberNames = new Set<string>();
-    
-    teamsData.forEach(team => {
-      // Get team members from BigQuery data
-      if (team.bigQueryData?.teamMembers && Array.isArray(team.bigQueryData.teamMembers)) {
-        team.bigQueryData.teamMembers.forEach((name: string) => {
-          if (name && name.trim()) {
-            teamMemberNames.add(name.trim());
-          }
-        });
-      }
-      
-      // Get team lead
-      if (team.bigQueryData?.teamLead) {
-        teamMemberNames.add(team.bigQueryData.teamLead.trim());
+    // Add all people from userMap
+    userMapRef.current.forEach((info, vanid) => {
+      if (!seen.has(vanid) && info.fullName && info.fullName.trim() !== '') {
+        seen.add(vanid);
+        organizers.push({ vanid, name: info.fullName });
       }
     });
     
-    // For each name, resolve to canonical form and find VAN ID
-    teamMemberNames.forEach(name => {
-      // Step 1: Resolve to canonical name using mappings
-      const canonicalName = organizerMappings && organizerMappings.length > 0
-        ? getCanonicalOrganizerName(name, organizerMappings)
-        : name;
-      
-      // Step 2: Find VAN ID for this canonical name in userMap
-      const userEntry = Array.from(userMap.entries()).find(([id, info]) => {
-        const fullName = (info.fullName || `${info.firstname || ''} ${info.lastname || ''}`.trim()).toLowerCase();
-        const firstName = (info.firstname || '').toLowerCase();
-        const canonicalLower = canonicalName.toLowerCase();
-        
-        return fullName === canonicalLower || 
-               firstName === canonicalLower ||
-               fullName.includes(canonicalLower) ||
-               canonicalLower.includes(fullName);
-      });
-      
-      if (userEntry) {
-        const [vanid, info] = userEntry;
-        organizerMap.set(vanid, canonicalName);
-      }
-    });
-    
-    // Also add ALL organizers from the mapping table
-    if (organizerMappings && Array.isArray(organizerMappings)) {
-      organizerMappings.forEach(mapping => {
-        const vanid = mapping.primary_vanid;
-        const name = mapping.preferred_name;
-        
-        if (vanid && name && !organizerMap.has(vanid)) {
-          organizerMap.set(vanid, name);
-        }
-      });
+    // Ensure Maggie Hughes is always present as a default
+    if (!seen.has('100001')) {
+      organizers.unshift({ vanid: '100001', name: 'Maggie Hughes' });
     }
     
-    // Convert to array and sort
-    return Array.from(organizerMap.entries())
-      .map(([vanid, name]) => ({ vanid, name }))
-      .sort((a, b) => a.name.localeCompare(b.name));
-  }, [teamsData, userMap, organizerMappings]);
+    // Sort alphabetically by name
+    organizers.sort((a, b) => a.name.localeCompare(b.name));
+    
+    return organizers;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userMap]);
   
-  // Organizer selector for dashboard view
-  // Try to get organizer from: 1) URL, 2) localStorage, 3) nothing (empty)
-  const getInitialOrganizer = () => {
-    const urlOrganizer = getOrganizerFromURL();
-    if (urlOrganizer) return urlOrganizer;
-    
-    // Check localStorage for cached organizer
-    const cachedOrganizer = localStorage.getItem('dashboard_selected_organizer');
-    
-    // Default to Maggie Hughes (100001) if nothing cached
-    if (!cachedOrganizer && currentUserId) {
-      return currentUserId;
-    }
-    
-    return cachedOrganizer || currentUserId || ''; // Fallback chain
-  };
-  
-  const [selectedOrganizerId, setSelectedOrganizerId] = React.useState<string>(getInitialOrganizer());
+  // TEMPORARY FIX: Just default to Maggie Hughes
+  const [selectedOrganizerId, setSelectedOrganizerId] = React.useState<string>('100001');
   const [selectedOrganizerInfo, setSelectedOrganizerInfo] = React.useState<any>(currentUserInfo);
 
-  // Save initial organizer to localStorage if not already saved
-  React.useEffect(() => {
-    if (selectedOrganizerId && !localStorage.getItem('dashboard_selected_organizer')) {
-      localStorage.setItem('dashboard_selected_organizer', selectedOrganizerId);
-    }
-  }, []);
+  // TEMPORARY FIX: Remove the effect that was causing loops
 
   // Update selected organizer when dropdown changes
+  // Only depend on selectedOrganizerId (primitive string) to prevent loops
   React.useEffect(() => {
     if (selectedOrganizerId) {
-      // Try to find in dashboardOrganizers list by VAN ID or by name (for URL compatibility)
       const selectedOrg = dashboardOrganizers.find(org => 
         org.vanid === selectedOrganizerId || org.name === selectedOrganizerId
       );
       
       if (selectedOrg) {
-        // If we found by name, update the selectedOrganizerId state to use VAN ID
         if (selectedOrg.vanid !== selectedOrganizerId) {
           setSelectedOrganizerId(selectedOrg.vanid);
-          return; // Let the state update trigger this effect again
+          return;
         }
         
-        // Use the name from the dropdown (canonical name)
-        
-        // Try to get more info from userMap
-        const orgInfo = userMap.get(selectedOrganizerId);
-        setSelectedOrganizerInfo(orgInfo || { 
+        const orgInfo = userMapRef.current.get(selectedOrganizerId);
+        const info = orgInfo || { 
           firstname: selectedOrg.name.split(' ')[0],
           fullName: selectedOrg.name 
-        });
+        };
+        selectedOrganizerInfoRef.current = info;
+        setSelectedOrganizerInfo(info);
         
-        // Set filter using the canonical name
-        // PeoplePanel will check if person.organizers array includes this name
         setDashboardPeopleFilters((prev: any) => ({ 
           ...prev, 
           organizer: selectedOrg.name 
         }));
-        
-      } else {
       }
     } else {
-      // Clear filter when no organizer selected
       setDashboardPeopleFilters((prev: any) => ({ 
         ...prev, 
         organizer: '' 
       }));
     }
-  }, [selectedOrganizerId, userMap, currentUserInfo, dashboardOrganizers]);
+  }, [selectedOrganizerId, dashboardOrganizers]); // eslint-disable-line react-hooks/exhaustive-deps
   
   // Filters for Dashboard's My People PeoplePanel - pre-filtered by current user as organizer
   const [dashboardPeopleFilters, setDashboardPeopleFilters] = React.useState<any>({
@@ -1195,55 +1134,34 @@ const Dashboard: React.FC<DashboardProps> = ({
   }, [selectedOrganizerId]); // Reload whenever the selected organizer changes
 
   // Load available actions for the selected organizer
+  const actionsLoadingRef = React.useRef(false);
+  
   useEffect(() => {
     const loadActions = async () => {
-      if (selectedOrganizerId) {
-        setLoadingActions(true);
-        try {
-          // Get organizer's chapter from their team
-          const organizerFullName = selectedOrganizerInfo?.fullName;
-          const organizerFirstName = selectedOrganizerInfo?.firstname;
-          
-          // Find the team where this organizer is a member or lead
-          const organizerTeam = teamsData?.find(team => {
-            const teamLead = team.bigQueryData?.teamLead;
-            const teamMembers = team.bigQueryData?.teamMembers || [];
-            
-            // Check if organizer is the lead
-            if (teamLead === organizerFullName || teamLead === organizerFirstName) {
-              return true;
-            }
-            
-            // Check if organizer is a member
-            return teamMembers.some((member: string) => 
-              member === organizerFullName || member === organizerFirstName
-            );
-          });
-          
-          // Get chapter from team, or fall back to selectedOrganizerInfo
-          const organizerChapter = organizerTeam?.bigQueryData?.chapter || 
-                                   selectedOrganizerInfo?.chapter || 
-                                   currentUserInfo?.chapter;
-          
-          const actions = await fetchActions(selectedOrganizerId, organizerChapter);
-          // Show all actions visible to this organizer (includes templates they've adopted)
-          // The API already filters to show only actions visible to the organizer and their chapter
-          setAvailableActions(actions);
-          // Set default action to first available action
-          if (actions.length > 0 && !selectedActionForAdd) {
-            setSelectedActionForAdd(actions[0].action_id);
-          }
-        } catch (error) {
-          console.error('Error loading actions:', error);
-          setAvailableActions([]);
-        } finally {
-          setLoadingActions(false);
+      if (!selectedOrganizerId || actionsLoadingRef.current) return;
+      actionsLoadingRef.current = true;
+      setLoadingActions(true);
+      try {
+        const orgInfo = selectedOrganizerInfoRef.current;
+        const organizerChapter = orgInfo?.chapter || currentUserInfoRef.current?.chapter;
+        
+        const actions = await fetchActions(selectedOrganizerId, organizerChapter);
+        setAvailableActions(actions);
+        if (actions.length > 0) {
+          setSelectedActionForAdd(prev => prev || actions[0].action_id);
         }
+      } catch (error) {
+        console.error('Error loading actions:', error);
+        setAvailableActions([]);
+      } finally {
+        setLoadingActions(false);
+        actionsLoadingRef.current = false;
       }
     };
     
+    actionsLoadingRef.current = false;
     loadActions();
-  }, [selectedOrganizerId, reloadTrigger, selectedOrganizerInfo?.userId, currentUserInfo?.userId, teamsData]);
+  }, [selectedOrganizerId, reloadTrigger]); // eslint-disable-line react-hooks/exhaustive-deps
   
   // Cache for actions to prevent duplicate API calls
   const actionsCache = React.useRef<Map<string, any[]>>(new Map());
@@ -1254,136 +1172,49 @@ const Dashboard: React.FC<DashboardProps> = ({
   }, [reloadTrigger]);
   
   // Load live actions and goals for all leaders (from both hierarchy AND teams)
-  // This creates maps of organizer_vanid -> live action IDs and organizer_vanid -> goals
+  const leaderActionsLoadedRef = React.useRef(false);
+  
   useEffect(() => {
+    if (leaderActionsLoadedRef.current) return;
+    leaderActionsLoadedRef.current = true;
+    
     const loadLeaderActionsAndGoals = async () => {
-      // Get all unique leader VANIDs from TWO sources:
       const leaderVanids = new Set<string>();
       
-      // SOURCE 1: Leader hierarchy
-      if (leaderHierarchyProp && leaderHierarchyProp.length > 0) {
-        leaderHierarchyProp.forEach(entry => {
+      const hierarchy = leaderHierarchyPropRef.current;
+      if (hierarchy && hierarchy.length > 0) {
+        hierarchy.forEach(entry => {
           if (entry.leader_vanid) leaderVanids.add(entry.leader_vanid);
-        });
-      }
-      
-      // SOURCE 2: Team members (if user has a team, include team members as leaders)
-      const myTeam = teamsData?.find(team => {
-        const teamLead = team.bigQueryData?.teamLead;
-        if (!teamLead) return false;
-        
-        const organizerInfo = selectedOrganizerInfo || currentUserInfo;
-        const userFullName = organizerInfo?.fullName;
-        const userFirstName = organizerInfo?.firstname;
-        
-        return teamLead === userFullName || 
-               teamLead.toLowerCase() === userFullName?.toLowerCase() ||
-               teamLead.toLowerCase() === userFirstName?.toLowerCase();
-      });
-      
-      if (myTeam?.bigQueryData?.teamMembers && Array.isArray(myTeam.bigQueryData.teamMembers)) {
-        myTeam.bigQueryData.teamMembers.forEach((memberName: string) => {
-          // Find team member's VAN ID from peopleRecords or nodes
-          const person = peopleRecords?.find(p => 
-            p.name.toLowerCase() === memberName.toLowerCase()
-          );
-          const node = !person ? nodes.find(n => 
-            n.name?.toLowerCase() === memberName.toLowerCase()
-          ) : null;
-          
-          const memberId = person?.id || node?.id;
-          if (memberId) {
-            leaderVanids.add(memberId);
-          }
         });
       }
       
       if (leaderVanids.size === 0) return;
       
-      // Group leaders by chapter to reduce API calls
-      const leadersByChapter = new Map<string, string[]>();
-      
-      Array.from(leaderVanids).forEach(vanid => {
-        const leaderInfo = userMap.get(vanid);
-        const leaderFullName = leaderInfo?.fullName || leaderInfo?.name;
-        const leaderFirstName = leaderInfo?.firstname;
-        
-        // Find the team where this leader is a member or lead
-        const leaderTeam = teamsData?.find(team => {
-          const teamLead = team.bigQueryData?.teamLead;
-          const teamMembers = team.bigQueryData?.teamMembers || [];
-          
-          if (teamLead === leaderFullName || teamLead === leaderFirstName) {
-            return true;
-          }
-          
-          return teamMembers.some((member: string) => 
-            member === leaderFullName || member === leaderFirstName
-          );
-        });
-        
-        const leaderChapter = leaderTeam?.bigQueryData?.chapter || leaderInfo?.chapter || 'unknown';
-        
-        if (!leadersByChapter.has(leaderChapter)) {
-          leadersByChapter.set(leaderChapter, []);
-        }
-        leadersByChapter.get(leaderChapter)!.push(vanid);
-      });
-      
-      // Fetch actions and goals for each leader
       const actionsMap: Record<string, string[]> = {};
       const goalsMap: Record<string, Record<string, number>> = {};
-      
-      // Fetch actions once per chapter and share across leaders
-      const chapterActionsCache = new Map<string, any[]>();
       
       await Promise.all(
         Array.from(leaderVanids).map(async (vanid) => {
           try {
-            // Get leader's info from userMap
-            const leaderInfo = userMap.get(vanid);
-            const leaderFullName = leaderInfo?.fullName || leaderInfo?.name;
-            const leaderFirstName = leaderInfo?.firstname;
+            const leaderInfo = userMapRef.current.get(vanid);
+            const leaderChapter = leaderInfo?.chapter || 'unknown';
             
-            // Find the team where this leader is a member or lead
-            const leaderTeam = teamsData?.find(team => {
-              const teamLead = team.bigQueryData?.teamLead;
-              const teamMembers = team.bigQueryData?.teamMembers || [];
-              
-              // Check if leader is the lead
-              if (teamLead === leaderFullName || teamLead === leaderFirstName) {
-                return true;
-              }
-              
-              // Check if leader is a member
-              return teamMembers.some((member: string) => 
-                member === leaderFullName || member === leaderFirstName
-              );
-            });
-            
-            // Get chapter from team, or fall back to userMap
-            const leaderChapter = leaderTeam?.bigQueryData?.chapter || leaderInfo?.chapter || 'unknown';
-            
-            // Check cache first
             const cacheKey = `${vanid}:${leaderChapter}`;
             let actions;
             
             if (actionsCache.current.has(cacheKey)) {
               actions = actionsCache.current.get(cacheKey);
             } else {
-              // Fetch actions with chapter filtering
               actions = await fetchActions(vanid, leaderChapter);
               actionsCache.current.set(cacheKey, actions);
             }
             
-            // Filter to only live actions
             const liveActions = actions
               ? actions.filter((a: any) => (a.status || 'live') === 'live')
                        .map((a: any) => a.action_id)
               : [];
             actionsMap[vanid] = liveActions;
             
-            // Fetch goals
             const goals = await fetchOrganizerGoals(vanid);
             const goalsForOrganizer: Record<string, number> = {};
             goals.forEach((goal: any) => {
@@ -1403,7 +1234,7 @@ const Dashboard: React.FC<DashboardProps> = ({
     };
     
     loadLeaderActionsAndGoals();
-  }, [leaderHierarchyProp, reloadTrigger, teamsData, selectedOrganizerInfo?.userId, currentUserInfo?.userId]);
+  }, [reloadTrigger, selectedOrganizerId]); // eslint-disable-line react-hooks/exhaustive-deps
   
   // Load organizer goals
   useEffect(() => {
@@ -1503,35 +1334,26 @@ const Dashboard: React.FC<DashboardProps> = ({
     return baseGoal;
   };
 
-  // Load goals for all leaders (for My Leaders view)
+  // Load goals for all leaders (for My Leaders view) - load once
+  const allLeaderGoalsLoadedRef = React.useRef(false);
+  
   useEffect(() => {
+    if (!selectedOrganizerId || allLeaderGoalsLoadedRef.current) return;
+    allLeaderGoalsLoadedRef.current = true;
+    
     const loadAllLeaderGoals = async () => {
-      if (!selectedOrganizerId) return;
-      
-      // Get all unique leader IDs from hierarchy and teams
       const uniqueLeaderIds = new Set<string>();
       
-      // From leader hierarchy
-      leaderHierarchyProp.forEach(entry => {
+      const hierarchy = leaderHierarchyPropRef.current;
+      hierarchy.forEach(entry => {
         uniqueLeaderIds.add(entry.leader_vanid);
         if (entry.parent_leader_vanid) {
           uniqueLeaderIds.add(entry.parent_leader_vanid);
         }
       });
       
-      // From my team members
-      if (myTeam?.bigQueryData?.teamMembers) {
-        myTeam.bigQueryData.teamMembers.forEach((memberName: string) => {
-          const person = peopleRecords?.find(p => 
-            p.name.toLowerCase() === memberName.toLowerCase()
-          );
-          if (person?.id) {
-            uniqueLeaderIds.add(person.id);
-          }
-        });
-      }
+      if (uniqueLeaderIds.size === 0) return;
       
-      // Fetch goals for all leaders in parallel
       const goalsPromises = Array.from(uniqueLeaderIds).map(vanid => 
         fetchOrganizerGoals(vanid).catch(err => {
           console.error(`Failed to fetch goals for leader ${vanid}:`, err);
@@ -1541,7 +1363,6 @@ const Dashboard: React.FC<DashboardProps> = ({
       
       const allGoalsArrays = await Promise.all(goalsPromises);
       
-      // Build map: leaderVanId -> (actionId -> goalValue)
       const goalsMap = new Map<string, Map<string, number>>();
       allGoalsArrays.forEach((goalsArray, index) => {
         const vanid = Array.from(uniqueLeaderIds)[index];
@@ -1558,7 +1379,7 @@ const Dashboard: React.FC<DashboardProps> = ({
     };
     
     loadAllLeaderGoals();
-  }, [selectedOrganizerId, leaderHierarchyProp, myTeam, peopleRecords, reloadTrigger]);
+  }, [selectedOrganizerId, reloadTrigger]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Selected organizer's chapter
   const userChapter = selectedOrganizerInfo?.chapter || currentUserInfo?.chapter || 'Unknown';
@@ -1579,7 +1400,7 @@ const Dashboard: React.FC<DashboardProps> = ({
     }
     
     return allIds;
-  }, [selectedOrganizerId, organizerMappings]);
+  }, [selectedOrganizerId]); // Removed organizerMappings to prevent infinite loop
 
   // Helper: Get ALL name variations for the selected organizer
   const getAllOrganizerNames = useMemo(() => {
@@ -1608,7 +1429,7 @@ const Dashboard: React.FC<DashboardProps> = ({
     }
     
     return names;
-  }, [selectedOrganizerId, selectedOrganizerInfo, currentUserInfo, organizerMappings]);
+  }, [selectedOrganizerId, selectedOrganizerInfo, currentUserInfo]); // Removed organizerMappings to prevent infinite loop
 
   // MY TURF: People organized by the selected organizer (pledges + manual additions)
   const myTurf = useMemo(() => {
@@ -1631,39 +1452,6 @@ const Dashboard: React.FC<DashboardProps> = ({
       };
     };
     
-    // Import pledges as "Sign Pledge" actions
-    pledgeSubmissions.forEach(submission => {
-      if (submission.submissions && Array.isArray(submission.submissions)) {
-        submission.submissions.forEach(sub => {
-          const leaderStr = sub.leader?.toString().trim();
-          // Check against ALL VAN IDs and ALL name variations
-          const isMyPledge = allVanIds.includes(leaderStr) || 
-                            allNames.some(name => name && leaderStr === name);
-          
-          if (isMyPledge) {
-            // Check if already in manual turf list
-            const existingInList = turfList.find(t => t.vanid === sub.vanid && t.action === 'sign_pledge');
-            const contactInfo = getContactInfo(sub.vanid);
-            
-            turfPeople.push({
-              vanid: sub.vanid,
-              firstName: sub.first_name,
-              lastName: sub.last_name,
-              desiredChange: sub.desired_change,
-              action: 'sign_pledge',
-              fields: {
-                asked: existingInList?.fields?.asked ?? true, // Auto-mark as asked if pledged
-                signed: existingInList?.fields?.signed ?? true, // Auto-mark as signed if pledged
-                willGetOthers: existingInList?.fields?.willGetOthers ?? false
-              },
-              datePledged: submission.date_submitted,
-              loeStatus: contactInfo.loeStatus,
-              memberStatus: contactInfo.memberStatus
-            });
-          }
-        });
-      }
-    });
     
     // Merge with manual turf list (people added but not yet pledged/completed action)
     turfList.forEach(turfPerson => {
@@ -1687,7 +1475,7 @@ const Dashboard: React.FC<DashboardProps> = ({
     // });
     
     return turfPeople;
-  }, [pledgeSubmissions, selectedOrganizerId, turfList, getAllOrganizerVanIds, getAllOrganizerNames, sharedAllContacts]);
+  }, [selectedOrganizerId, turfList, getAllOrganizerVanIds, getAllOrganizerNames, sharedAllContacts]);
 
   // MY PEOPLE: People organized by the selected organizer (from peopleRecords/meetings + primary organizer)
   const myPeople = useMemo(() => {
@@ -1886,34 +1674,6 @@ const Dashboard: React.FC<DashboardProps> = ({
     const allVanIds = getAllOrganizerVanIds;
     const allNames = getAllOrganizerNames;
     
-    pledgeSubmissions.forEach(submission => {
-      if (submission.submissions && Array.isArray(submission.submissions)) {
-        submission.submissions.forEach(sub => {
-          const leaderStr = sub.leader?.toString().trim();
-          // Check if this pledge was organized by the selected organizer
-          const isMyPledge = allVanIds.includes(leaderStr) || 
-                            allNames.some(name => name && leaderStr === name);
-          
-          if (isMyPledge && sub.vanid) {
-            const vanidStr = sub.vanid.toString();
-            // Only add if NOT already in VAN contacts and NOT already a leader
-            const inVanContacts = peopleRecords.some(p => p.id === vanidStr);
-            if (!inVanContacts && !existingLeaderIds.has(vanidStr)) {
-              if (!pledgePeopleMap.has(vanidStr)) {
-                pledgePeopleMap.set(vanidStr, {
-                  id: vanidStr,
-                  name: `${sub.first_name || ''} ${sub.last_name || ''}`.trim(),
-                  chapter: userChapter || 'Unknown',
-                  totalMeetings: 0,
-                  inVan: false,
-                  isPledgeOnly: true
-                });
-              }
-            }
-          }
-        });
-      }
-    });
     
     const pledgePeople = Array.from(pledgePeopleMap.values());
     const allPeople = [...vanPeople, ...pledgePeople];
@@ -1948,7 +1708,7 @@ const Dashboard: React.FC<DashboardProps> = ({
       // Otherwise alphabetical
       return a.name.localeCompare(b.name);
     });
-  }, [sharedAllContacts, peopleRecords, leadersList, selectedOrganizerId, myTeam, userChapter, pledgeSubmissions, getAllOrganizerVanIds, getAllOrganizerNames]);
+  }, [sharedAllContacts, peopleRecords, leadersList, selectedOrganizerId, myTeam, userChapter, getAllOrganizerVanIds, getAllOrganizerNames]);
 
   // Filter conversation people by search text
   const filteredTurfPeople = useMemo(() => {
@@ -2551,69 +2311,8 @@ const Dashboard: React.FC<DashboardProps> = ({
         }
       }
       
-      // Count pledges collected by this leader
-      let pledgeCount = 0;
-      const matchedPledges: any[] = []; // For debugging
-      
-      pledgeSubmissions.forEach(submission => {
-        if (submission.submissions && Array.isArray(submission.submissions)) {
-          submission.submissions.forEach(sub => {
-            const leaderStr = sub.leader?.toString().trim().toLowerCase();
-            
-            // Skip if no leader string
-            if (!leaderStr) return;
-            
-            // Use stricter matching - prioritize exact matches and full name matches
-            let matched = false;
-            
-            // 1. Exact match with leaderId
-            if (leaderStr === leaderId.toLowerCase()) {
-              matched = true;
-            }
-            // 2. Exact match with full name
-            else if (leaderStr === leaderName.toLowerCase()) {
-              matched = true;
-            }
-            // 3. Exact match with team member name (if applicable)
-            else if (teamMemberName && leaderStr === teamMemberName.toLowerCase()) {
-              matched = true;
-            }
-            // 4. Full name contains match (but require at least 2 parts to match)
-            else {
-              // Check if leader field contains both first and last name parts
-              const leaderNameParts = leaderName.toLowerCase().split(' ');
-              if (leaderNameParts.length >= 2) {
-                const firstName = leaderNameParts[0];
-                const lastName = leaderNameParts[leaderNameParts.length - 1];
-                
-                // Both first and last name must be in the leader string
-                if (leaderStr.includes(firstName) && leaderStr.includes(lastName)) {
-                  matched = true;
-                }
-              }
-            }
-            
-            if (matched) {
-              pledgeCount += 1;
-              matchedPledges.push({
-                person: `${sub.first_name} ${sub.last_name}`,
-                leaderField: sub.leader,
-                matchedAgainst: leaderName
-              });
-            }
-          });
-        }
-      });
-      
-      // Debug logging for specific leaders - commented out for production
-      // if (leaderName.toLowerCase().includes('ali') || leaderName.toLowerCase().includes('natalia')) {
-      //   console.log(`🔍 Pledge count for ${leaderName}:`, {
-      //     leaderId,
-      //     pledgeCount,
-      //     matchedPledges,
-      //     leaderNameParts: leaderName.split(' ')
-      //   });
-      // }
+      // No pledge processing needed
+      const pledgeCount = 0;
       
       // Build sub-leaders from TWO sources:
       // 1. Explicit hierarchy from lumoviz_leader_hierarchy table
@@ -2869,7 +2568,7 @@ const Dashboard: React.FC<DashboardProps> = ({
     };
     
     return sortLeadersRecursive(leaders);
-  }, [pledgeSubmissions, selectedOrganizerId, selectedOrganizerInfo, nodes, links, userMap, myTeam, teamsData, leadersList, peopleRecords, leaderHierarchyProp, leaderActionsMap, listsDataProp, ACTIONS, allLeaderGoalsMap, organizerMappings]);
+  }, [selectedOrganizerId, selectedOrganizerInfo, nodes, links, userMap, myTeam, teamsData, leadersList, peopleRecords, leaderHierarchyProp, leaderActionsMap, listsDataProp, ACTIONS, allLeaderGoalsMap]); // Removed organizerMappings to prevent infinite loop
 
   // No longer need these - simplified leader-to-my-list flow
 
@@ -2886,29 +2585,8 @@ const Dashboard: React.FC<DashboardProps> = ({
     const userFirstName = organizerInfo?.firstname;
     const alternateIds = Array.isArray(organizerInfo?.alternateIds) ? organizerInfo.alternateIds : [];
     
-    let count = 0;
-    pledgeSubmissions.forEach(submission => {
-      // Check if submissions array exists
-      if (submission.submissions && Array.isArray(submission.submissions)) {
-        submission.submissions.forEach(sub => {
-          const leaderStr = sub.leader?.toString().trim();
-          
-          // Match by ID, full name, first+last name, first name only, or alternate IDs
-          const isMatch = leaderStr === currentUserId || 
-                         leaderStr === userFullName ||
-                         leaderStr === userFirstLast ||
-                         leaderStr === userFirstName ||
-                         (leaderStr && alternateIds.includes(leaderStr));
-          
-          if (isMatch) {
-            count += 1;
-          }
-        });
-      }
-    });
-    
-    return count;
-  }, [pledgeSubmissions, selectedOrganizerId, selectedOrganizerInfo, currentUserInfo]);
+    return 0; // No pledge processing needed
+  }, [selectedOrganizerId, selectedOrganizerInfo, currentUserInfo]);
 
   // Calculate individual goals for each action (using live actions only)
   const individualActionGoals = useMemo(() => {
@@ -3141,31 +2819,10 @@ const Dashboard: React.FC<DashboardProps> = ({
         // Federation-wide count (from pledgeSubmissions)
         let federationCount = 0;
         
-        if (action.action_id === 'sign_pledge') {
-          // Count all pledges in the federation
-          pledgeSubmissions.forEach(submission => {
-            if (submission.submissions && Array.isArray(submission.submissions)) {
-              federationCount += submission.submissions.length;
-            }
-          });
-        }
+        // No pledge processing needed
         
-        // Team-wide count (from myTeam members + their pledges)
+        // No pledge processing needed
         let teamCount = 0;
-        if (myTeam?.bigQueryData?.teamMembers && action.action_id === 'sign_pledge') {
-          const teamMemberNames = myTeam.bigQueryData.teamMembers.map((name: string) => name.toLowerCase());
-          
-          pledgeSubmissions.forEach(submission => {
-            if (submission.submissions && Array.isArray(submission.submissions)) {
-              submission.submissions.forEach(sub => {
-                const leaderStr = sub.leader?.toString().trim().toLowerCase();
-                if (leaderStr && teamMemberNames.some((name: string) => leaderStr.includes(name) || name.includes(leaderStr))) {
-                  teamCount += 1;
-                }
-              });
-            }
-          });
-        }
         
         // Use federation count as the main metric, with team as secondary
         // Goals are aspirational (e.g., 1000 pledges federation-wide)
@@ -3190,23 +2847,7 @@ const Dashboard: React.FC<DashboardProps> = ({
       liveActions.forEach((action: any) => {
         let teamCount = 0;
         
-        if (action.action_id === 'sign_pledge') {
-          // Count pledges from team members
-          if (myTeam.bigQueryData?.teamMembers) {
-            const teamMemberNames = myTeam.bigQueryData.teamMembers.map((name: string) => name.toLowerCase());
-            
-            pledgeSubmissions.forEach(submission => {
-              if (submission.submissions && Array.isArray(submission.submissions)) {
-                submission.submissions.forEach(sub => {
-                  const leaderStr = sub.leader?.toString().trim().toLowerCase();
-                  if (leaderStr && teamMemberNames.some((name: string) => leaderStr.includes(name) || name.includes(leaderStr))) {
-                    teamCount += 1;
-                  }
-                });
-              }
-            });
-          }
-        }
+        // No pledge processing needed
         
         // Team goals (smaller than federation-wide)
         const goal = action.action_id === 'sign_pledge' ? 100 : 20;
@@ -3224,7 +2865,7 @@ const Dashboard: React.FC<DashboardProps> = ({
     }
     
     return goals;
-  }, [userCampaigns, pledgeSubmissions, myTeam, availableActions]);
+  }, [userCampaigns, myTeam, availableActions]);
 
   // Calculate overall campaign progress (average of all actions)
   const campaignProgress = useMemo(() => {
@@ -4535,7 +4176,6 @@ const Dashboard: React.FC<DashboardProps> = ({
                       currentVisualization="people"
                       peopleFilters={dashboardPeopleFilters}
                       onFiltersChange={setDashboardPeopleFilters}
-                      pledgeSubmissions={pledgeSubmissions}
                       selectedActions={currentOrganizerLiveActions}
                       currentUserId={currentUserId || undefined}
                       currentUserName={currentUserInfo?.fullName || currentUserInfo?.firstname || ''}
@@ -4703,7 +4343,6 @@ const Dashboard: React.FC<DashboardProps> = ({
                                 unifiedActionIds={unifiedActionIdsForTable}
                                 ACTIONS={ACTIONS}
                                 availableActions={availableActions}
-                                pledgeSubmissions={pledgeSubmissions}
                                 currentUserId={currentUserId || undefined}
                                 peopleRecords={peopleRecords}
                                 reloadTriggers={leaderListReloadTrigger}
