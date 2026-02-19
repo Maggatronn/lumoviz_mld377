@@ -341,18 +341,30 @@ const Dashboard: React.FC<DashboardProps> = ({
     return params.get('organizer') || '';
   };
 
-  // Dynamically build organizer list from userMap (all people in org_ids/contacts)
+  // Dynamically build organizer list from userMap + teamsData (org IDs + all team members)
   const dashboardOrganizers = React.useMemo(() => {
     const organizers: { vanid: string; name: string }[] = [];
     const seen = new Set<string>();
     
-    // Add all people from userMap
+    // Add all people from userMap (org IDs / contacts)
     userMapRef.current.forEach((info, vanid) => {
       if (!seen.has(vanid) && info.fullName && info.fullName.trim() !== '') {
         seen.add(vanid);
         organizers.push({ vanid, name: info.fullName });
       }
     });
+
+    // Add team members from teamsData
+    for (const team of teamsDataRef.current) {
+      const members = team.organizers || [];
+      for (const m of members) {
+        const vid = (m.id || m.vanId)?.toString();
+        if (vid && !seen.has(vid) && m.name) {
+          seen.add(vid);
+          organizers.push({ vanid: vid, name: m.name });
+        }
+      }
+    }
     
     // Ensure Maggie Hughes is always present as a default
     if (!seen.has('100001')) {
@@ -364,7 +376,7 @@ const Dashboard: React.FC<DashboardProps> = ({
     
     return organizers;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userMap]);
+  }, [userMap, teamsData]);
   
   // TEMPORARY FIX: Just default to Maggie Hughes
   const [selectedOrganizerId, setSelectedOrganizerId] = React.useState<string>('100001');
