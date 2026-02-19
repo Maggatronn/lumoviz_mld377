@@ -772,14 +772,65 @@ const MainAppContent: React.FC = () => {
   }, [currentUserId, loadOrganizerGoalsData]);
 
   // Available filter options
+  const [contactsData, setContactsData] = useState<any[]>([]);
+  const [orgIds, setOrgIds] = useState<any[]>([]);
+  const [userMap, setUserMap] = useState<Map<string, any>>(new Map());
+
+  // Build combined organizer options from org_ids + team members for AssignOrganizerDialog
+  const allOrganizerOptions = React.useMemo(() => {
+    const seen = new Set<string>();
+    const combined: Array<{ vanid?: string | number; firstname?: string; lastname?: string; chapter?: string }> = [];
+
+    for (const o of orgIds) {
+      const vid = o.vanid?.toString();
+      if (vid && !seen.has(vid)) {
+        seen.add(vid);
+        combined.push(o);
+      }
+    }
+
+    for (const team of teamsData) {
+      const members = team.organizers || [];
+      for (const m of members) {
+        const vid = (m.id || m.vanId)?.toString();
+        if (vid && !seen.has(vid) && m.name) {
+          seen.add(vid);
+          const nameParts = m.name.trim().split(/\s+/);
+          combined.push({
+            vanid: vid,
+            firstname: nameParts[0] || '',
+            lastname: nameParts.slice(1).join(' ') || '',
+            chapter: m.chapter || team.chapter
+          });
+        }
+      }
+    }
+
+    return combined;
+  }, [orgIds, teamsData]);
+
+  // Available filter options (organizer dropdown in the filter bar)
   const filterOptions = React.useMemo(() => {
-    // Get unique organizers from meetings
-    const organizers = Array.from(new Set(
-      meetingsData
-        .map(meeting => meeting.organizer)
-        .filter(Boolean)
-        .filter(org => org !== 'Unknown Organizer')
-    )).sort();
+    const organizerSet = new Set<string>();
+
+    meetingsData.forEach(meeting => {
+      if (meeting.organizer && meeting.organizer !== 'Unknown Organizer') {
+        organizerSet.add(meeting.organizer);
+      }
+    });
+
+    orgIds.forEach((o: any) => {
+      const name = `${o.firstname || ''} ${o.lastname || ''}`.trim();
+      if (name) organizerSet.add(name);
+    });
+
+    teamsData.forEach((team: any) => {
+      (team.organizers || []).forEach((m: any) => {
+        if (m.name) organizerSet.add(m.name);
+      });
+    });
+
+    const organizers = Array.from(organizerSet).sort();
 
     return {
       chapters,
@@ -787,10 +838,7 @@ const MainAppContent: React.FC = () => {
       teamTypes: ['Lead Team', 'Chapter Team', 'Working Group', 'Committee'],
       goalTypes: ['Pledges', 'Leadership', 'Membership', 'Events']
     };
-  }, [chapters, meetingsData]);
-  const [contactsData, setContactsData] = useState<any[]>([]);
-  const [orgIds, setOrgIds] = useState<any[]>([]);
-  const [userMap, setUserMap] = useState<Map<string, any>>(new Map());
+  }, [chapters, meetingsData, orgIds, teamsData]);
   
   // Memoize userMap with integer keys for PeoplePanel to prevent unnecessary re-renders
   const peopleUserMap = React.useMemo(() => {
@@ -2443,18 +2491,45 @@ const MainAppContent: React.FC = () => {
 
       // Find or create the section leader node (once per section)
       if (!sectionLeaderIdMap.has(sectionName)) {
+        const sectionLower = sectionName.toLowerCase();
+
+        // 1. Check orgIds
         const leaderOrg = (orgIds as any[]).find((org: any) =>
-          (org.firstname || '').trim().toLowerCase() === sectionName.toLowerCase()
+          (org.firstname || '').trim().toLowerCase() === sectionLower
         );
-        const leaderId = leaderOrg?.vanid?.toString() || `section_leader_${sectionName}`;
+
+        // 2. Check existing network nodes (team members already in the graph)
+        const existingNode = !leaderOrg && filteredNodes.find((n: any) => {
+          const firstName = (n.name || '').split(' ')[0].toLowerCase();
+          return firstName === sectionLower;
+        });
+
+        // 3. Check all team member data
+        let teamMemberMatch: any = null;
+        if (!leaderOrg && !existingNode) {
+          for (const t of teamsData as any[]) {
+            const match = (t.organizers || []).find((m: any) => {
+              const firstName = (m.name || '').split(' ')[0].toLowerCase();
+              return firstName === sectionLower;
+            });
+            if (match) { teamMemberMatch = match; break; }
+          }
+        }
+
+        const leaderId = leaderOrg?.vanid?.toString()
+          || (existingNode as any)?.id
+          || (teamMemberMatch?.id ? String(teamMemberMatch.id) : null)
+          || `section_leader_${sectionName}`;
+        const leaderName = leaderOrg
+          ? `${(leaderOrg.firstname || '')} ${(leaderOrg.lastname || '')}`.trim()
+          : (existingNode as any)?.name || teamMemberMatch?.name || sectionName;
+
         sectionLeaderIdMap.set(sectionName, leaderId);
 
         if (!filteredNodeIds.has(leaderId)) {
           sectionLeaderNewNodes.push({
             id: leaderId,
-            name: leaderOrg
-              ? `${(leaderOrg.firstname || '')} ${(leaderOrg.lastname || '')}`.trim()
-              : sectionName,
+            name: leaderName,
             chapter: sectionName,
             type: 'section_leader',
             degree: (teamsData as any[]).filter((t: any) => (t.chapter || t.bigQueryData?.chapter) === sectionName).length,
@@ -2467,25 +2542,30 @@ const MainAppContent: React.FC = () => {
 
       const leaderId = sectionLeaderIdMap.get(sectionName)!;
 
-      // Pick the highest-degree member of this team that's in the filtered graph
+      // Link section leader to the team lead (or highest-degree member) of each team
       const candidates = (team.organizers as any[])
         .map((m: any) => {
           const id = String(m.id ?? '');
           const node = filteredNodes.find((n: any) => n.id === id);
-          return node ? { id, degree: (node as any).degree || 0 } : null;
+          return node ? { id, degree: (node as any).degree || 0, isLead: id === team.lead?.id } : null;
         })
-        .filter(Boolean) as Array<{ id: string; degree: number }>;
+        .filter(Boolean) as Array<{ id: string; degree: number; isLead: boolean }>;
 
       if (candidates.length === 0) return;
-      candidates.sort((a, b) => b.degree - a.degree);
 
-      sectionLeaderLinks.push({
-        source: leaderId,
-        target: candidates[0].id,
-        type: 'section_leader',
-        linkSource: 'section_leader',
-        teamName: team.teamName,
-      });
+      // Prefer team lead, then highest-degree member
+      const teamLead = candidates.find(c => c.isLead);
+      const target = teamLead || candidates.sort((a, b) => b.degree - a.degree)[0];
+
+      if (target.id !== leaderId) {
+        sectionLeaderLinks.push({
+          source: leaderId,
+          target: target.id,
+          type: 'section_leader',
+          linkSource: 'section_leader',
+          teamName: team.teamName,
+        });
+      }
     });
 
     if (sectionLeaderNewNodes.length > 0) {
@@ -3389,7 +3469,7 @@ const MainAppContent: React.FC = () => {
         }}
         onAssign={handleAssignOrganizer}
         contactName={assignOrgTarget?.contactName || ''}
-        orgIds={orgIds}
+        orgIds={allOrganizerOptions}
       />
     </Box>
   );

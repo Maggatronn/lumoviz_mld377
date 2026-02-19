@@ -115,8 +115,8 @@ const EditTeamDialog: React.FC<EditTeamDialogProps> = ({
       }
       
       // Set team members (excluding the lead)
-      const membersExcludingLead = teamToEdit.organizers.filter(
-        organizer => organizer.id !== teamToEdit.lead?.id
+      const membersExcludingLead = (teamToEdit.organizers || []).filter(
+        (organizer: any) => organizer.id !== teamToEdit.lead?.id
       );
       setTeamMembers(membersExcludingLead);
       

@@ -743,35 +743,22 @@ const NetworkGraph: React.FC<NetworkGraphProps> = ({
       .force('link', d3.forceLink<Node, Link>(simulationLinks)
         .id(d => d.id)
         .distance((d: Link) => {
-          // Use meeting count from the aggregated link data
           const meetingCount = (d as any).meetingCount || 1;
-          
-          // More meetings = closer together (shorter distance) - but with larger base distances
-          const maxReduction = 80;
-          const reduction = Math.min(maxReduction, Math.log2(meetingCount) * 25);
-          const distance = Math.max(80, 180 - reduction); // Increased base distances significantly
-          
-          // Debug: Log distance calculation for first few links
-          
-          return distance;
+          const maxReduction = 100;
+          const reduction = Math.min(maxReduction, Math.log2(meetingCount) * 30);
+          return Math.max(100, 280 - reduction);
         })
         .strength((d: Link) => {
-          // Use meeting count from the aggregated link data
           const meetingCount = (d as any).meetingCount || 1;
-          
-          // Stronger links to pull connected nodes together
-          const baseStrength = 2; // Increased from 0.2
-          const strengthMultiplier = Math.min(2.5, 1 + Math.log2(meetingCount) * 0.4); // Increased multiplier
-          const finalStrength = baseStrength * strengthMultiplier * densityFactor; // Removed the 50% reduction
-          
-          // Apply density scaling to the final strength
-          return finalStrength;
+          const baseStrength = 0.4;
+          const strengthMultiplier = Math.min(2.0, 1 + Math.log2(meetingCount) * 0.3);
+          return baseStrength * strengthMultiplier * densityFactor;
         }))
       .force('charge', d3.forceManyBody<Node>().strength(() => {
-        return -40 * repulsionFactor; // Stronger attraction (less repulsion)
+        return -150 * repulsionFactor;
       }))
-      .force('center', d3.forceCenter(rect.width / 2, rect.height / 2).strength(0.08)) // Stronger center pull
-      .force('collision', d3.forceCollide().radius(25)) // Keep collision radius
+      .force('center', d3.forceCenter(rect.width / 2, rect.height / 2).strength(0.04))
+      .force('collision', d3.forceCollide().radius(40))
       // REMOVED boundary force - this was creating the square constraint!;
 
     // Set simulation parameters for faster stopping

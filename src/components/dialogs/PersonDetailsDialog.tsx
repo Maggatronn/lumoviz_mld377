@@ -100,6 +100,7 @@ interface PersonDetailsDialogProps {
   onEditPerson?: (personId: string) => void;
   onAddConversation?: (personId: string) => void;
   onAddToAction?: (personId: string) => void;
+  onEditConversation?: (meeting: any) => void;
 }
 
 const PersonDetailsDialog: React.FC<PersonDetailsDialogProps> = ({
@@ -114,7 +115,8 @@ const PersonDetailsDialog: React.FC<PersonDetailsDialogProps> = ({
   sx,
   onEditPerson,
   onAddConversation,
-  onAddToAction
+  onAddToAction,
+  onEditConversation
 }) => {
   // Use cached meetings instead of state
   const personMeetings = React.useMemo(() => {
@@ -593,9 +595,24 @@ const PersonDetailsDialog: React.FC<PersonDetailsDialogProps> = ({
                                   />
                                 )}
                               </Box>
-                              <Typography variant="caption" color="text.secondary" sx={{ whiteSpace: 'nowrap' }}>
-                                {meetingDate ? format(meetingDate, 'MMM dd, yyyy') : 'Unknown Date'}
-                              </Typography>
+                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                                <Typography variant="caption" color="text.secondary" sx={{ whiteSpace: 'nowrap' }}>
+                                  {meetingDate ? format(meetingDate, 'MMM dd, yyyy') : 'Unknown Date'}
+                                </Typography>
+                                {isLumovizMeeting && (meeting as any).meeting_id && onEditConversation && (
+                                  <IconButton
+                                    size="small"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      onEditConversation(meeting);
+                                      onClose();
+                                    }}
+                                    sx={{ p: 0.25 }}
+                                  >
+                                    <EditIcon sx={{ fontSize: 14, color: 'text.secondary' }} />
+                                  </IconButton>
+                                )}
+                              </Box>
                             </Box>
                             
                             {hasNotes && (

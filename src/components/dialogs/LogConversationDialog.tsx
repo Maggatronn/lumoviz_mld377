@@ -29,10 +29,38 @@ import { API_BASE_URL } from '../../config';
 
 type ContactOption = { vanid: string; name: string; chapter?: string; inputValue?: string };
 
+export interface EditableConversation {
+  meeting_id: string;
+  contact_vanid: string;
+  contact_name: string;
+  organizer_vanid: string;
+  meeting_type: string;
+  date: string;
+  notes?: string;
+  person_type?: string;
+  purpose?: string;
+  values?: string;
+  difference?: string;
+  resources?: string;
+  commitment_asked_yn?: string;
+  commitment_made_yn?: string;
+  commitment_what?: string;
+  catapults?: string[];
+  shared_purpose_constituency_stance?: string;
+  shared_purpose_constituency_how?: string;
+  shared_purpose_change_stance?: string;
+  shared_purpose_change_how?: string;
+  leadership_tag?: string;
+  did_share_story?: boolean;
+  what_shared?: string;
+}
+
 interface LogConversationDialogProps {
   open: boolean;
   onClose: () => void;
   onSave: (conversation: NewConversation) => Promise<void>;
+  onUpdate?: (meetingId: string, conversation: NewConversation) => Promise<void>;
+  editingConversation?: EditableConversation | null;
   availableContacts?: ContactOption[];
   currentUserVanId?: string;
   preselectedContact?: ContactOption | null;
@@ -74,6 +102,8 @@ const LogConversationDialog: React.FC<LogConversationDialogProps> = ({
   open,
   onClose,
   onSave,
+  onUpdate,
+  editingConversation = null,
   availableContacts = [],
   currentUserVanId = '',
   preselectedContact = null,
@@ -81,6 +111,7 @@ const LogConversationDialog: React.FC<LogConversationDialogProps> = ({
   availableOrganizers = [],
   onPersonAdd
 }) => {
+  const isEditing = !!editingConversation;
   const [selectedContact, setSelectedContact] = useState<ContactOption | null>(preselectedContact);
   const [meetingType, setMeetingType] = useState('Constituency One-on-One');
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
@@ -114,12 +145,44 @@ const LogConversationDialog: React.FC<LogConversationDialogProps> = ({
   const [contactSearchText, setContactSearchText] = useState('');
   const [catapultSearchText, setCatapultSearchText] = useState('');
 
-  // Update selected contact when preselectedContact changes or dialog opens
+  // Pre-populate fields when editing
   useEffect(() => {
-    if (open && preselectedContact) {
+    if (open && editingConversation) {
+      const ec = editingConversation;
+      const contact = availableContacts.find(c => c.vanid === ec.contact_vanid) ||
+        { vanid: ec.contact_vanid, name: ec.contact_name };
+      setSelectedContact(contact);
+      setMeetingType(ec.meeting_type || 'Constituency One-on-One');
+      setDate(ec.date || new Date().toISOString().split('T')[0]);
+      setNotes(ec.notes || '');
+      setPersonType(ec.person_type || 'Constituent');
+      setPurpose(ec.purpose || '');
+      setValues(ec.values || '');
+      setDifference(ec.difference || '');
+      setResources(ec.resources || '');
+      setCommitmentAskedYN(ec.commitment_asked_yn || '');
+      setCommitmentMadeYN(ec.commitment_made_yn || '');
+      setCommitmentWhat(ec.commitment_what || '');
+      setSharedPurposeConstituencyStance(ec.shared_purpose_constituency_stance || '');
+      setSharedPurposeConstituencyHow(ec.shared_purpose_constituency_how || '');
+      setSharedPurposeChangeStance(ec.shared_purpose_change_stance || '');
+      setSharedPurposeChangeHow(ec.shared_purpose_change_how || '');
+      setLeadershipTag(ec.leadership_tag || 'Unknown');
+      setDidShareStory(ec.did_share_story || false);
+      setWhatShared(ec.what_shared || '');
+      // Resolve catapult VAN IDs to contact options
+      if (ec.catapults && ec.catapults.length > 0) {
+        const resolved = ec.catapults
+          .map(id => availableContacts.find(c => c.vanid === id))
+          .filter(Boolean) as ContactOption[];
+        setCatapults(resolved);
+      } else {
+        setCatapults([]);
+      }
+    } else if (open && preselectedContact) {
       setSelectedContact(preselectedContact);
     }
-  }, [open, preselectedContact]);
+  }, [open, editingConversation, preselectedContact, availableContacts]);
 
   const handleClose = () => {
     setSelectedContact(null);
@@ -159,7 +222,7 @@ const LogConversationDialog: React.FC<LogConversationDialogProps> = ({
 
     setSaving(true);
     try {
-      await onSave({
+      const conversationData: NewConversation = {
         contact_vanid: selectedContact.vanid,
         contact_name: selectedContact.name,
         organizer_vanid: currentUserVanId,
@@ -167,7 +230,6 @@ const LogConversationDialog: React.FC<LogConversationDialogProps> = ({
         date,
         notes: notes.trim() || undefined,
         chapter: selectedContact.chapter,
-        // Extended fields
         person_type: personType,
         purpose: purpose.trim() || undefined,
         values: values.trim() || undefined,
@@ -184,10 +246,16 @@ const LogConversationDialog: React.FC<LogConversationDialogProps> = ({
         leadership_tag: leadershipTag,
         did_share_story: didShareStory,
         what_shared: whatShared.trim() || undefined
-      });
+      };
+
+      if (isEditing && editingConversation && onUpdate) {
+        await onUpdate(editingConversation.meeting_id, conversationData);
+      } else {
+        await onSave(conversationData);
+      }
       handleClose();
     } catch (err) {
-      setError('Failed to log conversation. Please try again.');
+      setError(isEditing ? 'Failed to update conversation. Please try again.' : 'Failed to log conversation. Please try again.');
     } finally {
       setSaving(false);
     }
@@ -211,7 +279,7 @@ const LogConversationDialog: React.FC<LogConversationDialogProps> = ({
     >
       <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
         <ChatIcon />
-        Log Conversation
+        {isEditing ? 'Edit Conversation' : 'Log Conversation'}
       </DialogTitle>
       <DialogContent dividers>
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5, pt: 1 }}>
@@ -222,7 +290,7 @@ const LogConversationDialog: React.FC<LogConversationDialogProps> = ({
           )}
 
           <Typography variant="body2" color="text.secondary">
-            Record a detailed conversation with a contact
+            {isEditing ? 'Edit the details of this conversation' : 'Record a detailed conversation with a contact'}
           </Typography>
 
           {/* Basic Information */}
@@ -661,7 +729,7 @@ const LogConversationDialog: React.FC<LogConversationDialogProps> = ({
           variant="contained" 
           disabled={saving}
         >
-          {saving ? 'Logging...' : 'Log Conversation'}
+          {saving ? (isEditing ? 'Saving...' : 'Logging...') : (isEditing ? 'Save Changes' : 'Log Conversation')}
         </Button>
       </DialogActions>
 
