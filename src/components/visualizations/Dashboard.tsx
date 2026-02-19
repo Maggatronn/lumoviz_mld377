@@ -78,7 +78,8 @@ import EditTeamDialog from '../dialogs/EditTeamDialog';
 import CampaignActionDialog from '../dialogs/CampaignActionDialog';
 import AddPersonDialog, { NewPerson } from '../dialogs/AddPersonDialog';
 import EditPersonDialog, { PersonUpdate } from '../dialogs/EditPersonDialog';
-import LogConversationDialog, { NewConversation } from '../dialogs/LogConversationDialog';
+import LogConversationDialog, { NewConversation, EditableConversation } from '../dialogs/LogConversationDialog';
+import BatchAddPeopleDialog from '../dialogs/BatchAddPeopleDialog';
 import teamsService from '../../services/teamsService';
 import { useChapterColors } from '../../contexts/ChapterColorContext';
 import { getLOEColor, LOE_LEVELS } from '../../theme/loeColors';
@@ -314,6 +315,8 @@ const Dashboard: React.FC<DashboardProps> = ({
   const [showAddPersonDialog, setShowAddPersonDialog] = React.useState(false);
   const [showEditPersonDialog, setShowEditPersonDialog] = React.useState(false);
   const [showLogConversationDialog, setShowLogConversationDialog] = React.useState(false);
+  const [showBatchAddDialog, setShowBatchAddDialog] = React.useState(false);
+  const [editingConversation, setEditingConversation] = React.useState<EditableConversation | null>(null);
   const [selectedPersonForEdit, setSelectedPersonForEdit] = React.useState<any>(null);
   const [selectedPersonForConversation, setSelectedPersonForConversation] = React.useState<any>(null);
   const [selectedPersonForAction, setSelectedPersonForAction] = React.useState<any>(null);
@@ -338,18 +341,30 @@ const Dashboard: React.FC<DashboardProps> = ({
     return params.get('organizer') || '';
   };
 
-  // Dynamically build organizer list from userMap (all people in org_ids/contacts)
+  // Dynamically build organizer list from userMap + teamsData (org IDs + all team members)
   const dashboardOrganizers = React.useMemo(() => {
     const organizers: { vanid: string; name: string }[] = [];
     const seen = new Set<string>();
     
-    // Add all people from userMap
+    // Add all people from userMap (org IDs / contacts)
     userMapRef.current.forEach((info, vanid) => {
       if (!seen.has(vanid) && info.fullName && info.fullName.trim() !== '') {
         seen.add(vanid);
         organizers.push({ vanid, name: info.fullName });
       }
     });
+
+    // Add team members from teamsData
+    for (const team of teamsDataRef.current) {
+      const members = team.organizers || [];
+      for (const m of members) {
+        const vid = (m.id || m.vanId)?.toString();
+        if (vid && !seen.has(vid) && m.name) {
+          seen.add(vid);
+          organizers.push({ vanid: vid, name: m.name });
+        }
+      }
+    }
     
     // Ensure Maggie Hughes is always present as a default
     if (!seen.has('100001')) {
@@ -361,7 +376,7 @@ const Dashboard: React.FC<DashboardProps> = ({
     
     return organizers;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userMap]);
+  }, [userMap, teamsData]);
   
   // TEMPORARY FIX: Just default to Maggie Hughes
   const [selectedOrganizerId, setSelectedOrganizerId] = React.useState<string>('100001');
@@ -2030,6 +2045,65 @@ const Dashboard: React.FC<DashboardProps> = ({
     }
   };
 
+  const handleUpdateConversation = async (meetingId: string, conversation: NewConversation) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/meetings/${meetingId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(conversation)
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to update conversation');
+      }
+
+      alert('✓ Conversation updated successfully!');
+      setEditingConversation(null);
+      
+      if (onConversationLog) {
+        onConversationLog();
+      }
+    } catch (error) {
+      console.error('Error updating conversation:', error);
+      throw error;
+    }
+  };
+
+  const handleEditConversationFromMeeting = (meeting: any) => {
+    const rawDate = meeting.date_contacted?.value || meeting.date_contacted || meeting.datestamp?.value || meeting.datestamp;
+    const dateStr = rawDate ? new Date(rawDate).toISOString().split('T')[0] : '';
+    const contactName = [meeting.participant_first_name, meeting.participant_last_name].filter(Boolean).join(' ') || '';
+    const contactVanId = String(meeting.participant_vanid || meeting.vanid || '');
+
+    const editable: EditableConversation = {
+      meeting_id: meeting.meeting_id,
+      contact_vanid: contactVanId,
+      contact_name: contactName,
+      organizer_vanid: String(meeting.organizer_vanid || ''),
+      meeting_type: meeting.meeting_type || meeting.conversation_type || 'Constituency One-on-One',
+      date: dateStr,
+      notes: meeting.lmtg_notes || '',
+      person_type: meeting.meeting_type || meeting.person_type || 'Constituent',
+      purpose: meeting.notes_purpose || '',
+      values: meeting.lmtg_values || '',
+      difference: meeting.lmtg_difference || '',
+      resources: meeting.lmtg_resources || '',
+      commitment_asked_yn: meeting.lmtg_commitment_asked || '',
+      commitment_made_yn: meeting.lmtg_commitment_made || '',
+      commitment_what: meeting.lmtg_commitment_what || '',
+      catapults: meeting.lmtg_catapults ? meeting.lmtg_catapults.split(', ').filter(Boolean) : [],
+      shared_purpose_constituency_stance: meeting.lmtg_sp_constituency_stance || '',
+      shared_purpose_constituency_how: meeting.lmtg_sp_constituency_how || '',
+      shared_purpose_change_stance: meeting.lmtg_sp_change_stance || '',
+      shared_purpose_change_how: meeting.lmtg_sp_change_how || '',
+      leadership_tag: meeting.lmtg_leadership_tag || meeting.leadership_tag || '',
+      did_share_story: meeting.lmtg_did_share_story || false,
+      what_shared: meeting.lmtg_what_shared || ''
+    };
+    setEditingConversation(editable);
+    setShowLogConversationDialog(true);
+  };
+
   const handleEditPerson = async (personId: string, updates: PersonUpdate) => {
     try {
       const response = await fetch(`${API_BASE_URL}/api/contacts/${personId}`, {
@@ -3313,6 +3387,147 @@ const Dashboard: React.FC<DashboardProps> = ({
             })}
         </Box>
 
+        {/* My Teams Section */}
+        {myTeamsData.length > 0 && (
+          <Box sx={{ mb: 2 }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1 }}>
+              <Typography variant="subtitle2" sx={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                <GroupsIcon sx={{ fontSize: 18 }} /> My Teams
+              </Typography>
+              <Button
+                size="small"
+                startIcon={<AddIcon />}
+                onClick={() => setShowAddTeamDialog(true)}
+                sx={{ fontSize: '0.75rem', textTransform: 'none' }}
+              >
+                Add Team
+              </Button>
+            </Box>
+            <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 1.5 }}>
+              {myTeamsData.map((team: any) => {
+                const isLead = team.lead && selectedOrganizerId &&
+                  (String(team.lead.id) === String(selectedOrganizerId));
+                const members = team.organizers || [];
+
+                // Aggregate affirm/challenge counts from team members' conversations
+                const memberIds = new Set(members.map((m: any) => String(m.id)));
+                const teamMeetings = sharedCachedMeetings.filter((m: any) => {
+                  const participantId = String(m.participant_vanid || m.vanid || '');
+                  const organizerId = String(m.organizer_vanid || '');
+                  return memberIds.has(participantId) || memberIds.has(organizerId);
+                });
+                const constCounts = { affirm: 0, challenge: 0 };
+                const changeCounts = { affirm: 0, challenge: 0 };
+                teamMeetings.forEach((m: any) => {
+                  const cs = m.lmtg_sp_constituency_stance || '';
+                  const ch = m.lmtg_sp_change_stance || '';
+                  if (cs === 'affirm') constCounts.affirm++;
+                  if (cs === 'challenge') constCounts.challenge++;
+                  if (ch === 'affirm') changeCounts.affirm++;
+                  if (ch === 'challenge') changeCounts.challenge++;
+                });
+                const hasConstData = constCounts.affirm > 0 || constCounts.challenge > 0;
+                const hasChangeData = changeCounts.affirm > 0 || changeCounts.challenge > 0;
+
+                return (
+                  <Card key={team.id} elevation={1} sx={{
+                    border: '1px solid',
+                    borderColor: isLead ? 'primary.main' : 'divider',
+                    borderLeft: isLead ? '3px solid' : '1px solid',
+                    borderLeftColor: isLead ? 'primary.main' : 'divider',
+                  }}>
+                    <CardContent sx={{ p: 1.5, '&:last-child': { pb: 1.5 } }}>
+                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 0.5 }}>
+                        <Box>
+                          <Typography variant="body2" sx={{ fontWeight: 600, fontSize: '0.85rem' }}>
+                            {team.teamName || 'Unnamed Team'}
+                          </Typography>
+                          <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.7rem' }}>
+                            {team.chapter} &middot; {members.length} member{members.length !== 1 ? 's' : ''}
+                          </Typography>
+                        </Box>
+                        <IconButton
+                          size="small"
+                          onClick={() => handleEditTeam(team)}
+                          sx={{ mt: -0.5 }}
+                        >
+                          <EditIcon sx={{ fontSize: 16 }} />
+                        </IconButton>
+                      </Box>
+
+                      {/* Constituency / Turf */}
+                      {team.constituency && (
+                        <Box sx={{ mt: 0.75, p: 0.75, borderRadius: 1, bgcolor: '#f8f9fa', border: '1px solid #e9ecef' }}>
+                          <Typography variant="caption" sx={{ fontWeight: 700, fontSize: '0.6rem', textTransform: 'uppercase', letterSpacing: 0.5, color: 'text.secondary', display: 'block', mb: 0.25 }}>
+                            Constituency / Turf
+                          </Typography>
+                          <Typography variant="body2" sx={{ fontSize: '0.75rem', lineHeight: 1.3 }}>
+                            {team.constituency}
+                          </Typography>
+                          {hasConstData && (
+                            <Box sx={{ display: 'flex', gap: 0.75, mt: 0.5 }}>
+                              <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.25, px: 0.75, py: 0.25, borderRadius: 1, bgcolor: '#f0fdf9', border: '1px solid #99f6e4' }}>
+                                <Typography sx={{ fontSize: '0.6rem', fontWeight: 700, color: '#0f766e' }}>Affirm {constCounts.affirm}</Typography>
+                              </Box>
+                              <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.25, px: 0.75, py: 0.25, borderRadius: 1, bgcolor: '#fef2f2', border: '1px solid #fca5a5' }}>
+                                <Typography sx={{ fontSize: '0.6rem', fontWeight: 700, color: '#b91c1c' }}>Challenge {constCounts.challenge}</Typography>
+                              </Box>
+                            </Box>
+                          )}
+                        </Box>
+                      )}
+
+                      {/* Shared Purpose */}
+                      {team.sharedPurpose && (
+                        <Box sx={{ mt: 0.75, p: 0.75, borderRadius: 1, bgcolor: '#f8f9fa', border: '1px solid #e9ecef' }}>
+                          <Typography variant="caption" sx={{ fontWeight: 700, fontSize: '0.6rem', textTransform: 'uppercase', letterSpacing: 0.5, color: 'text.secondary', display: 'block', mb: 0.25 }}>
+                            Shared Purpose
+                          </Typography>
+                          <Typography variant="body2" sx={{ fontSize: '0.75rem', lineHeight: 1.3, fontStyle: 'italic' }}>
+                            {team.sharedPurpose}
+                          </Typography>
+                          {hasChangeData && (
+                            <Box sx={{ display: 'flex', gap: 0.75, mt: 0.5 }}>
+                              <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.25, px: 0.75, py: 0.25, borderRadius: 1, bgcolor: '#f0fdf9', border: '1px solid #99f6e4' }}>
+                                <Typography sx={{ fontSize: '0.6rem', fontWeight: 700, color: '#0f766e' }}>Affirm {changeCounts.affirm}</Typography>
+                              </Box>
+                              <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.25, px: 0.75, py: 0.25, borderRadius: 1, bgcolor: '#fef2f2', border: '1px solid #fca5a5' }}>
+                                <Typography sx={{ fontSize: '0.6rem', fontWeight: 700, color: '#b91c1c' }}>Challenge {changeCounts.challenge}</Typography>
+                              </Box>
+                            </Box>
+                          )}
+                        </Box>
+                      )}
+
+                      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mt: 0.75 }}>
+                        {members.slice(0, 8).map((member: any) => (
+                          <Chip
+                            key={member.id}
+                            label={member.name}
+                            size="small"
+                            variant={member.id === team.lead?.id ? 'filled' : 'outlined'}
+                            color={member.id === team.lead?.id ? 'primary' : 'default'}
+                            onClick={() => onPersonDetailsOpen?.(member.id)}
+                            sx={{ height: 22, fontSize: '0.7rem', cursor: 'pointer' }}
+                          />
+                        ))}
+                        {members.length > 8 && (
+                          <Chip
+                            label={`+${members.length - 8} more`}
+                            size="small"
+                            variant="outlined"
+                            sx={{ height: 22, fontSize: '0.65rem' }}
+                          />
+                        )}
+                      </Box>
+                    </CardContent>
+                  </Card>
+                );
+              })}
+            </Box>
+          </Box>
+        )}
+
         {/* Organizing Section */}
         <Box>
 
@@ -3370,17 +3585,6 @@ const Dashboard: React.FC<DashboardProps> = ({
                             </Box>
                           )}
                         </IconButton>
-                      )}
-                      {turfTab === 'lists' && (
-                        <Button
-                          startIcon={<AddIcon />}
-                          size="small"
-                          variant="outlined"
-                          onClick={() => setShowAddTurfDialog(true)}
-                          disabled={conversationPeopleForTurf.length === 0}
-                        >
-                          Add
-                        </Button>
                       )}
                     </Box>
                   </Box>
@@ -3443,13 +3647,12 @@ const Dashboard: React.FC<DashboardProps> = ({
                   )}
                 </Box>
 
-                {/* Tabs with inline search bar */}
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                {/* Tabs row */}
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
                   <Tabs 
                     value={turfTab} 
                     onChange={(_, newValue) => {
                       setTurfTab(newValue);
-                      // Update URL
                       const params = new URLSearchParams(window.location.search);
                       params.set('dashboardTab', newValue);
                       window.history.pushState({}, '', `${window.location.pathname}?${params.toString()}`);
@@ -3480,30 +3683,38 @@ const Dashboard: React.FC<DashboardProps> = ({
                     <Tab label="My Lists" value="lists" />
                     <Tab label="My Actions" value="actions" />
                   </Tabs>
-                  
-                  {/* Quick Action Buttons */}
-                  <Box sx={{ display: 'flex', gap: 1 }}>
-                    <Button
-                      variant="outlined"
-                      size="small"
-                      startIcon={<PersonIcon />}
-                      onClick={() => setShowAddPersonDialog(true)}
-                      sx={{ fontSize: '0.75rem', px: 1.5 }}
-                    >
-                      Add Person
-                    </Button>
-                    <Button
-                      variant="outlined"
-                      size="small"
-                      startIcon={<ChatIcon />}
-                      onClick={() => setShowLogConversationDialog(true)}
-                      sx={{ fontSize: '0.75rem', px: 1.5 }}
-                    >
-                      Log Conversation
-                    </Button>
-                  </Box>
-                  
-                  {/* Compact Search Bar for My People - inline with tabs */}
+                </Box>
+
+                {/* Action buttons + search bar row */}
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                  <Button
+                    variant="contained"
+                    size="small"
+                    startIcon={<PersonIcon />}
+                    onClick={() => setShowBatchAddDialog(true)}
+                    sx={{ fontSize: '0.75rem', px: 1.5 }}
+                  >
+                    Add People
+                  </Button>
+                  <Button
+                    variant="outlined"
+                    size="small"
+                    startIcon={<AddIcon />}
+                    onClick={() => setShowAddTurfDialog(true)}
+                    sx={{ fontSize: '0.75rem', px: 1.5 }}
+                  >
+                    Add to List
+                  </Button>
+                  <Button
+                    variant="outlined"
+                    size="small"
+                    startIcon={<ChatIcon />}
+                    onClick={() => setShowLogConversationDialog(true)}
+                    sx={{ fontSize: '0.75rem', px: 1.5 }}
+                  >
+                    Log Conversation
+                  </Button>
+                  <Box sx={{ flex: 1 }} />
                   {turfTab === 'people' && (
                     <TextField
                       size="small"
@@ -4190,6 +4401,8 @@ const Dashboard: React.FC<DashboardProps> = ({
                       onEditPerson={handleOpenEditPerson}
                       onAddConversation={handleOpenLogConversation}
                       onAddToAction={handleOpenAddToAction}
+                      hideActionButtons={true}
+                      onEditConversation={handleEditConversationFromMeeting}
                     />
                   </Box>
                 </Box>
@@ -4398,15 +4611,6 @@ const Dashboard: React.FC<DashboardProps> = ({
                           <MenuItem value="newest">Newest first</MenuItem>
                           <MenuItem value="oldest">Oldest first</MenuItem>
                         </Select>
-                        <Button
-                          variant="outlined"
-                          size="small"
-                          startIcon={<AddIcon />}
-                          onClick={() => setShowLogConversationDialog(true)}
-                          sx={{ fontSize: '0.75rem', px: 1.5 }}
-                        >
-                          Log Conversation
-                        </Button>
                       </Box>
                     </Box>
 
@@ -4520,6 +4724,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                                 <th style={{ ...thStyle, minWidth: 140 }}>Constituency</th>
                                 <th style={{ ...thStyle, minWidth: 140 }}>Change</th>
                                 <th style={{ ...thStyle, width: 80 }}>Committed?</th>
+                                <th style={{ ...thStyle, width: 40 }}></th>
                               </tr>
                             </thead>
                             <tbody>
@@ -4616,6 +4821,20 @@ const Dashboard: React.FC<DashboardProps> = ({
                                           border: `1px solid ${commitmentMade === 'yes' ? '#86efac' : '#d1d5db'}`,
                                         }}>{commitmentMade === 'yes' ? '✓ Yes' : '✗ No'}</span>
                                       ) : dash}
+                                    </td>
+                                    <td style={{ ...tdStyle, textAlign: 'center', padding: '4px' }}>
+                                      {isNewMeeting && m.meeting_id && (
+                                        <IconButton
+                                          size="small"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            handleEditConversationFromMeeting(m);
+                                          }}
+                                          sx={{ p: 0.5 }}
+                                        >
+                                          <EditIcon sx={{ fontSize: 16, color: 'text.secondary' }} />
+                                        </IconButton>
+                                      )}
                                     </td>
                                   </tr>
                                 );
@@ -5520,8 +5739,11 @@ const Dashboard: React.FC<DashboardProps> = ({
           setShowLogConversationDialog(false);
           setSelectedPersonForConversation(null);
           setSelectedActionForConversation(null);
+          setEditingConversation(null);
         }}
         onSave={handleLogConversation}
+        onUpdate={handleUpdateConversation}
+        editingConversation={editingConversation}
         availableContacts={allPeople.map(p => ({
           vanid: p.id,
           name: p.name,
@@ -5536,6 +5758,20 @@ const Dashboard: React.FC<DashboardProps> = ({
         availableChapters={chapters}
         availableOrganizers={dashboardOrganizers.map(org => ({ id: org.vanid, name: org.name }))}
         onPersonAdd={onPersonAdd}
+      />
+
+      {/* Batch Add People Dialog */}
+      <BatchAddPeopleDialog
+        open={showBatchAddDialog}
+        onClose={() => setShowBatchAddDialog(false)}
+        onSaved={(_count) => {
+          setShowBatchAddDialog(false);
+          if (onPersonAdd) onPersonAdd();
+        }}
+        availableSections={chapters}
+        availableOrganizers={dashboardOrganizers.map(org => ({ id: org.vanid, name: org.name }))}
+        availableActions={ACTIONS}
+        currentUserId={currentUserId || undefined}
       />
     </Box>
   );

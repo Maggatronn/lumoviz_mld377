@@ -2223,104 +2223,52 @@ const CampaignLineGraph: React.FC<CampaignLineGraphProps> = ({
 
                 // Render extra columns helper
                 const renderExtraCells = (actionFields: Array<{ key: string; label: string }>, namedCount: number, fieldCounts: Record<string, number>) => {
-                  if (actionFields.length < 2) return null;
-                  if (displayMode === 'conversions') {
-                    const cells: React.ReactNode[] = [];
-                    if (actionFields.length > 0) {
-                      const firstCount = fieldCounts[actionFields[0].key] ?? 0;
-                      const rate = namedCount > 0 ? (firstCount / namedCount) * 100 : 0;
-                      cells.push(
-                        <TableCell key="conv-named" align="center" sx={{ bgcolor: '#fffef0' }}>
-                          <Typography variant="body2" sx={{ fontWeight: 600, fontSize: '0.75rem', color: rate >= 50 ? '#4caf50' : rate >= 25 ? '#ff9800' : '#f44336' }}>
-                            {rate > 0 ? `${Math.round(rate)}%` : '—'}
-                          </Typography>
-                        </TableCell>
-                      );
-                    }
-                    actionFields.slice(0, -1).forEach((f, i) => {
-                      const nextF = actionFields[i + 1];
-                      const fromCount = fieldCounts[f.key] ?? 0;
-                      const toCount = fieldCounts[nextF.key] ?? 0;
-                      const rate = fromCount > 0 ? (toCount / fromCount) * 100 : 0;
-                      cells.push(
-                        <TableCell key={`conv-${f.key}`} align="center" sx={{ bgcolor: '#fffef0' }}>
-                          <Typography variant="body2" sx={{ fontWeight: 600, fontSize: '0.75rem', color: rate >= 50 ? '#4caf50' : rate >= 25 ? '#ff9800' : '#f44336' }}>
-                            {rate > 0 ? `${Math.round(rate)}%` : '—'}
-                          </Typography>
-                        </TableCell>
-                      );
-                    });
-                    return cells;
-                  } else {
-                    // Progress: Named | →f1% | f1 | →f2% | f2 | ...
-                    const cells: React.ReactNode[] = [];
+                  if (displayMode !== 'conversions' || actionFields.length < 2) return null;
+                  const cells: React.ReactNode[] = [];
+                  cells.push(
+                    <TableCell key="prog-named" align="center" sx={{ bgcolor: '#f0f4ff' }}>
+                      <Typography variant="body2" sx={{ fontWeight: 600, fontSize: '0.75rem', color: 'primary.main' }}>{namedCount}</Typography>
+                    </TableCell>
+                  );
+                  actionFields.forEach((f, i) => {
+                    const fromCount = i === 0 ? namedCount : (fieldCounts[actionFields[i - 1].key] ?? 0);
+                    const toCount = fieldCounts[f.key] ?? 0;
+                    const rate = fromCount > 0 ? (toCount / fromCount) * 100 : 0;
                     cells.push(
-                      <TableCell key="prog-named" align="center" sx={{ bgcolor: '#f0f4ff' }}>
-                        <Typography variant="body2" sx={{ fontWeight: 600, fontSize: '0.75rem', color: 'primary.main' }}>{namedCount}</Typography>
+                      <TableCell key={`prog-conv-${f.key}`} align="center" sx={{ bgcolor: '#fffef0' }}>
+                        <Typography variant="body2" sx={{ fontWeight: 600, fontSize: '0.7rem', color: rate >= 50 ? '#4caf50' : rate >= 25 ? '#ff9800' : '#f44336' }}>
+                          {rate > 0 ? `${Math.round(rate)}%` : '—'}
+                        </Typography>
                       </TableCell>
                     );
-                    actionFields.forEach((f, i) => {
-                      const fromCount = i === 0 ? namedCount : (fieldCounts[actionFields[i - 1].key] ?? 0);
-                      const toCount = fieldCounts[f.key] ?? 0;
-                      const rate = fromCount > 0 ? (toCount / fromCount) * 100 : 0;
-                      cells.push(
-                        <TableCell key={`prog-conv-${f.key}`} align="center" sx={{ bgcolor: '#fffef0' }}>
-                          <Typography variant="body2" sx={{ fontWeight: 600, fontSize: '0.7rem', color: rate >= 50 ? '#4caf50' : rate >= 25 ? '#ff9800' : '#f44336' }}>
-                            {rate > 0 ? `${Math.round(rate)}%` : '—'}
-                          </Typography>
-                        </TableCell>
-                      );
-                      cells.push(
-                        <TableCell key={`prog-cnt-${f.key}`} align="center" sx={{ bgcolor: '#f0f4ff' }}>
-                          <Typography variant="body2" sx={{ fontWeight: 600, fontSize: '0.75rem' }}>{toCount}</Typography>
-                        </TableCell>
-                      );
-                    });
-                    return cells;
-                  }
+                    cells.push(
+                      <TableCell key={`prog-cnt-${f.key}`} align="center" sx={{ bgcolor: '#f0f4ff' }}>
+                        <Typography variant="body2" sx={{ fontWeight: 600, fontSize: '0.75rem' }}>{toCount}</Typography>
+                      </TableCell>
+                    );
+                  });
+                  return cells;
                 };
 
-                // Extra header columns helper
                 const renderExtraHeaders = (actionFields: Array<{ key: string; label: string }>) => {
-                  if (actionFields.length < 2) return null;
-                  if (displayMode === 'conversions') {
-                    const headers: React.ReactNode[] = [];
-                    if (actionFields.length > 0) {
-                      headers.push(
-                        <TableCell key="conv-hdr-named" align="center" sx={{ fontWeight: 600, py: 1, minWidth: 70, bgcolor: '#fffef0', fontSize: '0.65rem' }}>
-                          Named→{actionFields[0].label}
-                        </TableCell>
-                      );
-                    }
-                    actionFields.slice(0, -1).forEach((f, i) => {
-                      const nextF = actionFields[i + 1];
-                      headers.push(
-                        <TableCell key={`conv-hdr-${f.key}`} align="center" sx={{ fontWeight: 600, py: 1, minWidth: 70, bgcolor: '#fffef0', fontSize: '0.65rem' }}>
-                          {f.label}→{nextF.label}
-                        </TableCell>
-                      );
-                    });
-                    return headers;
-                  } else {
-                    const headers: React.ReactNode[] = [];
+                  if (displayMode !== 'conversions' || actionFields.length < 2) return null;
+                  const headers: React.ReactNode[] = [];
+                  headers.push(
+                    <TableCell key="prog-hdr-named" align="center" sx={{ fontWeight: 600, py: 1, minWidth: 50, bgcolor: '#f0f4ff', fontSize: '0.65rem' }}>Named</TableCell>
+                  );
+                  actionFields.forEach((f, i) => {
                     headers.push(
-                      <TableCell key="prog-hdr-named" align="center" sx={{ fontWeight: 600, py: 1, minWidth: 50, bgcolor: '#f0f4ff', fontSize: '0.65rem' }}>Named</TableCell>
+                      <TableCell key={`prog-hdr-conv-${f.key}`} align="center" sx={{ fontWeight: 600, py: 1, minWidth: 50, bgcolor: '#fffef0', fontSize: '0.6rem' }}>
+                        →{f.label}
+                      </TableCell>
                     );
-                    actionFields.forEach((f, i) => {
-                      const fromLabel = i === 0 ? 'Named' : actionFields[i - 1].label;
-                      headers.push(
-                        <TableCell key={`prog-hdr-conv-${f.key}`} align="center" sx={{ fontWeight: 600, py: 1, minWidth: 50, bgcolor: '#fffef0', fontSize: '0.6rem' }}>
-                          →{f.label}
-                        </TableCell>
-                      );
-                      headers.push(
-                        <TableCell key={`prog-hdr-cnt-${f.key}`} align="center" sx={{ fontWeight: 600, py: 1, minWidth: 50, bgcolor: '#f0f4ff', fontSize: '0.65rem' }}>
-                          {f.label}
-                        </TableCell>
-                      );
-                    });
-                    return headers;
-                  }
+                    headers.push(
+                      <TableCell key={`prog-hdr-cnt-${f.key}`} align="center" sx={{ fontWeight: 600, py: 1, minWidth: 50, bgcolor: '#f0f4ff', fontSize: '0.65rem' }}>
+                        {f.label}
+                      </TableCell>
+                    );
+                  });
+                  return headers;
                 };
 
                 return (
@@ -2491,67 +2439,34 @@ const CampaignLineGraph: React.FC<CampaignLineGraphProps> = ({
                 allChapters.forEach(ch => { if (!sortedChapters.includes(ch)) sortedChapters.push(ch); });
 
                 const renderExtraCells = (actionFields: Array<{ key: string; label: string }>, namedCount: number, fieldCounts: Record<string, number>) => {
-                  if (actionFields.length < 2) return null;
-                  if (displayMode === 'conversions') {
-                    const cells: React.ReactNode[] = [];
-                    if (actionFields.length > 0) {
-                      const fc = fieldCounts[actionFields[0].key] ?? 0;
-                      const rate = namedCount > 0 ? (fc / namedCount) * 100 : 0;
-                      cells.push(<TableCell key="conv-named" align="center" sx={{ bgcolor: '#fffef0' }}>
-                        <Typography variant="body2" sx={{ fontWeight: 600, fontSize: '0.75rem', color: rate >= 50 ? '#4caf50' : rate >= 25 ? '#ff9800' : '#f44336' }}>{rate > 0 ? `${Math.round(rate)}%` : '—'}</Typography>
-                      </TableCell>);
-                    }
-                    actionFields.slice(0, -1).forEach((f, i) => {
-                      const nextF = actionFields[i + 1];
-                      const fromC = fieldCounts[f.key] ?? 0;
-                      const toC = fieldCounts[nextF.key] ?? 0;
-                      const rate = fromC > 0 ? (toC / fromC) * 100 : 0;
-                      cells.push(<TableCell key={`conv-${f.key}`} align="center" sx={{ bgcolor: '#fffef0' }}>
-                        <Typography variant="body2" sx={{ fontWeight: 600, fontSize: '0.75rem', color: rate >= 50 ? '#4caf50' : rate >= 25 ? '#ff9800' : '#f44336' }}>{rate > 0 ? `${Math.round(rate)}%` : '—'}</Typography>
-                      </TableCell>);
-                    });
-                    return cells;
-                  } else {
-                    const cells: React.ReactNode[] = [];
-                    cells.push(<TableCell key="prog-named" align="center" sx={{ bgcolor: '#f0f4ff' }}>
-                      <Typography variant="body2" sx={{ fontWeight: 600, fontSize: '0.75rem', color: 'primary.main' }}>{namedCount}</Typography>
+                  if (displayMode !== 'conversions' || actionFields.length < 2) return null;
+                  const cells: React.ReactNode[] = [];
+                  cells.push(<TableCell key="prog-named" align="center" sx={{ bgcolor: '#f0f4ff' }}>
+                    <Typography variant="body2" sx={{ fontWeight: 600, fontSize: '0.75rem', color: 'primary.main' }}>{namedCount}</Typography>
+                  </TableCell>);
+                  actionFields.forEach((f, i) => {
+                    const fromC = i === 0 ? namedCount : (fieldCounts[actionFields[i - 1].key] ?? 0);
+                    const toC = fieldCounts[f.key] ?? 0;
+                    const rate = fromC > 0 ? (toC / fromC) * 100 : 0;
+                    cells.push(<TableCell key={`prog-conv-${f.key}`} align="center" sx={{ bgcolor: '#fffef0' }}>
+                      <Typography variant="body2" sx={{ fontWeight: 600, fontSize: '0.7rem', color: rate >= 50 ? '#4caf50' : rate >= 25 ? '#ff9800' : '#f44336' }}>{rate > 0 ? `${Math.round(rate)}%` : '—'}</Typography>
                     </TableCell>);
-                    actionFields.forEach((f, i) => {
-                      const fromC = i === 0 ? namedCount : (fieldCounts[actionFields[i - 1].key] ?? 0);
-                      const toC = fieldCounts[f.key] ?? 0;
-                      const rate = fromC > 0 ? (toC / fromC) * 100 : 0;
-                      cells.push(<TableCell key={`prog-conv-${f.key}`} align="center" sx={{ bgcolor: '#fffef0' }}>
-                        <Typography variant="body2" sx={{ fontWeight: 600, fontSize: '0.7rem', color: rate >= 50 ? '#4caf50' : rate >= 25 ? '#ff9800' : '#f44336' }}>{rate > 0 ? `${Math.round(rate)}%` : '—'}</Typography>
-                      </TableCell>);
-                      cells.push(<TableCell key={`prog-cnt-${f.key}`} align="center" sx={{ bgcolor: '#f0f4ff' }}>
-                        <Typography variant="body2" sx={{ fontWeight: 600, fontSize: '0.75rem' }}>{toC}</Typography>
-                      </TableCell>);
-                    });
-                    return cells;
-                  }
+                    cells.push(<TableCell key={`prog-cnt-${f.key}`} align="center" sx={{ bgcolor: '#f0f4ff' }}>
+                      <Typography variant="body2" sx={{ fontWeight: 600, fontSize: '0.75rem' }}>{toC}</Typography>
+                    </TableCell>);
+                  });
+                  return cells;
                 };
 
                 const renderExtraHeaders = (actionFields: Array<{ key: string; label: string }>) => {
-                  if (actionFields.length < 2) return null;
-                  if (displayMode === 'conversions') {
-                    const headers: React.ReactNode[] = [];
-                    if (actionFields.length > 0) {
-                      headers.push(<TableCell key="conv-hdr-named" align="center" sx={{ fontWeight: 600, py: 1, minWidth: 70, bgcolor: '#fffef0', fontSize: '0.65rem' }}>Named→{actionFields[0].label}</TableCell>);
-                    }
-                    actionFields.slice(0, -1).forEach((f, i) => {
-                      const nextF = actionFields[i + 1];
-                      headers.push(<TableCell key={`conv-hdr-${f.key}`} align="center" sx={{ fontWeight: 600, py: 1, minWidth: 70, bgcolor: '#fffef0', fontSize: '0.65rem' }}>{f.label}→{nextF.label}</TableCell>);
-                    });
-                    return headers;
-                  } else {
-                    const headers: React.ReactNode[] = [];
-                    headers.push(<TableCell key="prog-hdr-named" align="center" sx={{ fontWeight: 600, py: 1, minWidth: 50, bgcolor: '#f0f4ff', fontSize: '0.65rem' }}>Named</TableCell>);
-                    actionFields.forEach((f, i) => {
-                      headers.push(<TableCell key={`prog-hdr-conv-${f.key}`} align="center" sx={{ fontWeight: 600, py: 1, minWidth: 50, bgcolor: '#fffef0', fontSize: '0.6rem' }}>→{f.label}</TableCell>);
-                      headers.push(<TableCell key={`prog-hdr-cnt-${f.key}`} align="center" sx={{ fontWeight: 600, py: 1, minWidth: 50, bgcolor: '#f0f4ff', fontSize: '0.65rem' }}>{f.label}</TableCell>);
-                    });
-                    return headers;
-                  }
+                  if (displayMode !== 'conversions' || actionFields.length < 2) return null;
+                  const headers: React.ReactNode[] = [];
+                  headers.push(<TableCell key="prog-hdr-named" align="center" sx={{ fontWeight: 600, py: 1, minWidth: 50, bgcolor: '#f0f4ff', fontSize: '0.65rem' }}>Named</TableCell>);
+                  actionFields.forEach((f, i) => {
+                    headers.push(<TableCell key={`prog-hdr-conv-${f.key}`} align="center" sx={{ fontWeight: 600, py: 1, minWidth: 50, bgcolor: '#fffef0', fontSize: '0.6rem' }}>→{f.label}</TableCell>);
+                    headers.push(<TableCell key={`prog-hdr-cnt-${f.key}`} align="center" sx={{ fontWeight: 600, py: 1, minWidth: 50, bgcolor: '#f0f4ff', fontSize: '0.65rem' }}>{f.label}</TableCell>);
+                  });
+                  return headers;
                 };
 
                 return (

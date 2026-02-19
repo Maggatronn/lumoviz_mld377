@@ -2817,7 +2817,8 @@ app.post('/api/meetings/by-contacts', checkDataAccess, async (req, res) => {
     // conversations table fields: purpose, commitments, stakes, evaluation (no development/values/etc.)
     // NULL placeholders added for lumoviz_meetings-specific columns to make UNION columns match.
     const convCols = include_notes
-      ? `conv.participant_vanid,
+      ? `NULL::TEXT                      AS meeting_id,
+         conv.participant_vanid,
          conv.organizer_vanid,
          conv.date_contacted,
          conv.conversation_type          AS meeting_type,
@@ -2843,8 +2844,11 @@ app.post('/api/meetings/by-contacts', checkDataAccess, async (req, res) => {
          NULL::TEXT                      AS lmtg_sp_constituency_how,
          NULL::TEXT                      AS lmtg_sp_change_stance,
          NULL::TEXT                      AS lmtg_sp_change_how,
+         NULL::BOOLEAN                  AS lmtg_did_share_story,
+         NULL::TEXT                      AS lmtg_what_shared,
          'conversations'                 AS data_source`
-      : `conv.participant_vanid,
+      : `NULL::TEXT                      AS meeting_id,
+         conv.participant_vanid,
          conv.organizer_vanid,
          conv.date_contacted,
          conv.conversation_type          AS meeting_type,
@@ -2870,13 +2874,16 @@ app.post('/api/meetings/by-contacts', checkDataAccess, async (req, res) => {
          NULL::TEXT                      AS lmtg_sp_constituency_how,
          NULL::TEXT                      AS lmtg_sp_change_stance,
          NULL::TEXT                      AS lmtg_sp_change_how,
+         NULL::BOOLEAN                  AS lmtg_did_share_story,
+         NULL::TEXT                      AS lmtg_what_shared,
          'conversations'                 AS data_source`;
 
     // ── Branch 2: newly-logged lumoviz_meetings ──────────────────────────────
     // Passes BOTH legacy notes_ aliases (for latestNotes computation) AND the
     // real lumoviz_meetings field names (so the display dialog can use proper labels).
     const mtgCols = include_notes
-      ? `m.organizee_vanid               AS participant_vanid,
+      ? `m.meeting_id,
+         m.organizee_vanid               AS participant_vanid,
          m.organizer_vanid,
          m.meeting_date                  AS date_contacted,
          COALESCE(m.person_type, 'One-on-One') AS meeting_type,
@@ -2902,8 +2909,11 @@ app.post('/api/meetings/by-contacts', checkDataAccess, async (req, res) => {
          m.shared_purpose_constituency_how    AS lmtg_sp_constituency_how,
          m.shared_purpose_change_stance       AS lmtg_sp_change_stance,
          m.shared_purpose_change_how          AS lmtg_sp_change_how,
+         m.did_share_story               AS lmtg_did_share_story,
+         m.what_shared                   AS lmtg_what_shared,
          'lumoviz_meetings'              AS data_source`
-      : `m.organizee_vanid               AS participant_vanid,
+      : `m.meeting_id,
+         m.organizee_vanid               AS participant_vanid,
          m.organizer_vanid,
          m.meeting_date                  AS date_contacted,
          COALESCE(m.person_type, 'One-on-One') AS meeting_type,
@@ -2929,6 +2939,8 @@ app.post('/api/meetings/by-contacts', checkDataAccess, async (req, res) => {
          m.shared_purpose_constituency_how    AS lmtg_sp_constituency_how,
          m.shared_purpose_change_stance       AS lmtg_sp_change_stance,
          m.shared_purpose_change_how          AS lmtg_sp_change_how,
+         m.did_share_story               AS lmtg_did_share_story,
+         m.what_shared                   AS lmtg_what_shared,
          'lumoviz_meetings'              AS data_source`;
 
     const query = `
@@ -2974,6 +2986,7 @@ app.get('/api/meetings', checkDataAccess, async (req, res) => {
 
     const convQuery = `
       SELECT
+        NULL::TEXT                                                   AS meeting_id,
         c.organizer_vanid,
         COALESCE(
           NULLIF(TRIM(CONCAT(COALESCE(o1.firstname,''),' ',COALESCE(o1.lastname,''))), ''),
@@ -3028,6 +3041,7 @@ app.get('/api/meetings', checkDataAccess, async (req, res) => {
 
     const mtgQuery = `
       SELECT
+        m.meeting_id,
         m.organizer_vanid,
         COALESCE(
           NULLIF(TRIM(CONCAT(COALESCE(o1.firstname,''),' ',COALESCE(o1.lastname,''))), ''),
@@ -4459,6 +4473,106 @@ app.post('/api/meetings', async (req, res) => {
     res.json({ success: true, message: 'Conversation logged successfully' });
   } catch (error) {
     console.error('Error logging conversation:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// PUT /api/meetings/:meetingId - Update an existing conversation (lumoviz_meetings only)
+app.put('/api/meetings/:meetingId', async (req, res) => {
+  try {
+    const { meetingId } = req.params;
+    const {
+      contact_vanid,
+      organizer_vanid,
+      date,
+      notes,
+      meeting_type,
+      person_type,
+      purpose,
+      values,
+      difference,
+      resources,
+      commitment_asked_yn,
+      commitment_made_yn,
+      commitment_what,
+      catapults,
+      shared_purpose_constituency_stance,
+      shared_purpose_constituency_how,
+      shared_purpose_change_stance,
+      shared_purpose_change_how,
+      leadership_tag,
+      did_share_story,
+      what_shared
+    } = req.body;
+
+    if (!meetingId) {
+      return res.status(400).json({ success: false, error: 'meetingId is required' });
+    }
+
+    const result = await pool.query(
+      `UPDATE lumoviz_meetings SET
+        organizee_vanid = $1,
+        organizer_vanid = $2,
+        meeting_date = $3,
+        notes = $4,
+        person_type = $5,
+        purpose = $6,
+        values = $7,
+        difference = $8,
+        resources = $9,
+        commitment_asked_yn = $10,
+        commitment_made_yn = $11,
+        commitment_what = $12,
+        catapults = $13,
+        shared_purpose_constituency_stance = $14,
+        shared_purpose_constituency_how = $15,
+        shared_purpose_change_stance = $16,
+        shared_purpose_change_how = $17,
+        leadership_tag = $18,
+        did_share_story = $19,
+        what_shared = $20
+      WHERE meeting_id = $21`,
+      [
+        contact_vanid ? parseInt(contact_vanid, 10) : null,
+        organizer_vanid ? String(organizer_vanid) : null,
+        date || null,
+        notes || null,
+        person_type || null,
+        purpose || null,
+        values || null,
+        difference || null,
+        resources || null,
+        commitment_asked_yn || null,
+        commitment_made_yn || null,
+        commitment_what || null,
+        (catapults && catapults.length > 0) ? catapults : null,
+        shared_purpose_constituency_stance || null,
+        shared_purpose_constituency_how || null,
+        shared_purpose_change_stance || null,
+        shared_purpose_change_how || null,
+        leadership_tag || null,
+        did_share_story || false,
+        what_shared || null,
+        meetingId
+      ]
+    );
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ success: false, error: 'Meeting not found' });
+    }
+
+    // Update LOE if leadership assessment changed
+    const validLOE = ['Leader', 'Potential Leader', 'Supporter', 'Unknown'];
+    if (leadership_tag && validLOE.includes(leadership_tag) && contact_vanid) {
+      await pool.query(
+        'UPDATE contacts SET loe = $1, updated_at = CURRENT_TIMESTAMP WHERE vanid = $2',
+        [leadership_tag, contact_vanid]
+      );
+    }
+
+    res.json({ success: true, message: 'Conversation updated successfully' });
+  } catch (error) {
+    console.error('Error updating conversation:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });

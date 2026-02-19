@@ -199,6 +199,8 @@ interface PeoplePanelProps {
   contactOrganizerMap?: Map<string, Array<{ organizer_vanid: string; name: string }>>;
   onAddOrganizer?: (contactVanId: string, contactName: string) => void;
   onRemoveOrganizer?: (contactVanId: string, organizerVanId: string) => void;
+  hideActionButtons?: boolean;
+  onEditConversation?: (meeting: any) => void;
 }
 
 interface PersonRecord {
@@ -274,6 +276,8 @@ const PeoplePanel: React.FC<PeoplePanelProps> = ({
   contactOrganizerMap,
   onAddOrganizer,
   onRemoveOrganizer,
+  hideActionButtons = false,
+  onEditConversation,
 }) => {
   // Normalize actions from database format to component format
   const ACTIONS = React.useMemo(() => {
@@ -2030,24 +2034,28 @@ const PeoplePanel: React.FC<PeoplePanelProps> = ({
                   {contactsLoading && (
                     <Typography variant="caption" color="primary" sx={{ fontSize: '0.75rem' }}>Loading...</Typography>
                   )}
-                  <Button
-                    size="small"
-                    variant="outlined"
-                    startIcon={<ChatIcon fontSize="small" />}
-                    onClick={() => setShowLogConversationDialog(true)}
-                    sx={{ fontSize: '0.75rem', py: 0.4, borderColor: '#d1d5db', color: 'text.secondary', '&:hover': { borderColor: 'primary.main', color: 'primary.main' } }}
-                  >
-                    Log Conversation
-                  </Button>
-                  <Button
-                    size="small"
-                    variant="contained"
-                    startIcon={<PersonAddIcon fontSize="small" />}
-                    onClick={() => setShowBatchAddDialog(true)}
-                    sx={{ fontSize: '0.75rem', py: 0.4 }}
-                  >
-                    Add People
-                  </Button>
+                  {!hideActionButtons && (
+                    <>
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        startIcon={<ChatIcon fontSize="small" />}
+                        onClick={() => setShowLogConversationDialog(true)}
+                        sx={{ fontSize: '0.75rem', py: 0.4, borderColor: '#d1d5db', color: 'text.secondary', '&:hover': { borderColor: 'primary.main', color: 'primary.main' } }}
+                      >
+                        Log Conversation
+                      </Button>
+                      <Button
+                        size="small"
+                        variant="contained"
+                        startIcon={<PersonAddIcon fontSize="small" />}
+                        onClick={() => setShowBatchAddDialog(true)}
+                        sx={{ fontSize: '0.75rem', py: 0.4 }}
+                      >
+                        Add People
+                      </Button>
+                    </>
+                  )}
                   {showCopyButton && (
                     <Tooltip title="Copy as table (paste into Google Docs/Excel)">
                       <IconButton 
@@ -3133,6 +3141,7 @@ const PeoplePanel: React.FC<PeoplePanelProps> = ({
         onEditPerson={onEditPerson}
         onAddConversation={onAddConversation}
         onAddToAction={onAddToAction}
+        onEditConversation={onEditConversation}
       />
 
       {/* OrganizerDetailsDialog */}
@@ -3514,6 +3523,7 @@ const PeoplePanel: React.FC<PeoplePanelProps> = ({
         open={Boolean(loeMenuAnchorEl)}
         onClose={() => { setLoeMenuAnchorEl(null); setLoeMenuPersonId(null); }}
         onClick={(e) => e.stopPropagation()}
+        disableRestoreFocus
         PaperProps={{ sx: { minWidth: 180, borderRadius: 2, boxShadow: 3 } }}
         transformOrigin={{ horizontal: 'left', vertical: 'top' }}
         anchorOrigin={{ horizontal: 'left', vertical: 'bottom' }}
@@ -3540,9 +3550,12 @@ const PeoplePanel: React.FC<PeoplePanelProps> = ({
           dense
           onClick={(e) => {
             e.stopPropagation();
-            if (loeMenuPersonId) setEditingLoeId(loeMenuPersonId);
+            const personId = loeMenuPersonId;
             setLoeMenuAnchorEl(null);
             setLoeMenuPersonId(null);
+            setTimeout(() => {
+              if (personId) setEditingLoeId(personId);
+            }, 150);
           }}
         >
           <ListItemIcon><EditIcon fontSize="small" /></ListItemIcon>

@@ -108,19 +108,22 @@ export const buildNameBasedMerges = (
     }
   });
   
-  // Find organizers in meetings who have same normalized first name as team members
+  // Find organizers AND contacts in meetings who match team members by first name
   meetingsData.forEach((meeting) => {
-    const organizerVanId = String(meeting.organizer_vanid || '');
-    const organizerName = meeting.organizer || '';
-    const organizerFirstName = organizerName.split(' ')[0]?.toLowerCase().trim();
-    const normalizedOrganizerFirstName = normalizeFirstName(organizerFirstName);
-    
-    if (organizerVanId && normalizedOrganizerFirstName && teamMembers.has(normalizedOrganizerFirstName)) {
-      const teamMember = teamMembers.get(normalizedOrganizerFirstName)!;
-      if (organizerVanId !== teamMember.id) {
-        merges.set(organizerVanId, teamMember.id);
+    const pairs = [
+      { vanId: String(meeting.organizer_vanid || ''), name: meeting.organizer || '' },
+      { vanId: String(meeting.vanid || ''), name: (meeting as any).contact || '' },
+    ];
+    pairs.forEach(({ vanId, name }) => {
+      const firstName = name.split(' ')[0]?.toLowerCase().trim();
+      const normalized = normalizeFirstName(firstName);
+      if (vanId && normalized && teamMembers.has(normalized)) {
+        const teamMember = teamMembers.get(normalized)!;
+        if (vanId !== teamMember.id) {
+          merges.set(vanId, teamMember.id);
+        }
       }
-    }
+    });
   });
   
   return merges;
