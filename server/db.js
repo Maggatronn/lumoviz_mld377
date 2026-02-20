@@ -6,8 +6,9 @@ const isProduction = process.env.NODE_ENV === 'production';
 // Shared pool settings that handle Cloud SQL Proxy connection drops gracefully
 const poolConfig = {
   max: 10,
-  idleTimeoutMillis: 30000,      // close idle connections after 30s
-  connectionTimeoutMillis: 10000, // give up connecting after 10s
+  idleTimeoutMillis: 10000,       // close idle connections after 10s (avoids stale connections)
+  connectionTimeoutMillis: 10000,  // give up connecting after 10s
+  allowExitOnIdle: false,          // keep pool alive
 };
 
 // Configuration for PostgreSQL connection

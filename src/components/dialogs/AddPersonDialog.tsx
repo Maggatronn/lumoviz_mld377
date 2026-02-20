@@ -22,7 +22,7 @@ interface AddPersonDialogProps {
   onClose: () => void;
   onSave: (person: NewPerson) => Promise<void>;
   availableChapters?: string[];
-  availableOrganizers?: Array<{ id: string; name: string }>;
+  availableOrganizers?: Array<{ id: string; name: string; chapter?: string }>;
   currentUserId?: string;
   initialFirstName?: string;
   initialLastName?: string;
@@ -50,14 +50,6 @@ const AddPersonDialog: React.FC<AddPersonDialogProps> = ({
 }) => {
   const [firstname, setFirstname] = useState(initialFirstName);
   const [lastname, setLastname] = useState(initialLastName);
-
-  // Re-seed name fields whenever dialog opens with prefilled values
-  useEffect(() => {
-    if (open) {
-      setFirstname(initialFirstName);
-      setLastname(initialLastName);
-    }
-  }, [open, initialFirstName, initialLastName]);
   const [chapter, setChapter] = useState('');
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
@@ -65,6 +57,41 @@ const AddPersonDialog: React.FC<AddPersonDialogProps> = ({
   const [primaryOrganizer, setPrimaryOrganizer] = useState(currentUserId);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
+
+  const getOrganizerChapter = (organizerId: string) => {
+    const org = availableOrganizers.find(o => o.id === organizerId);
+    return org?.chapter || '';
+  };
+
+  // Keep organizer in sync with the MyView dropdown, even while dialog is closed
+  useEffect(() => {
+    if (currentUserId) {
+      setPrimaryOrganizer(currentUserId);
+      setChapter(getOrganizerChapter(currentUserId));
+    }
+  }, [currentUserId, availableOrganizers]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Reset form fields when dialog opens
+  useEffect(() => {
+    if (open) {
+      setFirstname(initialFirstName);
+      setLastname(initialLastName);
+      setPhone('');
+      setEmail('');
+      setVanid('');
+      setError('');
+      setPrimaryOrganizer(currentUserId || '');
+      setChapter(getOrganizerChapter(currentUserId || ''));
+    }
+  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleOrganizerChange = (organizerId: string) => {
+    setPrimaryOrganizer(organizerId);
+    const orgChapter = getOrganizerChapter(organizerId);
+    if (orgChapter) {
+      setChapter(orgChapter);
+    }
+  };
 
   const handleClose = () => {
     setFirstname('');
@@ -166,7 +193,7 @@ const AddPersonDialog: React.FC<AddPersonDialogProps> = ({
             <Select
               value={primaryOrganizer}
               label="Primary Organizer"
-              onChange={(e) => setPrimaryOrganizer(e.target.value)}
+              onChange={(e) => handleOrganizerChange(e.target.value)}
             >
               {availableOrganizers.map(org => (
                 <MenuItem key={org.id} value={org.id}>

@@ -10,7 +10,6 @@ import {
 } from '@mui/material';
 import {
   FilterList as FilterListIcon,
-  Edit as EditIcon,
   Info as InfoIcon,
   WarningAmber as WarningIcon
 } from '@mui/icons-material';
@@ -27,7 +26,6 @@ interface PersonChipProps {
   color?: any;
   variant?: 'filled' | 'outlined';
   showMenu?: boolean;
-  // Person mapping specific props
   allMappings?: OrganizerMapping[];
 }
 
@@ -66,7 +64,7 @@ export const PersonChip: React.FC<PersonChipProps> = ({
 
   const handleClick = (event: React.MouseEvent<HTMLDivElement>) => {
     event.stopPropagation();
-    if (showMenu && (onFilterBy || onEditMapping || onViewDetails)) {
+    if (showMenu && (onFilterBy || onViewDetails)) {
       setAnchorEl(event.currentTarget);
     }
   };
@@ -79,14 +77,6 @@ export const PersonChip: React.FC<PersonChipProps> = ({
     event.stopPropagation();
     if (onFilterBy) {
       onFilterBy(name, vanId);
-    }
-    handleClose();
-  };
-
-  const handleEdit = (event: React.MouseEvent) => {
-    event.stopPropagation();
-    if (onEditMapping) {
-      onEditMapping(name, vanId);
     }
     handleClose();
   };
@@ -121,8 +111,8 @@ export const PersonChip: React.FC<PersonChipProps> = ({
       variant={variant}
       onClick={handleClick}
       sx={{
-        cursor: showMenu && (onFilterBy || onEditMapping || onViewDetails) ? 'pointer' : 'default',
-        '&:hover': showMenu && (onFilterBy || onEditMapping || onViewDetails) ? {
+        cursor: showMenu && (onFilterBy || onViewDetails) ? 'pointer' : 'default',
+        '&:hover': showMenu && (onFilterBy || onViewDetails) ? {
           opacity: 0.8
         } : {},
         ...sx
@@ -132,7 +122,7 @@ export const PersonChip: React.FC<PersonChipProps> = ({
 
   const tooltipTitle = showWarning 
     ? "Not in VAN - needs to be added"
-    : showMenu && (onFilterBy || onEditMapping || onViewDetails)
+    : showMenu && (onFilterBy || onViewDetails)
     ? "Click for options"
     : "";
 
@@ -168,17 +158,6 @@ export const PersonChip: React.FC<PersonChipProps> = ({
               <FilterListIcon fontSize="small" />
             </ListItemIcon>
             <ListItemText>Filter by {name}</ListItemText>
-          </MenuItem>
-        )}
-        
-        {onEditMapping && (
-          <MenuItem onClick={handleEdit}>
-            <ListItemIcon>
-              <EditIcon fontSize="small" />
-            </ListItemIcon>
-            <ListItemText>
-              {showWarning ? 'Map to VAN ID...' : 'Edit mapping...'}
-            </ListItemText>
           </MenuItem>
         )}
       </Menu>

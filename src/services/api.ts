@@ -31,7 +31,7 @@ export interface Contact {
   last_contact_date?: string; // Date of most recent contact from API
   total_meetings_all_time?: number; // Total meetings count from API
   organizers?: string[]; // List of organizer names from API
-  primary_organizer_vanid?: string; // Primary organizer VAN ID from lumoviz_contacts
+  primary_organizer_vanid?: string;
 }
 
 export interface IdMapping {

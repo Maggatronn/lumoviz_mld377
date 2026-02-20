@@ -11,6 +11,7 @@ import {
   InputLabel,
   FormControlLabel,
   Checkbox,
+  Chip,
   CircularProgress,
   Alert,
   ToggleButton,
@@ -58,7 +59,7 @@ import TeamsPanel from './panels/TeamsPanel';
 // import NotesPanel from './panels/NotesPanel'; // TODO: Being consolidated into People panel
 import CampaignPanel from './panels/CampaignPanel';
 import DateRangePicker from './ui/DateRangePicker';
-import PersonDetailsDialog from './dialogs/PersonDetailsDialog';
+import PersonDetailsDialog, { PersonUpdate } from './dialogs/PersonDetailsDialog';
 import AssignOrganizerDialog from './dialogs/AssignOrganizerDialog';
 import { EditOrganizerMappingDialog } from './dialogs/EditOrganizerMappingDialog';
 import { PersonMappingDialog } from './dialogs/PersonMappingDialog';
@@ -461,9 +462,69 @@ const MainAppContent: React.FC = () => {
   }, []);
   
   // Load shared contacts and meetings data once (for PeoplePanel)
+  const reloadSharedContacts = useCallback(async (includeMeetings = false) => {
+    console.log('[MainApp] Reloading shared contacts...');
+    try {
+      const contactsResponse = await fetchContacts({
+        chapter: undefined,
+        limit: 5000,
+        offset: 0
+      });
+      
+      console.log('[MainApp] Reloaded contacts:', contactsResponse.data.length);
+      
+      const contacts = (contactsResponse.data || []).map(contact => ({
+        ...contact,
+        organizers: contact.organizers?.map(organizer => 
+          getCanonicalOrganizerName(organizer, organizerMappings)
+        )
+      }));
+      
+      setSharedAllContacts(contacts);
+      
+      setUserMap(prev => {
+        const updated = new Map(prev);
+        contacts.forEach(contact => {
+          const vanid = contact.vanid?.toString();
+          if (vanid) {
+            updated.set(vanid, {
+              userId: vanid,
+              firstname: contact.firstname,
+              lastname: contact.lastname,
+              fullName: `${contact.firstname || ''} ${contact.lastname || ''}`.trim(),
+              chapter: contact.chapter || 'Unknown',
+              type: 'contact',
+              email: contact.email,
+              phone: undefined
+            });
+          }
+        });
+        return updated;
+      });
+      
+      if (includeMeetings && contacts.length > 0) {
+        const contactsToFetch = contacts.slice(0, 500);
+        const BATCH_SIZE = 100;
+        const allMeetings: any[] = [];
+        
+        for (let i = 0; i < contactsToFetch.length; i += BATCH_SIZE) {
+          const batch = contactsToFetch.slice(i, i + BATCH_SIZE);
+          const contactIds = batch.map(c => c.vanid?.toString()).filter(Boolean) as string[];
+          
+          if (contactIds.length > 0) {
+            const batchMeetings = await fetchMeetingsByContacts(contactIds, true);
+            allMeetings.push(...batchMeetings);
+            setSharedCachedMeetings([...allMeetings]);
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error reloading shared contacts:', error);
+    }
+  }, [organizerMappings]);
+
   useEffect(() => {
     const loadSharedData = async () => {
-      // Only do full load once
       if (sharedDataLoadedRef.current) {
         console.log('[MainApp] Skipping - already loaded shared data');
         return;
@@ -477,85 +538,11 @@ const MainAppContent: React.FC = () => {
       console.log('[MainApp] Loading shared contacts and meetings...');
       sharedDataLoadedRef.current = true;
       
-      try {
-        // Load ALL contacts (no date filter)
-        const contactsResponse = await fetchContacts({
-          chapter: undefined,
-          limit: 5000,
-          offset: 0
-        });
-        
-        console.log('[MainApp] Loaded contacts:', contactsResponse.data.length);
-        
-        // Resolve organizer names to canonical form using mapping table
-        const contacts = (contactsResponse.data || []).map(contact => ({
-          ...contact,
-          organizers: contact.organizers?.map(organizer => 
-            getCanonicalOrganizerName(organizer, organizerMappings)
-          )
-        }));
-        
-        setSharedAllContacts(contacts);
-        
-        // Also add ALL contacts to userMap for proper name resolution
-        setUserMap(prev => {
-          const updated = new Map(prev);
-          contacts.forEach(contact => {
-            const vanid = contact.vanid?.toString();
-            if (vanid && !updated.has(vanid)) {
-              updated.set(vanid, {
-                userId: vanid,
-                firstname: contact.firstname,
-                lastname: contact.lastname,
-                fullName: `${contact.firstname || ''} ${contact.lastname || ''}`.trim(),
-                chapter: contact.chapter || 'Unknown',
-                type: 'contact',
-                email: contact.email,
-                phone: undefined
-              });
-            }
-          });
-          return updated;
-        });
-        
-        // Load meetings for contacts
-        if (contacts.length > 0) {
-          const contactsToFetch = contacts.slice(0, 500);
-          const BATCH_SIZE = 100;
-          const allMeetings: any[] = [];
-          
-          // console.log('[MainApp] Fetching meetings for', contactsToFetch.length, 'contacts in batches of', BATCH_SIZE);
-          
-          for (let i = 0; i < contactsToFetch.length; i += BATCH_SIZE) {
-            const batch = contactsToFetch.slice(i, i + BATCH_SIZE);
-            const contactIds = batch.map(c => c.vanid?.toString()).filter(Boolean) as string[];
-            
-            if (contactIds.length > 0) {
-              const batchMeetings = await fetchMeetingsByContacts(contactIds, true);
-              allMeetings.push(...batchMeetings);
-              // console.log(`[MainApp] Batch ${Math.floor(i/BATCH_SIZE) + 1} complete: ${batchMeetings.length} meetings (total: ${allMeetings.length})`);
-              
-              // Update UI progressively after each batch
-              setSharedCachedMeetings([...allMeetings]);
-            }
-          }
-          
-          // console.log('[MainApp] ✅ Loaded', allMeetings.length, 'total meetings', {
-          //   sampleMeeting: allMeetings[0] ? {
-          //     participant_vanid: allMeetings[0].participant_vanid,
-          //     organizer: allMeetings[0].organizer,
-          //     organizer_vanid: allMeetings[0].organizer_vanid,
-          //     purpose: allMeetings[0].purpose?.substring(0, 50) + '...'
-          //   } : null
-          // });
-        }
-      } catch (error) {
-        console.error('Error loading shared PeoplePanel data:', error);
-      }
+      await reloadSharedContacts(true);
     };
     
     loadSharedData();
-  }, [mappingsReady]); // Load once when mappings are ready, organizerMappings removed to prevent infinite loop
+  }, [mappingsReady, reloadSharedContacts]);
   
   // Load leader hierarchy once when currentUserId is available
   const loadLeaderHierarchyData = React.useCallback(async () => {
@@ -776,15 +763,18 @@ const MainAppContent: React.FC = () => {
   const [orgIds, setOrgIds] = useState<any[]>([]);
   const [userMap, setUserMap] = useState<Map<string, any>>(new Map());
 
-  // Build combined organizer options from org_ids + team members for AssignOrganizerDialog
+  // Build combined organizer options from contacts + team members (dedup by vanid AND name)
   const allOrganizerOptions = React.useMemo(() => {
-    const seen = new Set<string>();
+    const seenVanids = new Set<string>();
+    const seenNames = new Set<string>();
     const combined: Array<{ vanid?: string | number; firstname?: string; lastname?: string; chapter?: string }> = [];
 
     for (const o of orgIds) {
       const vid = o.vanid?.toString();
-      if (vid && !seen.has(vid)) {
-        seen.add(vid);
+      const name = `${o.firstname || ''} ${o.lastname || ''}`.trim().toLowerCase();
+      if (vid && !seenVanids.has(vid) && (!name || !seenNames.has(name))) {
+        seenVanids.add(vid);
+        if (name) seenNames.add(name);
         combined.push(o);
       }
     }
@@ -793,8 +783,10 @@ const MainAppContent: React.FC = () => {
       const members = team.organizers || [];
       for (const m of members) {
         const vid = (m.id || m.vanId)?.toString();
-        if (vid && !seen.has(vid) && m.name) {
-          seen.add(vid);
+        const name = m.name?.trim().toLowerCase();
+        if (vid && !seenVanids.has(vid) && name && !seenNames.has(name)) {
+          seenVanids.add(vid);
+          seenNames.add(name);
           const nameParts = m.name.trim().split(/\s+/);
           combined.push({
             vanid: vid,
@@ -1322,6 +1314,10 @@ const MainAppContent: React.FC = () => {
           username: 'maggie',
           alternateIds: ['100001']
         };
+        if (!newUserMap.has(testUserId)) {
+          newUserMap.set(testUserId, testUserInfo);
+          setUserMap(new Map(newUserMap));
+        }
         setCurrentUserId(testUserId);
         setCurrentUserInfo(testUserInfo);
         
@@ -1428,7 +1424,7 @@ const MainAppContent: React.FC = () => {
 
   // Handle node selection
   const handleNodeSelection = (nodeId: string | null) => {
-    setSelectedNodeId(nodeId);
+    setSelectedNodeId(prev => (prev === nodeId ? null : nodeId));
     
     // Show comprehensive node information in console
     if (!nodeId) return;
@@ -1490,7 +1486,7 @@ const MainAppContent: React.FC = () => {
   // Handle refresh
   const handleRefresh = () => {
     hasFetchedDataRef.current = false;
-    setFetchRequested(true);
+    reloadSharedContacts(true);
   };
 
   // Handler for opening person details dialog from Kanban
@@ -1507,6 +1503,38 @@ const MainAppContent: React.FC = () => {
   const handlePersonDialogClose = () => {
     setPersonDialogOpen(false);
     setSelectedPersonForDialog(null);
+  };
+
+  const handleSavePersonFromDialog = async (personId: string, updates: PersonUpdate) => {
+    const response = await fetch(`${API_BASE_URL}/api/contacts/${personId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updates)
+    });
+    if (!response.ok) {
+      throw new Error('Failed to update person');
+    }
+  };
+
+  const handleDeleteConversationFromDialog = async (meetingId: string) => {
+    const response = await fetch(`${API_BASE_URL}/api/meetings/${meetingId}`, {
+      method: 'DELETE'
+    });
+    if (!response.ok) {
+      throw new Error('Failed to delete conversation');
+    }
+  };
+
+  const handleDeletePersonFromDialog = async (personId: string) => {
+    const response = await fetch(`${API_BASE_URL}/api/contacts/${personId}`, {
+      method: 'DELETE'
+    });
+    if (!response.ok) {
+      throw new Error('Failed to delete person');
+    }
+    setPersonDialogOpen(false);
+    setSelectedPersonForDialog(null);
+    reloadSharedContacts(false);
   };
 
   // Helper function to get LOE status from contacts data
@@ -1868,16 +1896,17 @@ const MainAppContent: React.FC = () => {
       }
     });
 
-    // Enrich with contacts data (total_meetings_all_time, etc.)
+    // Enrich with contacts data (total_meetings_all_time, primary_organizer_vanid, etc.)
     contactsData.forEach((contact: any) => {
       const contactId = contact.vanid?.toString();
       if (contactId && peopleMap.has(contactId)) {
         const person = peopleMap.get(contactId)!;
-        // Also update last contact date if available from API
+        if (contact.primary_organizer_vanid) {
+          person.primary_organizer_vanid = contact.primary_organizer_vanid.toString();
+        }
         if (contact.last_contact_date) {
           const apiDate = new Date(contact.last_contact_date);
           if (!isNaN(apiDate.getTime())) {
-            // Update mostRecentContact if this is more recent
             if (!person.mostRecentContact || apiDate > person.mostRecentContact) {
               person.mostRecentContact = apiDate;
             }
@@ -2595,6 +2624,15 @@ const MainAppContent: React.FC = () => {
   }, [allNetworkNodes, allNetworkLinks, selectedChapter, networkLOEFilter, leaderHierarchy, getNodeLOECategory, teamsData, orgIds]);
 
 
+  const selectedNodeName = React.useMemo(() => {
+    if (!selectedNodeId) return null;
+    const node = networkNodes.find(n => n.id === selectedNodeId);
+    if (node) return node.name;
+    const info = userMap.get(selectedNodeId);
+    if (info) return info.fullName || `${info.firstname || ''} ${info.lastname || ''}`.trim();
+    return selectedNodeId;
+  }, [selectedNodeId, networkNodes, userMap]);
+
   // Render mobile view
   if (isMobile) {
   return (
@@ -2625,12 +2663,10 @@ const MainAppContent: React.FC = () => {
             onNodeSelect={handleNodeSelection}
             onPersonDetailsOpen={handlePersonDetailsOpen}
             onPersonAdd={() => {
-              // Refresh contacts data
-              setFetchRequested(true);
+              reloadSharedContacts(false);
             }}
             onConversationLog={() => {
-              // Refresh meetings data
-              setFetchRequested(true);
+              reloadSharedContacts(true);
             }}
             selectedChapter={selectedChapter}
             teamsData={teamsData}
@@ -2761,6 +2797,27 @@ const MainAppContent: React.FC = () => {
               </Box>
             ))}
           </Box>
+
+          {/* Selected node filter chip */}
+          {selectedNodeId && selectedNodeName && (
+            <Chip
+              label={selectedNodeName}
+              size="small"
+              color="primary"
+              variant="outlined"
+              onDelete={() => setSelectedNodeId(null)}
+              sx={{
+                ml: 2,
+                fontWeight: 500,
+                fontSize: '0.8rem',
+                animation: 'fadeIn 0.2s ease',
+                '@keyframes fadeIn': {
+                  from: { opacity: 0, transform: 'scale(0.9)' },
+                  to: { opacity: 1, transform: 'scale(1)' }
+                }
+              }}
+            />
+          )}
         </Box>
 
         {/* Right section - Global Controls */}
@@ -2927,6 +2984,13 @@ const MainAppContent: React.FC = () => {
                   contactOrganizerMap={contactOrganizerMap}
                   onAddOrganizer={handleAddOrganizer}
                   onRemoveOrganizer={handleRemoveOrganizer}
+                  onSavePerson={handleSavePersonFromDialog}
+                  onDeleteConversation={handleDeleteConversationFromDialog}
+                  onDeletePerson={handleDeletePersonFromDialog}
+                  availableOrganizers={allOrganizerOptions.map(o => ({
+                    id: (o.vanid || '').toString(),
+                    name: `${o.firstname || ''} ${o.lastname || ''}`.trim()
+                  })).filter(o => o.id && o.name)}
                 />
               </Box>
 
@@ -3282,12 +3346,10 @@ const MainAppContent: React.FC = () => {
           onNodeSelect={handleNodeSelection}
           onPersonDetailsOpen={handlePersonDetailsOpen}
           onPersonAdd={() => {
-            // Refresh contacts data
-            setFetchRequested(true);
+            reloadSharedContacts(false);
           }}
           onConversationLog={() => {
-            // Refresh meetings data
-            setFetchRequested(true);
+            reloadSharedContacts(true);
           }}
           selectedChapter={selectedChapter}
           teamsData={teamsData}
@@ -3345,6 +3407,14 @@ const MainAppContent: React.FC = () => {
         orgIds={orgIds}
         cachedMeetings={sharedCachedMeetings}
         allContacts={sharedAllContacts}
+        onSavePerson={handleSavePersonFromDialog}
+        availableChapters={chapters}
+        availableOrganizers={allOrganizerOptions.map(o => ({
+          id: (o.vanid || '').toString(),
+          name: `${o.firstname || ''} ${o.lastname || ''}`.trim()
+        })).filter(o => o.id && o.name)}
+        onDeleteConversation={handleDeleteConversationFromDialog}
+        onDeletePerson={handleDeletePersonFromDialog}
         sx={{ zIndex: 9999 }}
       />
       

@@ -1037,27 +1037,26 @@ async function getOrgStructure() {
     
     const query = `
       SELECT 
-        userid,
+        vanid as userid,
         vanid,
-        supervisorid,
-        firstname,
-        lastname,
-        type,
-        turf,
-        team_role
-      FROM \`${PROJECT_ID}.${DATASET_ID}.org_ids\`
-      WHERE userid IS NOT NULL
+        NULL as supervisorid,
+        first_name as firstname,
+        last_name as lastname,
+        COALESCE(type, 'constituent') as type,
+        NULL as turf,
+        NULL as team_role
+      FROM \`${PROJECT_ID}.${DATASET_ID}.contacts\`
+      WHERE vanid IS NOT NULL
     `;
     
     const [rows] = await bigquery.query({ query });
     
-    // Create maps for quick lookups
     const orgStructure = {
-      userToSupervisor: new Map(), // userid -> supervisorid
-      supervisorToUsers: new Map(), // supervisorid -> [userids]
-      userToVanid: new Map(),      // userid -> vanid
-      vanidToUser: new Map(),      // vanid -> userid
-      userInfo: new Map()          // userid -> user info
+      userToSupervisor: new Map(),
+      supervisorToUsers: new Map(),
+      userToVanid: new Map(),
+      vanidToUser: new Map(),
+      userInfo: new Map()
     };
     
     rows.forEach(row => {
@@ -1066,24 +1065,19 @@ async function getOrgStructure() {
       const supervisorid = row.supervisorid?.toString();
       
       if (userid) {
-        // Map user to supervisor
         if (supervisorid) {
           orgStructure.userToSupervisor.set(userid, supervisorid);
-          
-          // Map supervisor to users
           if (!orgStructure.supervisorToUsers.has(supervisorid)) {
             orgStructure.supervisorToUsers.set(supervisorid, []);
           }
           orgStructure.supervisorToUsers.get(supervisorid).push(userid);
         }
         
-        // Map user to vanid and vice versa
         if (vanid) {
           orgStructure.userToVanid.set(userid, vanid);
           orgStructure.vanidToUser.set(vanid, userid);
         }
         
-        // Store user info
         orgStructure.userInfo.set(userid, {
           userid,
           vanid,
@@ -1132,9 +1126,9 @@ async function getUserIdFromIdentifier(identifier) {
   if (!identifier) return null;
   try {
     const query = `
-      SELECT userid FROM \`${PROJECT_ID}.${DATASET_ID}.org_ids\`
-      WHERE userid = '${identifier}' OR vanid = '${identifier}'
-        OR LOWER(CONCAT(firstname, '@carolinafederation.org')) = LOWER('${identifier}')
+      SELECT vanid as userid FROM \`${PROJECT_ID}.${DATASET_ID}.contacts\`
+      WHERE vanid = '${identifier}'
+        OR LOWER(CONCAT(first_name, '@carolinafederation.org')) = LOWER('${identifier}')
       LIMIT 1`;
     const [rows] = await bigquery.query({ query });
     return rows[0]?.userid?.toString() || null;
@@ -1315,8 +1309,7 @@ app.get('/api/contacts', async (req, res) => {
     const total = parseInt(countResult.rows[0]?.total) || 0;
     console.log('[/api/contacts] Total contacts:', total);
     
-    // Get paginated data with primary_organizer_vanid from lumoviz_contacts
-    // Add limit and offset to params first
+    // Get paginated data (primary_organizer_vanid now lives directly on contacts)
     queryParams.push(parseInt(limit), parseInt(offset));
     
     const dataQuery = `
@@ -1329,9 +1322,9 @@ app.get('/api/contacts', async (req, res) => {
         c.phone,
         c.member_status,
         c.loe,
-        lc.primary_organizer_vanid
+        c.type,
+        c.primary_organizer_vanid
       FROM contacts c
-      LEFT JOIN lumoviz_contacts lc ON CAST(c.vanid AS TEXT) = CAST(lc.vanid AS TEXT)
       WHERE ${whereClause}
       ORDER BY ${safeSortBy} ${safeSortOrder}
       LIMIT $${paramCount}
@@ -2239,112 +2232,54 @@ app.post('/api/network-data', async (req, res) => {
   }
 });
 
-// Add a new endpoint to get org_ids data
+// Legacy endpoint - redirects to contacts table
 app.get('/api/org-ids', async (req, res) => {
   try {
-    // console.log('Fetching org_ids data...');
-    
-    // First check the schema to see what columns are available
-    const schemaQuery = `
-      SELECT column_name, data_type
-      FROM \`${PROJECT_ID}\`.${DATASET_ID}.INFORMATION_SCHEMA.COLUMNS
-      WHERE table_name = 'org_ids'
-      ORDER BY ordinal_position
-    `;
-    
-    const [columns] = await bigquery.query({ query: schemaQuery });
-    // console.log('Org_ids columns:', columns.map(col => col.column_name).join(', '));
-    
-    // Look for ID fields that could match the userID in nodes
-    const idColumns = columns.filter(col => 
-      col.column_name.toLowerCase().includes('id') ||
-      col.column_name.toLowerCase().includes('user') ||
-      col.column_name.toLowerCase().includes('van')
-    );
-    
-    // console.log('Potential ID columns:', idColumns.map(col => col.column_name).join(', '));
-    
-    // Build the column list for the SELECT query
-    let selectColumns = ['vanid'];
-    
-    // Add any other ID columns we found
-    idColumns.forEach(col => {
-      if (!selectColumns.includes(col.column_name)) {
-        selectColumns.push(col.column_name);
-      }
-    });
-    
-    // Add name columns
-    if (columns.find(col => col.column_name === 'firstname')) {
-      selectColumns.push('firstname');
-    }
-    if (columns.find(col => col.column_name === 'lastname')) {
-      selectColumns.push('lastname');
-    }
-    if (columns.find(col => col.column_name === 'email')) {
-      selectColumns.push('email');
-    }
-    if (columns.find(col => col.column_name === 'chapter')) {
-      selectColumns.push('chapter');
-    }
-    
-    // Query the org_ids table with the columns we found
     const query = `
       SELECT 
-        ${selectColumns.join(',\n        ')}
-      FROM \`${PROJECT_ID}.${DATASET_ID}.org_ids\`
+        vanid,
+        vanid as userid,
+        first_name as firstname,
+        last_name as lastname,
+        email,
+        chapter,
+        COALESCE(type, 'constituent') as type
+      FROM \`${PROJECT_ID}.${DATASET_ID}.contacts\`
       LIMIT 2000
     `;
 
-    // console.log('Executing query:', query);
     const [rows] = await bigquery.query({ query });
     
-    // console.log(`Retrieved ${rows.length} rows from org_ids table`);
-    if (rows.length > 0) {
-      // console.log('First row sample:', JSON.stringify(rows[0], null, 2));
-    }
-    
     res.json({
-      columns: columns,
-      idColumns: idColumns,
+      columns: [],
+      idColumns: [],
       data: rows
     });
   } catch (error) {
-    // console.error('Error fetching org_ids data:', error);
     res.status(500).json({ error: error.message });
   }
 });
 
-// Simplified endpoint for org_ids - falls back to contacts table if org_ids is empty
+// Simplified endpoint for org_ids - now reads directly from contacts table
 app.get('/api/org-ids-simple', async (req, res) => {
   try {
-    console.log('[/api/org-ids-simple] Fetching org_ids data from PostgreSQL...');
+    console.log('[/api/org-ids-simple] Fetching from contacts table...');
     
-    // Try org_ids first
-    let result = await pool.query(`
-      SELECT vanid, userid, firstname, lastname, supervisorid, type, turf, team_role, email, chapter
-      FROM org_ids LIMIT 5000
+    const result = await pool.query(`
+      SELECT 
+        vanid,
+        vanid as userid,
+        first_name as firstname,
+        last_name as lastname,
+        NULL as supervisorid,
+        COALESCE(type, 'constituent') as type,
+        NULL as turf,
+        NULL as team_role,
+        email,
+        chapter
+      FROM contacts
+      LIMIT 5000
     `);
-    
-    // If org_ids is empty, fall back to contacts table
-    if (result.rows.length === 0) {
-      console.log('[/api/org-ids-simple] org_ids empty, falling back to contacts table');
-      result = await pool.query(`
-        SELECT 
-          vanid,
-          vanid as userid,
-          first_name as firstname,
-          last_name as lastname,
-          NULL as supervisorid,
-          COALESCE(member_status, 'constituent') as type,
-          NULL as turf,
-          NULL as team_role,
-          email,
-          chapter
-        FROM contacts
-        LIMIT 5000
-      `);
-    }
     
     console.log(`[/api/org-ids-simple] Found ${result.rows.length} records`);
     res.json(result.rows);
@@ -2397,15 +2332,11 @@ app.get('/api/conversations', checkDataAccess, async (req, res) => {
     
     // console.log(`/api/conversations called with: startDate=${startDate}, endDate=${endDate}, chapter=${chapter}, participant=${participant}, limit=${limitNum}`);
     
-    // Build base query using conversations table with contacts for LOE data
-    // NOTE: Names come from org_ids first, then contacts table as fallback (NOT from conversations)
     let query = `
       WITH ConversationsData AS (
         SELECT 
           c.organizer_vanid,
-          -- Organizer name: try org_ids first, then contacts, then 'Unknown Organizer'
           COALESCE(
-            NULLIF(TRIM(CONCAT(COALESCE(o1.firstname, ''), ' ', COALESCE(o1.lastname, ''))), ''),
             NULLIF(TRIM(CONCAT(COALESCE(cont2.first_name, ''), ' ', COALESCE(cont2.last_name, ''))), ''),
             'Unknown Organizer'
           ) as organizer,
@@ -2418,10 +2349,8 @@ app.get('/api/conversations', checkDataAccess, async (req, res) => {
           c.stakes as notes_stakes,
           '' as notes_development,
           c.evaluation as notes_evaluation,
-          -- Two-on-One meeting fields - host name: try org_ids first, then contacts
           CASE WHEN c.host_vanid IS NOT NULL THEN 
             COALESCE(
-              NULLIF(TRIM(CONCAT(COALESCE(o3.firstname, ''), ' ', COALESCE(o3.lastname, ''))), ''),
               NULLIF(TRIM(CONCAT(COALESCE(cont3.first_name, ''), ' ', COALESCE(cont3.last_name, ''))), ''),
               'Unknown Host'
             )
@@ -2431,27 +2360,23 @@ app.get('/api/conversations', checkDataAccess, async (req, res) => {
           '' as two_risks,
           '' as two_effective,
           '' as two_support,
-          -- Contact information (participant) - use contacts table for participant info
           COALESCE(cont1.first_name, c.participant_first_name) as contact_firstname,
           COALESCE(cont1.last_name, c.participant_last_name) as contact_lastname,
           c.participant_chapter as contact_chapter,
           cont1.loe as contact_loe,
           cont1.member_status as member_status,
           cont1.email as email,
-          -- Organizer information - try org_ids first, then contacts
-          COALESCE(o1.firstname, cont2.first_name) as organizer_firstname,
-          COALESCE(o1.lastname, cont2.last_name) as organizer_lastname,
+          cont2.first_name as organizer_firstname,
+          cont2.last_name as organizer_lastname,
           cont2.chapter as organizer_chapter,
           cont2.loe as organizer_loe,
-          -- Host information (for Two-on-One meetings) - try org_ids first, then contacts
-          COALESCE(o3.firstname, cont3.first_name) as host_firstname,
-          COALESCE(o3.lastname, cont3.last_name) as host_lastname,
+          cont3.first_name as host_firstname,
+          cont3.last_name as host_lastname,
           cont3.chapter as host_chapter,
           cont3.loe as host_loe,
-          -- Include org_ids info for access control
-          o1.userid as organizer_userid,
-          o2.userid as contact_userid,
-          o3.userid as host_userid
+          cont2.vanid::TEXT as organizer_userid,
+          cont1.vanid::TEXT as contact_userid,
+          cont3.vanid::TEXT as host_userid
         FROM \`${PROJECT_ID}.${DATASET_ID}.conversations\` c
         LEFT JOIN \`${PROJECT_ID}.${DATASET_ID}.contacts\` cont1 
           ON CAST(c.participant_vanid AS STRING) = CAST(cont1.vanid AS STRING)
@@ -2459,12 +2384,6 @@ app.get('/api/conversations', checkDataAccess, async (req, res) => {
           ON CAST(c.organizer_vanid AS STRING) = CAST(cont2.vanid AS STRING)
         LEFT JOIN \`${PROJECT_ID}.${DATASET_ID}.contacts\` cont3 
           ON CAST(c.host_vanid AS STRING) = CAST(cont3.vanid AS STRING)
-        LEFT JOIN \`${PROJECT_ID}.${DATASET_ID}.org_ids\` o1
-          ON CAST(c.organizer_vanid AS STRING) = CAST(o1.vanid AS STRING)
-        LEFT JOIN \`${PROJECT_ID}.${DATASET_ID}.org_ids\` o2
-          ON CAST(c.participant_vanid AS STRING) = CAST(o2.vanid AS STRING)
-        LEFT JOIN \`${PROJECT_ID}.${DATASET_ID}.org_ids\` o3
-          ON CAST(c.host_vanid AS STRING) = CAST(o3.vanid AS STRING)
         WHERE 1=1
       `;
 
@@ -2720,9 +2639,7 @@ app.get('/api/meetings/histogram', checkDataAccess, async (req, res) => {
         scopeCol = 'participant_chapter';
         break;
       case 'person':
-        scopeCol = "COALESCE(NULLIF(TRIM(CONCAT(COALESCE(o1.firstname,''),' ',COALESCE(o1.lastname,''))),'')"
-                 + ", NULLIF(TRIM(CONCAT(COALESCE(cont2.first_name,''),' ',COALESCE(cont2.last_name,''))),''),"
-                 + " 'Unknown')";
+        scopeCol = "COALESCE(NULLIF(TRIM(CONCAT(COALESCE(cont2.first_name,''),' ',COALESCE(cont2.last_name,''))),''), 'Unknown')";
         break;
       case 'type':
         scopeCol = 'conversation_type';
@@ -2748,12 +2665,10 @@ app.get('/api/meetings/histogram', checkDataAccess, async (req, res) => {
     }
     if (organizer) {
       const orgLike = `'%${organizer.replace(/'/g, "''")}%'`;
-      convWhereParts.push(`(LOWER(CONCAT(COALESCE(o1.firstname,''),' ',COALESCE(o1.lastname,''))) LIKE LOWER(${orgLike}) OR LOWER(CONCAT(COALESCE(cont2.first_name,''),' ',COALESCE(cont2.last_name,''))) LIKE LOWER(${orgLike}))`);
-      mtgWhereParts.push(`(LOWER(CONCAT(COALESCE(o1.firstname,''),' ',COALESCE(o1.lastname,''))) LIKE LOWER(${orgLike}) OR LOWER(CONCAT(COALESCE(cont2.first_name,''),' ',COALESCE(cont2.last_name,''))) LIKE LOWER(${orgLike}))`);
+      convWhereParts.push(`LOWER(CONCAT(COALESCE(cont2.first_name,''),' ',COALESCE(cont2.last_name,''))) LIKE LOWER(${orgLike})`);
+      mtgWhereParts.push(`LOWER(CONCAT(COALESCE(cont2.first_name,''),' ',COALESCE(cont2.last_name,''))) LIKE LOWER(${orgLike})`);
     }
 
-    // UNION conversations (historical) + lumoviz_meetings (newly logged)
-    // lumoviz_meetings has meeting_date instead of date_contacted; map to same aliases.
     const query = `
       WITH combined AS (
         SELECT
@@ -2761,7 +2676,6 @@ app.get('/api/meetings/histogram', checkDataAccess, async (req, res) => {
           ${timeLabel}           AS time_label,
           ${scopeCol}            AS scope_key
         FROM conversations c
-        LEFT JOIN org_ids o1   ON c.organizer_vanid::TEXT = o1.vanid::TEXT
         LEFT JOIN contacts cont2 ON c.organizer_vanid::TEXT = cont2.vanid::TEXT
         WHERE ${convWhereParts.join(' AND ')}
 
@@ -2772,7 +2686,6 @@ app.get('/api/meetings/histogram', checkDataAccess, async (req, res) => {
           ${timeLabel.replace(/date_contacted/g, 'meeting_date')}  AS time_label,
           'One-on-One'                                             AS scope_key
         FROM lumoviz_meetings m
-        LEFT JOIN org_ids o1   ON m.organizer_vanid::TEXT = o1.vanid::TEXT
         LEFT JOIN contacts cont2 ON m.organizer_vanid::TEXT = cont2.vanid::TEXT
         WHERE ${mtgWhereParts.join(' AND ')}
       )
@@ -2817,7 +2730,7 @@ app.post('/api/meetings/by-contacts', checkDataAccess, async (req, res) => {
     // conversations table fields: purpose, commitments, stakes, evaluation (no development/values/etc.)
     // NULL placeholders added for lumoviz_meetings-specific columns to make UNION columns match.
     const convCols = include_notes
-      ? `NULL::TEXT                      AS meeting_id,
+      ? `('conv_' || conv.id) AS meeting_id,
          conv.participant_vanid,
          conv.organizer_vanid,
          conv.date_contacted,
@@ -2847,7 +2760,7 @@ app.post('/api/meetings/by-contacts', checkDataAccess, async (req, res) => {
          NULL::BOOLEAN                  AS lmtg_did_share_story,
          NULL::TEXT                      AS lmtg_what_shared,
          'conversations'                 AS data_source`
-      : `NULL::TEXT                      AS meeting_id,
+      : `('conv_' || conv.id) AS meeting_id,
          conv.participant_vanid,
          conv.organizer_vanid,
          conv.date_contacted,
@@ -2989,7 +2902,6 @@ app.get('/api/meetings', checkDataAccess, async (req, res) => {
         NULL::TEXT                                                   AS meeting_id,
         c.organizer_vanid,
         COALESCE(
-          NULLIF(TRIM(CONCAT(COALESCE(o1.firstname,''),' ',COALESCE(o1.lastname,''))), ''),
           NULLIF(TRIM(CONCAT(COALESCE(cont2.first_name,''),' ',COALESCE(cont2.last_name,''))), ''),
           'Unknown Organizer'
         ) AS organizer,
@@ -3014,22 +2926,20 @@ app.get('/api/meetings', checkDataAccess, async (req, res) => {
         cont1.loe                                                    AS contact_loe,
         cont1.member_status                                          AS member_status,
         cont1.email                                                  AS email,
-        COALESCE(o1.firstname, cont2.first_name)                    AS organizer_firstname,
-        COALESCE(o1.lastname,  cont2.last_name)                     AS organizer_lastname,
+        cont2.first_name                                             AS organizer_firstname,
+        cont2.last_name                                              AS organizer_lastname,
         cont2.chapter                                                AS organizer_chapter,
         cont2.loe                                                    AS organizer_loe,
         NULL::TEXT                                                   AS host_firstname,
         NULL::TEXT                                                   AS host_lastname,
         NULL::TEXT                                                   AS host_chapter,
         NULL::TEXT                                                   AS host_loe,
-        o1.userid                                                    AS organizer_userid,
-        o2.userid                                                    AS contact_userid,
+        cont2.vanid::TEXT                                            AS organizer_userid,
+        cont1.vanid::TEXT                                            AS contact_userid,
         NULL::TEXT                                                   AS host_userid
       FROM conversations c
       LEFT JOIN contacts  cont1 ON c.participant_vanid::TEXT = cont1.vanid::TEXT
       LEFT JOIN contacts  cont2 ON c.organizer_vanid::TEXT  = cont2.vanid::TEXT
-      LEFT JOIN org_ids   o1    ON c.organizer_vanid::TEXT  = o1.vanid::TEXT
-      LEFT JOIN org_ids   o2    ON c.participant_vanid::TEXT = o2.vanid::TEXT
       WHERE ${convWhere.join(' AND ')}
     `;
 
@@ -3044,7 +2954,6 @@ app.get('/api/meetings', checkDataAccess, async (req, res) => {
         m.meeting_id,
         m.organizer_vanid,
         COALESCE(
-          NULLIF(TRIM(CONCAT(COALESCE(o1.firstname,''),' ',COALESCE(o1.lastname,''))), ''),
           NULLIF(TRIM(CONCAT(COALESCE(cont2.first_name,''),' ',COALESCE(cont2.last_name,''))), ''),
           'Unknown Organizer'
         ) AS organizer,
@@ -3069,22 +2978,20 @@ app.get('/api/meetings', checkDataAccess, async (req, res) => {
         cont1.loe                                                    AS contact_loe,
         cont1.member_status                                          AS member_status,
         cont1.email                                                  AS email,
-        COALESCE(o1.firstname, cont2.first_name)                    AS organizer_firstname,
-        COALESCE(o1.lastname,  cont2.last_name)                     AS organizer_lastname,
+        cont2.first_name                                             AS organizer_firstname,
+        cont2.last_name                                              AS organizer_lastname,
         cont2.chapter                                                AS organizer_chapter,
         cont2.loe                                                    AS organizer_loe,
         NULL::TEXT                                                   AS host_firstname,
         NULL::TEXT                                                   AS host_lastname,
         NULL::TEXT                                                   AS host_chapter,
         NULL::TEXT                                                   AS host_loe,
-        o1.userid                                                    AS organizer_userid,
-        o2.userid                                                    AS contact_userid,
+        cont2.vanid::TEXT                                            AS organizer_userid,
+        cont1.vanid::TEXT                                            AS contact_userid,
         NULL::TEXT                                                   AS host_userid
       FROM lumoviz_meetings m
       LEFT JOIN contacts  cont1 ON m.organizee_vanid::TEXT = cont1.vanid::TEXT
       LEFT JOIN contacts  cont2 ON m.organizer_vanid::TEXT = cont2.vanid::TEXT
-      LEFT JOIN org_ids   o1    ON m.organizer_vanid::TEXT = o1.vanid::TEXT
-      LEFT JOIN org_ids   o2    ON m.organizee_vanid::TEXT = o2.vanid::TEXT
       WHERE ${mtgWhere.join(' AND ')}
     `;
 
@@ -3192,7 +3099,6 @@ app.get('/api/link-debug/:nodeId1/:nodeId2', async (req, res) => {
     `;
 
     // Query conversations for any interactions between these two nodes
-    // NOTE: Names come from org_ids first, then contacts table as fallback (NOT from conversations)
     const conversationsQuery = `
       SELECT 
         c.organizer_vanid,
@@ -3205,14 +3111,12 @@ app.get('/api/link-debug/:nodeId1/:nodeId2', async (req, res) => {
         c.stakes as notes_stakes,
         '' as notes_development,
         c.evaluation as notes_evaluation,
-        -- Contact information (participant) - use contacts table
         COALESCE(cont1.first_name, c.participant_first_name) as contact_firstname,
         COALESCE(cont1.last_name, c.participant_last_name) as contact_lastname,
         c.participant_chapter as contact_chapter,
         cont1.loe as contact_loe,
-        -- Organizer information - try org_ids first, then contacts
-        COALESCE(o1.firstname, cont2.first_name) as organizer_firstname,
-        COALESCE(o1.lastname, cont2.last_name) as organizer_lastname,
+        cont2.first_name as organizer_firstname,
+        cont2.last_name as organizer_lastname,
         cont2.chapter as organizer_chapter,
         cont2.loe as organizer_loe
       FROM \`${PROJECT_ID}.${DATASET_ID}.conversations\` c
@@ -3220,8 +3124,6 @@ app.get('/api/link-debug/:nodeId1/:nodeId2', async (req, res) => {
         ON CAST(c.participant_vanid AS STRING) = CAST(cont1.vanid AS STRING)
       LEFT JOIN \`${PROJECT_ID}.${DATASET_ID}.contacts\` cont2 
         ON CAST(c.organizer_vanid AS STRING) = CAST(cont2.vanid AS STRING)
-      LEFT JOIN \`${PROJECT_ID}.${DATASET_ID}.org_ids\` o1
-        ON CAST(c.organizer_vanid AS STRING) = CAST(o1.vanid AS STRING)
       WHERE 
         ((c.organizer_vanid = '${nodeId1}' OR CAST(c.organizer_vanid AS STRING) = '${nodeId1}') AND (c.participant_vanid = '${nodeId2}' OR CAST(c.participant_vanid AS STRING) = '${nodeId2}'))
         OR
@@ -3307,8 +3209,6 @@ app.get('/api/node-debug/:nodeId', async (req, res) => {
       LIMIT 100
     `;
 
-    // Query conversations for this node as both organizer and participant
-    // NOTE: Names come from org_ids first, then contacts table as fallback (NOT from conversations)
     const conversationsQuery = `
       SELECT 
         c.organizer_vanid,
@@ -3321,14 +3221,12 @@ app.get('/api/node-debug/:nodeId', async (req, res) => {
         c.stakes as notes_stakes,
         '' as notes_development,
         c.evaluation as notes_evaluation,
-        -- Contact information (participant) - use contacts table
         COALESCE(cont1.first_name, c.participant_first_name) as contact_firstname,
         COALESCE(cont1.last_name, c.participant_last_name) as contact_lastname,
         c.participant_chapter as contact_chapter,
         cont1.loe as contact_loe,
-        -- Organizer information - try org_ids first, then contacts
-        COALESCE(o1.firstname, cont2.first_name) as organizer_firstname,
-        COALESCE(o1.lastname, cont2.last_name) as organizer_lastname,
+        cont2.first_name as organizer_firstname,
+        cont2.last_name as organizer_lastname,
         cont2.chapter as organizer_chapter,
         cont2.loe as organizer_loe
       FROM \`${PROJECT_ID}.${DATASET_ID}.conversations\` c
@@ -3336,8 +3234,6 @@ app.get('/api/node-debug/:nodeId', async (req, res) => {
         ON CAST(c.participant_vanid AS STRING) = CAST(cont1.vanid AS STRING)
       LEFT JOIN \`${PROJECT_ID}.${DATASET_ID}.contacts\` cont2 
         ON CAST(c.organizer_vanid AS STRING) = CAST(cont2.vanid AS STRING)
-      LEFT JOIN \`${PROJECT_ID}.${DATASET_ID}.org_ids\` o1
-        ON CAST(c.organizer_vanid AS STRING) = CAST(o1.vanid AS STRING)
       WHERE 
         c.organizer_vanid = '${nodeId}' OR c.participant_vanid = '${nodeId}'
         OR CAST(c.organizer_vanid AS STRING) = '${nodeId}' OR CAST(c.participant_vanid AS STRING) = '${nodeId}'
@@ -3345,13 +3241,14 @@ app.get('/api/node-debug/:nodeId', async (req, res) => {
       LIMIT 100
     `;
 
-    // Query org_ids to get additional info about this node
+    // Query contacts to get additional info about this node
     const orgIdsQuery = `
-      SELECT *
-      FROM \`${PROJECT_ID}.${DATASET_ID}.org_ids\`
+      SELECT vanid, vanid as userid, first_name as firstname, last_name as lastname, 
+             email, chapter, COALESCE(type, 'constituent') as type
+      FROM \`${PROJECT_ID}.${DATASET_ID}.contacts\`
       WHERE 
-        vanid = '${nodeId}' OR userid = '${nodeId}'
-        OR CAST(vanid AS STRING) = '${nodeId}' OR CAST(userid AS STRING) = '${nodeId}'
+        vanid = '${nodeId}'
+        OR CAST(vanid AS STRING) = '${nodeId}'
     `;
 
     // Query contacts table
@@ -3442,8 +3339,6 @@ app.get('/api/network-data-with-hosts', checkDataAccess, async (req, res) => {
     }
     contactHistoryQuery += ` ORDER BY ch.utc_datecanvassed DESC LIMIT ${limitNum} OFFSET ${pageNum * limitNum}`;
 
-    // Query conversations data with Two-on-One information
-    // NOTE: Names come from org_ids first, then contacts table as fallback (NOT from conversations)
     let conversationsQuery = `
       SELECT 
         c.organizer_vanid,
@@ -3456,10 +3351,8 @@ app.get('/api/network-data-with-hosts', checkDataAccess, async (req, res) => {
         c.stakes as notes_stakes,
         '' as notes_development,
         c.evaluation as notes_evaluation,
-        -- Two-on-One meeting fields - host name: try org_ids first, then contacts
         CASE WHEN c.host_vanid IS NOT NULL THEN 
           COALESCE(
-            NULLIF(TRIM(CONCAT(COALESCE(o3.firstname, ''), ' ', COALESCE(o3.lastname, ''))), ''),
             NULLIF(TRIM(CONCAT(COALESCE(cont3.first_name, ''), ' ', COALESCE(cont3.last_name, ''))), ''),
             'Unknown Host'
           )
@@ -3469,21 +3362,18 @@ app.get('/api/network-data-with-hosts', checkDataAccess, async (req, res) => {
         '' as two_risks,
         '' as two_effective,
         '' as two_support,
-        -- Contact information (participant) - use contacts table
         COALESCE(cont1.first_name, c.participant_first_name) as contact_firstname,
         COALESCE(cont1.last_name, c.participant_last_name) as contact_lastname,
         c.participant_chapter as contact_chapter,
-        -- Organizer information - try org_ids first, then contacts
-        COALESCE(o1.firstname, cont2.first_name) as organizer_firstname,
-        COALESCE(o1.lastname, cont2.last_name) as organizer_lastname,
+        cont2.first_name as organizer_firstname,
+        cont2.last_name as organizer_lastname,
         cont2.chapter as organizer_chapter,
-        -- Host information (for Two-on-One meetings) - try org_ids first, then contacts
-        COALESCE(o3.firstname, cont3.first_name) as host_firstname,
-        COALESCE(o3.lastname, cont3.last_name) as host_lastname,
+        cont3.first_name as host_firstname,
+        cont3.last_name as host_lastname,
         cont3.chapter as host_chapter,
-        o1.userid as organizer_userid,
-        o2.userid as contact_userid,
-        o3.userid as host_userid
+        cont2.vanid::TEXT as organizer_userid,
+        cont1.vanid::TEXT as contact_userid,
+        cont3.vanid::TEXT as host_userid
       FROM \`${PROJECT_ID}.${DATASET_ID}.conversations\` c
       LEFT JOIN \`${PROJECT_ID}.${DATASET_ID}.contacts\` cont1 
         ON CAST(c.participant_vanid AS STRING) = CAST(cont1.vanid AS STRING)
@@ -3491,13 +3381,6 @@ app.get('/api/network-data-with-hosts', checkDataAccess, async (req, res) => {
         ON CAST(c.organizer_vanid AS STRING) = CAST(cont2.vanid AS STRING)
       LEFT JOIN \`${PROJECT_ID}.${DATASET_ID}.contacts\` cont3 
         ON CAST(c.host_vanid AS STRING) = CAST(cont3.vanid AS STRING)
-      
-      LEFT JOIN \`${PROJECT_ID}.${DATASET_ID}.org_ids\` o1
-        ON CAST(c.organizer_vanid AS STRING) = CAST(o1.vanid AS STRING)
-      LEFT JOIN \`${PROJECT_ID}.${DATASET_ID}.org_ids\` o2
-        ON CAST(c.participant_vanid AS STRING) = CAST(o2.vanid AS STRING)
-      LEFT JOIN \`${PROJECT_ID}.${DATASET_ID}.org_ids\` o3
-        ON CAST(c.host_vanid AS STRING) = CAST(o3.vanid AS STRING)
       WHERE 1=1
     `;
 
@@ -4222,6 +4105,7 @@ app.patch('/api/contacts/:vanid/section', async (req, res) => {
 app.post('/api/contacts', async (req, res) => {
   try {
     const { firstname, lastname, chapter, phone, email, vanid, primary_organizer_vanid } = req.body;
+    console.log('[POST /api/contacts] Received:', { firstname, lastname, chapter, primary_organizer_vanid, phone: !!phone, email: !!email });
     
     if (!firstname || !lastname) {
       return res.status(400).json({
@@ -4233,11 +4117,11 @@ app.post('/api/contacts', async (req, res) => {
     // Generate a VAN ID if not provided (use negative numbers for manually added contacts)
     const finalVanId = vanid || `-${Date.now()}`;
     
-    // Insert into contacts table (main contact data)
+    // Insert into contacts table (single source of truth)
     const contactsQuery = `
       INSERT INTO contacts
-      (vanid, first_name, last_name, email, phone, chapter, member_status, created_at, updated_at)
-      VALUES (@vanid, @first_name, @last_name, @email, @phone, @chapter, 'Active', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      (vanid, first_name, last_name, email, phone, chapter, member_status, type, primary_organizer_vanid, created_at, updated_at)
+      VALUES (@vanid, @first_name, @last_name, @email, @phone, @chapter, 'Active', 'constituent', @primary_organizer_vanid, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
     `;
     
     await database.query({
@@ -4248,47 +4132,12 @@ app.post('/api/contacts', async (req, res) => {
         last_name: lastname,
         email: email || null,
         phone: phone || null,
-        chapter: chapter || null
+        chapter: chapter || null,
+        primary_organizer_vanid: primary_organizer_vanid || null
       }
     });
     
-    // Also add to org_ids if they should be in the organizer dropdown
-    const orgIdsQuery = `
-      INSERT INTO org_ids
-      (vanid, userid, firstname, lastname, email, chapter, type, created_at, updated_at)
-      VALUES (@vanid, @userid, @firstname, @lastname, @email, @chapter, 'constituent', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-      ON CONFLICT (vanid) DO NOTHING
-    `;
-    
-    await database.query({
-      query: orgIdsQuery,
-      params: {
-        vanid: finalVanId,
-        userid: `${firstname.toLowerCase()}_${lastname.toLowerCase()}_${Date.now()}`,
-        firstname,
-        lastname,
-        email: email || null,
-        chapter: chapter || null
-      }
-    });
-    
-    // Store extended contact info in lumoviz_contacts table (if primary_organizer provided)
-    if (primary_organizer_vanid) {
-      const lumovizContactsQuery = `
-        INSERT INTO lumoviz_contacts
-        (vanid, primary_organizer_vanid, created_at, updated_at)
-        VALUES (@vanid, @primary_organizer_vanid, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-      `;
-      
-      await database.query({
-        query: lumovizContactsQuery,
-        params: {
-          vanid: finalVanId,
-          primary_organizer_vanid: primary_organizer_vanid
-        }
-      });
-    }
-    
+    console.log('[POST /api/contacts] ✅ Created contact:', finalVanId, { chapter: chapter || null, primary_organizer_vanid: primary_organizer_vanid || null });
     res.json({ 
       success: true, 
       message: 'Contact added successfully',
@@ -4300,46 +4149,91 @@ app.post('/api/contacts', async (req, res) => {
   }
 });
 
+// DELETE /api/contacts/:vanid - Delete a contact and all related records
+app.delete('/api/contacts/:vanid', async (req, res) => {
+  const { vanid } = req.params;
+  console.log('[DELETE /api/contacts] Deleting contact:', vanid);
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // Remove from lumoviz_contact_organizers
+    await client.query(
+      `DELETE FROM lumoviz_contact_organizers WHERE contact_vanid = $1`,
+      [vanid]
+    );
+
+    // Remove meetings where this person was the participant
+    await client.query(
+      `DELETE FROM lumoviz_meetings WHERE CAST(organizee_vanid AS TEXT) = $1`,
+      [vanid]
+    );
+
+    // Remove from lumoviz_lists
+    await client.query(
+      `DELETE FROM lumoviz_lists WHERE CAST(contact_vanid AS TEXT) = $1`,
+      [vanid]
+    );
+
+    // Remove from contacts (single source of truth)
+    await client.query(
+      `DELETE FROM contacts WHERE CAST(vanid AS TEXT) = $1`,
+      [vanid]
+    );
+
+    await client.query('COMMIT');
+    console.log('[DELETE /api/contacts] ✅ Deleted contact:', vanid);
+    res.json({ success: true, message: 'Contact deleted successfully' });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('[DELETE /api/contacts] Error:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  } finally {
+    client.release();
+  }
+});
+
 // PUT /api/contacts/:vanid - Update an existing contact
 app.put('/api/contacts/:vanid', async (req, res) => {
-  try {
-    const { vanid } = req.params;
-    const { phone, email, primary_organizer_vanid } = req.body;
-    
-    // Update or insert contact info in lumoviz_contacts table
-    // Use MERGE to handle both insert and update
-    const query = `
-      MERGE \`${PROJECT_ID}.${DATASET_ID}.lumoviz_contacts\` T
-      USING (SELECT @vanid as vanid) S
-      ON T.vanid = S.vanid
-      WHEN MATCHED THEN
-        UPDATE SET 
-          phone = @phone,
-          email = @email,
-          primary_organizer_vanid = @primary_organizer_vanid,
-          updated_at = CURRENT_TIMESTAMP
-      WHEN NOT MATCHED THEN
-        INSERT (vanid, phone, email, primary_organizer_vanid, created_at, updated_at)
-        VALUES (@vanid, @phone, @email, @primary_organizer_vanid, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-    `;
-    
-    await bigquery.query({
-      query,
-      params: {
-        vanid,
-        phone: phone || null,
-        email: email || null,
-        primary_organizer_vanid: primary_organizer_vanid || null
+  const { vanid } = req.params;
+  const { firstname, lastname, chapter, phone, email, primary_organizer_vanid } = req.body;
+
+  const maxRetries = 3;
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      // Update core contact fields in contacts table
+      const setClauses = [];
+      const values = [];
+      let paramIdx = 1;
+
+      if (firstname !== undefined) { setClauses.push(`first_name = $${paramIdx++}`); values.push(firstname); }
+      if (lastname !== undefined)  { setClauses.push(`last_name = $${paramIdx++}`);  values.push(lastname); }
+      if (chapter !== undefined)   { setClauses.push(`chapter = $${paramIdx++}`);    values.push(chapter); }
+      if (phone !== undefined)     { setClauses.push(`phone = $${paramIdx++}`);      values.push(phone || null); }
+      if (email !== undefined)     { setClauses.push(`email = $${paramIdx++}`);      values.push(email || null); }
+      if (primary_organizer_vanid !== undefined) { setClauses.push(`primary_organizer_vanid = $${paramIdx++}`); values.push(primary_organizer_vanid || null); }
+
+      if (setClauses.length > 0) {
+        setClauses.push(`updated_at = CURRENT_TIMESTAMP`);
+        values.push(vanid);
+        await pool.query(
+          `UPDATE contacts SET ${setClauses.join(', ')} WHERE vanid = $${paramIdx}`,
+          values
+        );
       }
-    });
-    
-    res.json({ 
-      success: true, 
-      message: 'Contact extended info updated successfully'
-    });
-  } catch (error) {
-    console.error('Error updating contact extended info:', error);
-    res.status(500).json({ success: false, error: error.message });
+
+      return res.json({
+        success: true,
+        message: 'Contact updated successfully'
+      });
+    } catch (error) {
+      console.error(`Error updating contact (attempt ${attempt}/${maxRetries}):`, error.message);
+      if (attempt === maxRetries) {
+        return res.status(500).json({ success: false, error: error.message });
+      }
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
   }
 });
 
@@ -4577,6 +4471,47 @@ app.put('/api/meetings/:meetingId', async (req, res) => {
   }
 });
 
+// DELETE /api/meetings/:meetingId - Delete a conversation
+app.delete('/api/meetings/:meetingId', async (req, res) => {
+  const { meetingId } = req.params;
+
+  if (!meetingId) {
+    return res.status(400).json({ success: false, error: 'meetingId is required' });
+  }
+
+  const maxRetries = 3;
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      let result;
+      if (meetingId.startsWith('conv_')) {
+        const convId = meetingId.replace('conv_', '');
+        result = await pool.query(
+          'DELETE FROM conversations WHERE id = $1',
+          [convId]
+        );
+      } else {
+        result = await pool.query(
+          'DELETE FROM lumoviz_meetings WHERE meeting_id = $1',
+          [meetingId]
+        );
+      }
+
+      if (result.rowCount === 0) {
+        return res.status(404).json({ success: false, error: 'Meeting not found' });
+      }
+
+      return res.json({ success: true, message: 'Conversation deleted successfully' });
+    } catch (error) {
+      console.error(`Error deleting conversation (attempt ${attempt}/${maxRetries}):`, error.message);
+      if (attempt === maxRetries) {
+        return res.status(500).json({ success: false, error: error.message });
+      }
+      // Wait briefly before retrying
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
+  }
+});
+
 // ============================================
 // CONTACT-ORGANIZER ASSIGNMENT ENDPOINTS
 // ============================================
@@ -4598,9 +4533,9 @@ app.get('/api/contact-organizers', async (req, res) => {
     if (contact_vanid) {
       const result = await pool.query(
         `SELECT co.contact_vanid, co.organizer_vanid, co.created_at,
-                o.firstname, o.lastname
+                o.first_name as firstname, o.last_name as lastname
          FROM lumoviz_contact_organizers co
-         LEFT JOIN org_ids o ON CAST(o.vanid AS TEXT) = co.organizer_vanid
+         LEFT JOIN contacts o ON CAST(o.vanid AS TEXT) = co.organizer_vanid
          WHERE co.contact_vanid = $1
          ORDER BY co.created_at`,
         [contact_vanid.toString()]
@@ -4611,9 +4546,9 @@ app.get('/api/contact-organizers', async (req, res) => {
     // Bulk: return all assignments (used for populating the People table)
     const result = await pool.query(
       `SELECT co.contact_vanid, co.organizer_vanid,
-              o.firstname, o.lastname
+              o.first_name as firstname, o.last_name as lastname
        FROM lumoviz_contact_organizers co
-       LEFT JOIN org_ids o ON CAST(o.vanid AS TEXT) = co.organizer_vanid
+       LEFT JOIN contacts o ON CAST(o.vanid AS TEXT) = co.organizer_vanid
        ORDER BY co.contact_vanid`
     );
     res.json({ success: true, data: result.rows });
@@ -5005,28 +4940,11 @@ app.get('/api/organizer-details/:vanid', async (req, res) => {
       return res.status(400).json({ success: false, error: 'vanid is required' });
     }
     
-    const query = `
-      SELECT 
-        vanid,
-        turf,
-        team_role
-      FROM \`${PROJECT_ID}.${DATASET_ID}.org_ids\`
-      WHERE vanid = @vanid
-    `;
-    
-    const [rows] = await bigquery.query({
-      query,
-      params: { vanid: vanid }
+    // turf and team_role are no longer stored (were in deprecated org_ids table)
+    res.json({ 
+      success: true, 
+      data: { vanid, turf: null, team_role: null }
     });
-    
-    if (rows.length === 0) {
-      return res.json({ 
-        success: true, 
-        data: { vanid, turf: null, team_role: null }
-      });
-    }
-    
-    res.json({ success: true, data: rows[0] });
   } catch (error) {
     console.error('Error fetching organizer details:', error);
     res.status(500).json({ success: false, error: error.message });
@@ -5043,22 +4961,8 @@ app.put('/api/organizer-details/:vanid', async (req, res) => {
       return res.status(400).json({ success: false, error: 'vanid is required' });
     }
     
-    const query = `
-      UPDATE \`${PROJECT_ID}.${DATASET_ID}.org_ids\`
-      SET 
-        turf = @turf,
-        team_role = @team_role
-      WHERE vanid = @vanid
-    `;
-    
-    await bigquery.query({
-      query,
-      params: {
-        vanid: vanid,
-        turf: turf || null,
-        team_role: team_role || null
-      }
-    });
+    // turf and team_role are no longer stored (were in deprecated org_ids table)
+    // Accept the request but no-op
     
     res.json({ 
       success: true, 
@@ -5419,5 +5323,100 @@ app.listen(port, '0.0.0.0', async () => {
     `);
   } catch (e) {
     // Constraint already exists — safe to ignore
+  }
+
+  // Add id column to conversations table if it doesn't exist (with retry)
+  for (let attempt = 1; attempt <= 5; attempt++) {
+    try {
+      await pool.query(`
+        ALTER TABLE conversations
+        ADD COLUMN IF NOT EXISTS id SERIAL
+      `);
+      await pool.query(`
+        ALTER TABLE conversations
+        ADD CONSTRAINT conversations_id_unique UNIQUE (id)
+      `);
+      console.log('✅ conversations.id column ensured');
+      break;
+    } catch (e) {
+      if (e.message.includes('already exists')) break;
+      if (attempt < 5) {
+        console.warn(`conversations.id migration retry ${attempt}/5:`, e.message);
+        await new Promise(r => setTimeout(r, 2000));
+      } else {
+        console.warn('conversations.id migration skipped after retries:', e.message);
+      }
+    }
+  }
+
+  // === Consolidate org_ids + lumoviz_contacts into contacts ===
+  try {
+    // Add type column (from org_ids)
+    await pool.query(`ALTER TABLE contacts ADD COLUMN IF NOT EXISTS type TEXT DEFAULT 'constituent'`);
+    // Add primary_organizer_vanid column (from lumoviz_contacts)
+    await pool.query(`ALTER TABLE contacts ADD COLUMN IF NOT EXISTS primary_organizer_vanid TEXT`);
+
+    // Copy type from org_ids where it exists and contacts.type is still default
+    const typeResult = await pool.query(`
+      UPDATE contacts c
+      SET type = o.type
+      FROM org_ids o
+      WHERE CAST(c.vanid AS TEXT) = CAST(o.vanid AS TEXT)
+        AND o.type IS NOT NULL
+        AND (c.type IS NULL OR c.type = 'constituent')
+        AND o.type != 'constituent'
+    `);
+    if (typeResult.rowCount > 0) {
+      console.log(`✅ Copied type for ${typeResult.rowCount} contacts from org_ids`);
+    }
+
+    // Copy primary_organizer_vanid from lumoviz_contacts where it exists
+    const orgResult = await pool.query(`
+      UPDATE contacts c
+      SET primary_organizer_vanid = lc.primary_organizer_vanid
+      FROM lumoviz_contacts lc
+      WHERE CAST(c.vanid AS TEXT) = CAST(lc.vanid AS TEXT)
+        AND lc.primary_organizer_vanid IS NOT NULL
+        AND c.primary_organizer_vanid IS NULL
+    `);
+    if (orgResult.rowCount > 0) {
+      console.log(`✅ Copied primary_organizer_vanid for ${orgResult.rowCount} contacts from lumoviz_contacts`);
+    }
+
+    // Insert org_ids entries that don't exist in contacts (different vanids for same people)
+    const insertResult = await pool.query(`
+      INSERT INTO contacts (vanid, first_name, last_name, email, chapter, type, member_status, created_at, updated_at)
+      SELECT o.vanid, o.firstname, o.lastname, o.email, o.chapter,
+             COALESCE(o.type, 'constituent'), 'Active', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+      FROM org_ids o
+      WHERE NOT EXISTS (
+        SELECT 1 FROM contacts c WHERE CAST(c.vanid AS TEXT) = CAST(o.vanid AS TEXT)
+      )
+      AND o.vanid IS NOT NULL
+    `);
+    if (insertResult.rowCount > 0) {
+      console.log(`✅ Inserted ${insertResult.rowCount} missing org_ids entries into contacts`);
+    }
+
+    // Deduplicate: remove entries where same name exists with more complete data
+    const dedupeResult = await pool.query(`
+      DELETE FROM contacts
+      WHERE vanid IN (
+        SELECT c2.vanid
+        FROM contacts c1
+        JOIN contacts c2 ON LOWER(TRIM(c1.first_name)) = LOWER(TRIM(c2.first_name))
+                        AND LOWER(TRIM(c1.last_name)) = LOWER(TRIM(c2.last_name))
+                        AND c1.vanid != c2.vanid
+        WHERE (c2.chapter IS NULL OR c2.chapter = '')
+          AND (c1.chapter IS NOT NULL AND c1.chapter != '')
+      )
+    `);
+    if (dedupeResult.rowCount > 0) {
+      console.log(`✅ Removed ${dedupeResult.rowCount} duplicate contacts (kept ones with more data)`);
+    }
+
+    console.log('✅ contacts table consolidation complete (type + primary_organizer_vanid columns)');
+  } catch (e) {
+    console.warn('contacts consolidation migration note:', e.message);
   }
 });

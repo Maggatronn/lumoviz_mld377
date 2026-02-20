@@ -11,7 +11,13 @@ import {
   Chip,
   IconButton,
   CircularProgress,
-  Divider
+  Divider,
+  TextField,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
+  Alert
 } from '@mui/material';
 import {
   Email as EmailIcon,
@@ -19,7 +25,10 @@ import {
   Close as CloseIcon,
   Edit as EditIcon,
   Chat as ChatIcon,
-  Add as AddIcon
+  Add as AddIcon,
+  Save as SaveIcon,
+  Cancel as CancelIcon,
+  DeleteOutline as DeleteIcon
 } from '@mui/icons-material';
 
 interface MeetingNote {
@@ -85,6 +94,17 @@ interface PersonRecord {
   memberStatus?: string;
   allMeetings: MeetingNote[];
   allMeetingsAllTime?: MeetingNote[];
+  primary_organizer_vanid?: string;
+}
+
+export interface PersonUpdate {
+  firstname?: string;
+  lastname?: string;
+  chapter?: string;
+  phone?: string;
+  email?: string;
+  vanid?: string;
+  primary_organizer_vanid?: string;
 }
 
 interface PersonDetailsDialogProps {
@@ -98,9 +118,14 @@ interface PersonDetailsDialogProps {
   allContacts?: any[]; // All contacts for name lookup
   sx?: any;
   onEditPerson?: (personId: string) => void;
+  onSavePerson?: (personId: string, updates: PersonUpdate) => Promise<void>;
+  availableChapters?: string[];
+  availableOrganizers?: Array<{ id: string; name: string }>;
   onAddConversation?: (personId: string) => void;
   onAddToAction?: (personId: string) => void;
   onEditConversation?: (meeting: any) => void;
+  onDeleteConversation?: (meetingId: string) => Promise<void>;
+  onDeletePerson?: (personId: string) => Promise<void>;
 }
 
 const PersonDetailsDialog: React.FC<PersonDetailsDialogProps> = ({
@@ -114,10 +139,110 @@ const PersonDetailsDialog: React.FC<PersonDetailsDialogProps> = ({
   allContacts = [],
   sx,
   onEditPerson,
+  onSavePerson,
+  availableChapters = [],
+  availableOrganizers = [],
   onAddConversation,
   onAddToAction,
-  onEditConversation
+  onEditConversation,
+  onDeleteConversation,
+  onDeletePerson
 }) => {
+  const [editing, setEditing] = useState(false);
+  const [editFirstname, setEditFirstname] = useState('');
+  const [editLastname, setEditLastname] = useState('');
+  const [editChapter, setEditChapter] = useState('');
+  const [editPhone, setEditPhone] = useState('');
+  const [editEmail, setEditEmail] = useState('');
+  const [editOrganizer, setEditOrganizer] = useState('');
+  const [editError, setEditError] = useState('');
+  const [editSaving, setEditSaving] = useState(false);
+  const [deleteConfirmMeetingId, setDeleteConfirmMeetingId] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [deletePersonConfirm, setDeletePersonConfirm] = useState(false);
+  const [deletingPerson, setDeletingPerson] = useState(false);
+
+  const handleDeleteConversation = async () => {
+    if (!deleteConfirmMeetingId || !onDeleteConversation) return;
+    setDeleting(true);
+    try {
+      await onDeleteConversation(deleteConfirmMeetingId);
+      setDeleteConfirmMeetingId(null);
+    } catch (err) {
+      console.error('Failed to delete conversation:', err);
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const handleDeletePerson = async () => {
+    if (!person || !onDeletePerson) return;
+    setDeletingPerson(true);
+    try {
+      await onDeletePerson(person.id);
+      setDeletePersonConfirm(false);
+      onClose();
+    } catch (err) {
+      console.error('Failed to delete person:', err);
+    } finally {
+      setDeletingPerson(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!open) {
+      setEditing(false);
+      setEditError('');
+    }
+  }, [open]);
+
+  const startEditing = () => {
+    if (!person) return;
+    const nameParts = person.name ? person.name.split(' ') : ['', ''];
+    setEditFirstname(person.firstname || nameParts[0] || '');
+    setEditLastname(person.lastname || nameParts.slice(1).join(' ') || '');
+    setEditChapter(person.chapter || '');
+    setEditPhone(person.phone || '');
+    setEditEmail(person.email || '');
+    setEditOrganizer(person.primary_organizer_vanid || '');
+    setEditError('');
+    setEditing(true);
+  };
+
+  const cancelEditing = () => {
+    setEditing(false);
+    setEditError('');
+  };
+
+  const handleSave = async () => {
+    if (!editFirstname.trim() || !editLastname.trim()) {
+      setEditError('First name and last name are required');
+      return;
+    }
+    if (!editChapter) {
+      setEditError('Please select a chapter');
+      return;
+    }
+    setEditSaving(true);
+    try {
+      if (onSavePerson) {
+        await onSavePerson(person.id, {
+          firstname: editFirstname.trim(),
+          lastname: editLastname.trim(),
+          chapter: editChapter,
+          phone: editPhone.trim() || undefined,
+          email: editEmail.trim() || undefined,
+          primary_organizer_vanid: editOrganizer || undefined
+        });
+      }
+      setEditing(false);
+      setEditError('');
+    } catch (err) {
+      setEditError('Failed to update person. Please try again.');
+    } finally {
+      setEditSaving(false);
+    }
+  };
   // Use cached meetings instead of state
   const personMeetings = React.useMemo(() => {
     if (!open || !person) return [];
@@ -296,6 +421,7 @@ const PersonDetailsDialog: React.FC<PersonDetailsDialogProps> = ({
   };
 
   return (
+    <>
     <Dialog 
       open={open} 
       onClose={onClose} 
@@ -308,83 +434,193 @@ const PersonDetailsDialog: React.FC<PersonDetailsDialogProps> = ({
     >
       <DialogTitle sx={{ pb: 2 }}>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-          <Box>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-              <Typography variant="h6" fontWeight={600}>
-                {person ? person.name : 'Person Details'}
-              </Typography>
-              {person && onEditPerson && (
-                <IconButton 
-                  size="small" 
-                  onClick={() => onEditPerson(person.id)}
-                  sx={{ color: 'primary.main' }}
-                >
-                  <EditIcon fontSize="small" />
-                </IconButton>
-              )}
-            </Box>
-            {person && (
-              <Box sx={{ display: 'flex', gap: 1, mt: 1, alignItems: 'center', flexWrap: 'wrap' }}>
-                <Typography variant="body2" color="text.secondary">
-                  {person.chapter}
-                </Typography>
-                <Typography variant="body2" color="text.secondary">•</Typography>
-                {person.loeStatus && (
-                  <>
-                    <Chip 
-                      label={person.loeStatus} 
-                      size="small"
-                      sx={{ height: 20, fontSize: '0.75rem' }}
-                    />
-                    <Typography variant="body2" color="text.secondary">•</Typography>
-                  </>
+          <Box sx={{ flex: 1 }}>
+            {editing ? (
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                {editError && (
+                  <Alert severity="error" onClose={() => setEditError('')}>
+                    {editError}
+                  </Alert>
                 )}
-                {person.memberStatus && (
-                  <>
-                    <Chip 
-                      label={person.memberStatus} 
+                <Box sx={{ display: 'flex', gap: 2 }}>
+                  <TextField
+                    label="First Name"
+                    value={editFirstname}
+                    onChange={(e) => setEditFirstname(e.target.value)}
+                    size="small"
+                    fullWidth
+                    required
+                    autoFocus
+                  />
+                  <TextField
+                    label="Last Name"
+                    value={editLastname}
+                    onChange={(e) => setEditLastname(e.target.value)}
+                    size="small"
+                    fullWidth
+                    required
+                  />
+                </Box>
+                <Box sx={{ display: 'flex', gap: 2 }}>
+                  <FormControl size="small" fullWidth required>
+                    <InputLabel>Chapter</InputLabel>
+                    <Select
+                      value={editChapter}
+                      label="Chapter"
+                      onChange={(e) => setEditChapter(e.target.value)}
+                    >
+                      {(() => {
+                        const chapters = availableChapters.filter(c => c !== 'All Chapters');
+                        if (editChapter && !chapters.includes(editChapter)) {
+                          chapters.unshift(editChapter);
+                        }
+                        return chapters.map(ch => (
+                          <MenuItem key={ch} value={ch}>{ch}</MenuItem>
+                        ));
+                      })()}
+                    </Select>
+                  </FormControl>
+                  {availableOrganizers.length > 0 && (
+                    <FormControl size="small" fullWidth>
+                      <InputLabel>Primary Organizer</InputLabel>
+                      <Select
+                        value={editOrganizer}
+                        label="Primary Organizer"
+                        onChange={(e) => setEditOrganizer(e.target.value)}
+                      >
+                        <MenuItem value="">
+                          <em>None</em>
+                        </MenuItem>
+                        {(() => {
+                          const orgs = [...availableOrganizers];
+                          if (editOrganizer && !orgs.some(o => o.id === editOrganizer)) {
+                            orgs.unshift({ id: editOrganizer, name: `Organizer ${editOrganizer}` });
+                          }
+                          return orgs.map(org => (
+                            <MenuItem key={org.id} value={org.id}>
+                              {org.name}
+                            </MenuItem>
+                          ));
+                        })()}
+                      </Select>
+                    </FormControl>
+                  )}
+                </Box>
+                <Box sx={{ display: 'flex', gap: 2 }}>
+                  <TextField
+                    label="Phone"
+                    value={editPhone}
+                    onChange={(e) => setEditPhone(e.target.value)}
+                    size="small"
+                    fullWidth
+                    placeholder="(555) 123-4567"
+                  />
+                  <TextField
+                    label="Email"
+                    value={editEmail}
+                    onChange={(e) => setEditEmail(e.target.value)}
+                    size="small"
+                    fullWidth
+                    type="email"
+                    placeholder="person@example.com"
+                  />
+                </Box>
+                <Box sx={{ display: 'flex', gap: 1 }}>
+                  <Button
+                    variant="contained"
+                    size="small"
+                    startIcon={<SaveIcon />}
+                    onClick={handleSave}
+                    disabled={editSaving}
+                  >
+                    {editSaving ? 'Saving...' : 'Save'}
+                  </Button>
+                  <Button
+                    variant="outlined"
+                    size="small"
+                    startIcon={<CancelIcon />}
+                    onClick={cancelEditing}
+                    disabled={editSaving}
+                  >
+                    Cancel
+                  </Button>
+                </Box>
+              </Box>
+            ) : (
+              <>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <Typography variant="h6" fontWeight={600}>
+                    {person ? person.name : 'Person Details'}
+                  </Typography>
+                  {person && (onSavePerson || onEditPerson) && (
+                    <IconButton 
+                      size="small" 
+                      onClick={() => {
+                        if (onSavePerson) {
+                          startEditing();
+                        } else if (onEditPerson) {
+                          onEditPerson(person.id);
+                        }
+                      }}
+                      sx={{ color: 'primary.main' }}
+                    >
+                      <EditIcon fontSize="small" />
+                    </IconButton>
+                  )}
+                  {person && onDeletePerson && (
+                    <IconButton
                       size="small"
-                      sx={{ height: 20, fontSize: '0.75rem' }}
-                    />
-                    <Typography variant="body2" color="text.secondary">•</Typography>
-                  </>
-                )}
-                <Typography variant="body2" color="text.secondary">
-                  {person.totalMeetingsAllTime || personMeetings.length} meetings
-                </Typography>
-                {mostRecentContactWithActions && (
-                  <>
+                      onClick={() => setDeletePersonConfirm(true)}
+                      sx={{ color: 'error.main' }}
+                    >
+                      <DeleteIcon fontSize="small" />
+                    </IconButton>
+                  )}
+                </Box>
+                {person && (
+                  <Box sx={{ display: 'flex', gap: 1, mt: 1, alignItems: 'center', flexWrap: 'wrap' }}>
+                    <Typography variant="body2" color="text.secondary">
+                      {person.chapter}
+                    </Typography>
                     <Typography variant="body2" color="text.secondary">•</Typography>
                     <Typography variant="body2" color="text.secondary">
-                      Last: {format(mostRecentContactWithActions, 'MMM dd, yyyy')}
+                      {person.totalMeetingsAllTime || personMeetings.length} meetings
                     </Typography>
-                  </>
-                )}
-                {person.organizers && person.organizers.length > 0 && (
-                  <>
-                    <Typography variant="body2" color="text.secondary">•</Typography>
-                    <Typography variant="body2" color="text.secondary">
-                      Organizer: {person.organizers.join(', ')}
-                    </Typography>
-                  </>
-                )}
-              </Box>
-            )}
-            {person && (person.email || person.phone) && (
-              <Box sx={{ display: 'flex', gap: 2, mt: 1 }}>
-                {person.email && (
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                    <EmailIcon sx={{ fontSize: 16, color: 'text.secondary' }} />
-                    <Typography variant="body2" color="text.secondary">{person.email}</Typography>
+                    {mostRecentContactWithActions && (
+                      <>
+                        <Typography variant="body2" color="text.secondary">•</Typography>
+                        <Typography variant="body2" color="text.secondary">
+                          Last: {format(mostRecentContactWithActions, 'MMM dd, yyyy')}
+                        </Typography>
+                      </>
+                    )}
+                    {person.organizers && person.organizers.length > 0 && (
+                      <>
+                        <Typography variant="body2" color="text.secondary">•</Typography>
+                        <Typography variant="body2" color="text.secondary">
+                          Organizer: {person.organizers.join(', ')}
+                        </Typography>
+                      </>
+                    )}
                   </Box>
                 )}
-                {person.phone && (
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                    <PhoneIcon sx={{ fontSize: 16, color: 'text.secondary' }} />
-                    <Typography variant="body2" color="text.secondary">{person.phone}</Typography>
+                {person && (person.email || person.phone) && (
+                  <Box sx={{ display: 'flex', gap: 2, mt: 1 }}>
+                    {person.email && (
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                        <EmailIcon sx={{ fontSize: 16, color: 'text.secondary' }} />
+                        <Typography variant="body2" color="text.secondary">{person.email}</Typography>
+                      </Box>
+                    )}
+                    {person.phone && (
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                        <PhoneIcon sx={{ fontSize: 16, color: 'text.secondary' }} />
+                        <Typography variant="body2" color="text.secondary">{person.phone}</Typography>
+                      </Box>
+                    )}
                   </Box>
                 )}
-              </Box>
+              </>
             )}
           </Box>
           <IconButton onClick={onClose} size="small">
@@ -612,6 +848,18 @@ const PersonDetailsDialog: React.FC<PersonDetailsDialogProps> = ({
                                     <EditIcon sx={{ fontSize: 14, color: 'text.secondary' }} />
                                   </IconButton>
                                 )}
+                                {(meeting as any).meeting_id && onDeleteConversation && (
+                                  <IconButton
+                                    size="small"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setDeleteConfirmMeetingId((meeting as any).meeting_id);
+                                    }}
+                                    sx={{ p: 0.25 }}
+                                  >
+                                    <DeleteIcon sx={{ fontSize: 14, color: 'text.secondary', '&:hover': { color: 'error.main' } }} />
+                                  </IconButton>
+                                )}
                               </Box>
                             </Box>
                             
@@ -728,6 +976,71 @@ const PersonDetailsDialog: React.FC<PersonDetailsDialogProps> = ({
         </Button>
       </DialogActions>
     </Dialog>
+
+    {/* Delete confirmation dialog */}
+    <Dialog
+      open={!!deleteConfirmMeetingId}
+      onClose={() => setDeleteConfirmMeetingId(null)}
+      maxWidth="xs"
+      fullWidth
+      sx={{ zIndex: 10000 }}
+    >
+      <DialogTitle>Delete Conversation</DialogTitle>
+      <DialogContent>
+        <Typography variant="body2">
+          Are you sure you want to delete this conversation? This action cannot be undone.
+        </Typography>
+      </DialogContent>
+      <DialogActions>
+        <Button
+          onClick={() => setDeleteConfirmMeetingId(null)}
+          disabled={deleting}
+        >
+          Cancel
+        </Button>
+        <Button
+          onClick={handleDeleteConversation}
+          variant="contained"
+          color="error"
+          disabled={deleting}
+        >
+          {deleting ? 'Deleting...' : 'Delete'}
+        </Button>
+      </DialogActions>
+    </Dialog>
+
+    {/* Delete person confirmation dialog */}
+    <Dialog
+      open={deletePersonConfirm}
+      onClose={() => setDeletePersonConfirm(false)}
+      maxWidth="xs"
+      fullWidth
+      sx={{ zIndex: 10000 }}
+    >
+      <DialogTitle>Delete Person</DialogTitle>
+      <DialogContent>
+        <Typography variant="body2">
+          Are you sure you want to delete <strong>{person?.name}</strong>? This will remove them and all their associated data. This action cannot be undone.
+        </Typography>
+      </DialogContent>
+      <DialogActions>
+        <Button
+          onClick={() => setDeletePersonConfirm(false)}
+          disabled={deletingPerson}
+        >
+          Cancel
+        </Button>
+        <Button
+          onClick={handleDeletePerson}
+          variant="contained"
+          color="error"
+          disabled={deletingPerson}
+        >
+          {deletingPerson ? 'Deleting...' : 'Delete'}
+        </Button>
+      </DialogActions>
+    </Dialog>
+    </>
   );
 };
 
