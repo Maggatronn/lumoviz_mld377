@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { format } from 'date-fns';
 import AddConnectionDialog from '../dialogs/AddConnectionDialog';
-import PersonDetailsDialog from '../dialogs/PersonDetailsDialog';
+import PersonDetailsDialog, { PersonUpdate } from '../dialogs/PersonDetailsDialog';
 import OrganizerDetailsDialog from '../dialogs/OrganizerDetailsDialog';
 import BatchAddPeopleDialog from '../dialogs/BatchAddPeopleDialog';
 import LogConversationDialog, { NewConversation } from '../dialogs/LogConversationDialog';
@@ -169,6 +169,8 @@ interface PeoplePanelProps {
   peopleRecords?: PersonRecord[];
   // Callbacks for person actions
   onEditPerson?: (personId: string) => void;
+  onSavePerson?: (personId: string, updates: PersonUpdate) => Promise<void>;
+  availableOrganizers?: Array<{ id: string; name: string }>;
   onAddConversation?: (personId: string) => void;
   onAddToAction?: (personId: string) => void;
   filteredPeopleRecords?: PersonRecord[];
@@ -201,6 +203,8 @@ interface PeoplePanelProps {
   onRemoveOrganizer?: (contactVanId: string, organizerVanId: string) => void;
   hideActionButtons?: boolean;
   onEditConversation?: (meeting: any) => void;
+  onDeleteConversation?: (meetingId: string) => Promise<void>;
+  onDeletePerson?: (personId: string) => Promise<void>;
 }
 
 interface PersonRecord {
@@ -222,6 +226,7 @@ interface PersonRecord {
   memberStatus?: string;
   allMeetings: MeetingNote[];
   allMeetingsAllTime: MeetingNote[];
+  primary_organizer_vanid?: string;
 }
 
 type SortColumn = 'name' | 'chapter' | 'team' | 'mostRecentContact' | 'totalMeetings' | 'organizers';
@@ -269,6 +274,8 @@ const PeoplePanel: React.FC<PeoplePanelProps> = ({
   onQuickAddToList,
   // Person action callbacks
   onEditPerson,
+  onSavePerson,
+  availableOrganizers = [],
   onAddConversation,
   onAddToAction,
   chapters: availableSections = [],
@@ -278,6 +285,8 @@ const PeoplePanel: React.FC<PeoplePanelProps> = ({
   onRemoveOrganizer,
   hideActionButtons = false,
   onEditConversation,
+  onDeleteConversation,
+  onDeletePerson,
 }) => {
   // Normalize actions from database format to component format
   const ACTIONS = React.useMemo(() => {
@@ -603,7 +612,7 @@ const PeoplePanel: React.FC<PeoplePanelProps> = ({
       console.log('[PeoplePanel] Filtering by organizer:', organizerLower, 'vanIds:', vanIds, 'names:', names);
       
       result = result.filter(c => {
-        // Check primary_organizer_vanid first (from lumoviz_contacts table)
+        // Check primary_organizer_vanid first (from contacts table)
         if (c.primary_organizer_vanid) {
           const primaryOrgVanid = c.primary_organizer_vanid.toString();
           const matchByPrimaryOrg = vanIds.some(id => id === primaryOrgVanid);
@@ -1326,7 +1335,10 @@ const PeoplePanel: React.FC<PeoplePanelProps> = ({
         loeStatus: contact.loe || getLOEStatus(contactId),
         memberStatus: contact.member_status || undefined,
         allMeetings: [],
-        allMeetingsAllTime: []
+        allMeetingsAllTime: [],
+        primary_organizer_vanid: contact.primary_organizer_vanid?.toString()
+          || contactOrganizerMap?.get(contactId)?.[0]?.organizer_vanid
+          || undefined,
       };
       peopleMap.set(contactId, personRecord);
     });
@@ -3139,9 +3151,14 @@ const PeoplePanel: React.FC<PeoplePanelProps> = ({
         cachedMeetings={cachedMeetings}
         allContacts={sharedAllContacts}
         onEditPerson={onEditPerson}
+        onSavePerson={onSavePerson}
+        availableChapters={availableSections}
+        availableOrganizers={availableOrganizers}
         onAddConversation={onAddConversation}
         onAddToAction={onAddToAction}
         onEditConversation={onEditConversation}
+        onDeleteConversation={onDeleteConversation}
+        onDeletePerson={onDeletePerson}
       />
 
       {/* OrganizerDetailsDialog */}

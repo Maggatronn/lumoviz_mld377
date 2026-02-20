@@ -81,7 +81,9 @@ const EditTeamDialog: React.FC<EditTeamDialogProps> = ({
   const [normCorrection, setNormCorrection] = useState<string>('');
   const [constituency, setConstituency] = useState<string>('');
   const [changeReason, setChangeReason] = useState<string>('');
-  const [memberTurfs] = useState<Map<string, string>>(new Map());
+  const [leadConstituentRole, setLeadConstituentRole] = useState<string>('');
+  const [leadFunctionalRole, setLeadFunctionalRole] = useState<string>('');
+  const [memberRoles, setMemberRoles] = useState<Map<string, { constituentRole: string; functionalRole: string }>>(new Map());
   const [isSaving, setIsSaving] = useState<boolean>(false);
   const [saveError, setSaveError] = useState<string>('');
   const [leadSearchQuery, setLeadSearchQuery] = useState('');
@@ -114,11 +116,32 @@ const EditTeamDialog: React.FC<EditTeamDialogProps> = ({
         setColor(currentColor);
       }
       
+      // Populate lead roles from existing data
+      if (teamToEdit.lead) {
+        setLeadConstituentRole((teamToEdit.lead as any).constituentRole || '');
+        setLeadFunctionalRole((teamToEdit.lead as any).functionalRole || '');
+      } else {
+        setLeadConstituentRole('');
+        setLeadFunctionalRole('');
+      }
+
       // Set team members (excluding the lead)
       const membersExcludingLead = (teamToEdit.organizers || []).filter(
         (organizer: any) => organizer.id !== teamToEdit.lead?.id
       );
       setTeamMembers(membersExcludingLead);
+
+      // Populate member roles from existing data
+      const rolesMap = new Map<string, { constituentRole: string; functionalRole: string }>();
+      membersExcludingLead.forEach((m: any) => {
+        if (m.constituentRole || m.functionalRole) {
+          rolesMap.set(m.id, {
+            constituentRole: m.constituentRole || '',
+            functionalRole: m.functionalRole || ''
+          });
+        }
+      });
+      setMemberRoles(rolesMap);
       
       setSaveError('');
     }
@@ -179,6 +202,9 @@ const EditTeamDialog: React.FC<EditTeamDialogProps> = ({
     setNormCorrection('');
     setConstituency('');
     setChangeReason('');
+    setLeadConstituentRole('');
+    setLeadFunctionalRole('');
+    setMemberRoles(new Map());
     
     setIsSaving(false);
     setSaveError('');
@@ -207,10 +233,24 @@ const EditTeamDialog: React.FC<EditTeamDialogProps> = ({
     setSaveError('');
 
     try {
-      const allOrganizers = [...(teamLead ? [teamLead] : []), ...teamMembers].filter(Boolean) as TeamMember[];
+      const enrichedLead = teamLead ? {
+        ...teamLead,
+        constituentRole: leadConstituentRole.trim() || undefined,
+        functionalRole: leadFunctionalRole.trim() || 'Team Lead'
+      } : null;
+
+      const enrichedMembers = teamMembers.map(m => ({
+        ...m,
+        constituentRole: memberRoles.get(m.id)?.constituentRole?.trim() || undefined,
+        functionalRole: memberRoles.get(m.id)?.functionalRole?.trim() || undefined
+      }));
+
+      const allOrganizers = [...(enrichedLead ? [enrichedLead] : []), ...enrichedMembers].filter(Boolean) as TeamMember[];
       const organizerDetails = allOrganizers.map(organizer => ({
         id: organizer.id,
-        name: organizer.name
+        name: organizer.name,
+        constituentRole: organizer.constituentRole,
+        functionalRole: organizer.functionalRole
       }));
       
       const updatedTeam = {
@@ -350,12 +390,45 @@ const EditTeamDialog: React.FC<EditTeamDialogProps> = ({
                   <Typography variant="caption" color="text.secondary">
                     {option.type || 'contact'}
                     {option.chapter && ` • ${option.chapter}`}
-                    {option.loeStatus && ` • ${option.loeStatus}`}
                   </Typography>
                 </Box>
               </Box>
             )}
           />
+          {teamLead && (
+            <Box sx={{ display: 'flex', gap: 2, mt: -1 }}>
+              <TextField
+                label="Constituency Role"
+                value={leadConstituentRole}
+                onChange={(e) => setLeadConstituentRole(e.target.value)}
+                placeholder="e.g., Leader, Community Member"
+                size="small"
+                fullWidth
+                sx={{
+                  '& .MuiOutlinedInput-root': {
+                    backgroundColor: '#f8f9fa',
+                    '&:hover': { backgroundColor: '#e9ecef' },
+                    '&.Mui-focused': { backgroundColor: '#fff' }
+                  }
+                }}
+              />
+              <TextField
+                label="Functional Role"
+                value={leadFunctionalRole}
+                onChange={(e) => setLeadFunctionalRole(e.target.value)}
+                placeholder="e.g., Team Lead, Facilitator"
+                size="small"
+                fullWidth
+                sx={{
+                  '& .MuiOutlinedInput-root': {
+                    backgroundColor: '#f8f9fa',
+                    '&:hover': { backgroundColor: '#e9ecef' },
+                    '&.Mui-focused': { backgroundColor: '#fff' }
+                  }
+                }}
+              />
+            </Box>
+          )}
 
           {/* Team Members – type to search; same Contacts/People list when onSearchPeople provided */}
           <Autocomplete
@@ -407,12 +480,64 @@ const EditTeamDialog: React.FC<EditTeamDialogProps> = ({
                     {option.name}
                   </Typography>
                   <Typography variant="caption" color="text.secondary">
-                    {option.chapter} • {option.loeStatus || 'Unknown LOE'}
+                    {option.chapter}
                   </Typography>
                 </Box>
               </Box>
             )}
           />
+          {teamMembers.length > 0 && (
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5, mt: -1 }}>
+              {teamMembers.map((member) => {
+                const roles = memberRoles.get(member.id) || { constituentRole: '', functionalRole: '' };
+                return (
+                  <Box key={member.id} sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
+                    <Typography variant="body2" sx={{ minWidth: 120, fontWeight: 500, color: 'text.secondary' }}>
+                      {member.name}
+                    </Typography>
+                    <TextField
+                      label="Constituency Role"
+                      value={roles.constituentRole}
+                      onChange={(e) => {
+                        const updated = new Map(memberRoles);
+                        updated.set(member.id, { ...roles, constituentRole: e.target.value });
+                        setMemberRoles(updated);
+                      }}
+                      placeholder="e.g., Leader, Ally"
+                      size="small"
+                      fullWidth
+                      sx={{
+                        '& .MuiOutlinedInput-root': {
+                          backgroundColor: '#f8f9fa',
+                          '&:hover': { backgroundColor: '#e9ecef' },
+                          '&.Mui-focused': { backgroundColor: '#fff' }
+                        }
+                      }}
+                    />
+                    <TextField
+                      label="Functional Role"
+                      value={roles.functionalRole}
+                      onChange={(e) => {
+                        const updated = new Map(memberRoles);
+                        updated.set(member.id, { ...roles, functionalRole: e.target.value });
+                        setMemberRoles(updated);
+                      }}
+                      placeholder="e.g., Note Taker, Recruiter"
+                      size="small"
+                      fullWidth
+                      sx={{
+                        '& .MuiOutlinedInput-root': {
+                          backgroundColor: '#f8f9fa',
+                          '&:hover': { backgroundColor: '#e9ecef' },
+                          '&.Mui-focused': { backgroundColor: '#fff' }
+                        }
+                      }}
+                    />
+                  </Box>
+                );
+              })}
+            </Box>
+          )}
 
           {/* Chapter Dropdown */}
           <FormControl fullWidth>

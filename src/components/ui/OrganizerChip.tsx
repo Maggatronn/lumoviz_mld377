@@ -9,7 +9,6 @@ import {
   Divider
 } from '@mui/material';
 import FilterListIcon from '@mui/icons-material/FilterList';
-import EditIcon from '@mui/icons-material/Edit';
 import InfoIcon from '@mui/icons-material/Info';
 import DeleteIcon from '@mui/icons-material/Delete';
 
@@ -46,7 +45,7 @@ export const OrganizerChip: React.FC<OrganizerChipProps> = ({
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
   const menuOpen = Boolean(anchorEl);
 
-  const hasMenu = showMenu && (onFilterBy || onEditMapping || onViewDetails || onRemoveOrganizer);
+  const hasMenu = showMenu && (onFilterBy || onViewDetails || onRemoveOrganizer);
 
   const handleClick = (event: React.MouseEvent<HTMLDivElement>) => {
     event.stopPropagation();
@@ -62,12 +61,6 @@ export const OrganizerChip: React.FC<OrganizerChipProps> = ({
   const handleFilterBy = (event: React.MouseEvent) => {
     event.stopPropagation();
     onFilterBy?.(name, vanId);
-    handleClose();
-  };
-
-  const handleEdit = (event: React.MouseEvent) => {
-    event.stopPropagation();
-    onEditMapping?.(name, vanId);
     handleClose();
   };
 
@@ -125,13 +118,6 @@ export const OrganizerChip: React.FC<OrganizerChipProps> = ({
           <MenuItem onClick={handleFilterBy}>
             <ListItemIcon><FilterListIcon fontSize="small" /></ListItemIcon>
             <ListItemText>Filter by {name}</ListItemText>
-          </MenuItem>
-        )}
-        
-        {onEditMapping && (
-          <MenuItem onClick={handleEdit}>
-            <ListItemIcon><EditIcon fontSize="small" /></ListItemIcon>
-            <ListItemText>Edit mapping...</ListItemText>
           </MenuItem>
         )}
 

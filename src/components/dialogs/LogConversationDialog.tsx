@@ -423,7 +423,7 @@ const LogConversationDialog: React.FC<LogConversationDialogProps> = ({
 
             <Box>
               <Typography variant="body2" fontWeight={600} sx={{ mb: 0.5 }}>
-                DIFFERENCES: What would make a difference in their life? Why does it matter to them?
+                CHANGE: What change would make a difference in their life? Why does it matter to them?
               </Typography>
               <TextField
                 value={difference}

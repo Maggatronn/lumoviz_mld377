@@ -1,9 +1,11 @@
-import React, { useRef, useEffect, useCallback } from 'react';
+import React, { useRef, useEffect, useCallback, useState } from 'react';
 import * as d3 from 'd3';
 import { Box } from '@mui/material';
 import { getChapterColor } from '../../theme/chapterColors';
 import { getCustomChapterColor } from '../../contexts/ChapterColorContext';
 import { getLOEColor } from '../../theme/loeColors';
+
+const PENGUIN_GIF = 'https://cdn3.emoji.gg/emojis/5709-dancing-penguin.gif';
 
 // Types
 interface Node extends d3.SimulationNodeDatum {
@@ -68,7 +70,7 @@ interface NetworkGraphProps {
   adminUserIds: Set<string>;
   dataSource: 'contacts' | 'meetings' | 'teams';
   selectedNodeId?: string | null;
-  onNodeClick?: (nodeId: string) => void;
+  onNodeClick?: (nodeId: string | null) => void;
   onNodeHover?: (nodeId: string | null) => void;
   hoveredMeetingId?: string | null;
   nodeFilters?: any;
@@ -152,6 +154,37 @@ const NetworkGraph: React.FC<NetworkGraphProps> = ({
   const animationFrameRef = useRef<number | null>(null);
   const simulationRef = useRef<d3.Simulation<Node, Link> | null>(null);
   const [tooltip, setTooltip] = React.useState<{ x: number; y: number; name: string } | null>(null);
+  const [isShaking, setIsShaking] = useState(false);
+  const shakeIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const startShaking = useCallback(() => {
+    setIsShaking(true);
+    const sim = simulationRef.current;
+    if (!sim) return;
+    sim.alpha(1).restart();
+    shakeIntervalRef.current = setInterval(() => {
+      if (simulationRef.current) {
+        simulationRef.current.alpha(0.8);
+      }
+    }, 100);
+  }, []);
+
+  const stopShaking = useCallback(() => {
+    setIsShaking(false);
+    if (shakeIntervalRef.current) {
+      clearInterval(shakeIntervalRef.current);
+      shakeIntervalRef.current = null;
+    }
+    if (simulationRef.current) {
+      simulationRef.current.alphaTarget(0);
+    }
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (shakeIntervalRef.current) clearInterval(shakeIntervalRef.current);
+    };
+  }, []);
 
   // Function to find node under mouse cursor
   const findNodeAtPosition = useCallback((mouseX: number, mouseY: number) => {
@@ -844,8 +877,8 @@ const NetworkGraph: React.FC<NetworkGraphProps> = ({
         return Math.sqrt(dx * dx + dy * dy) < nodeSize;
       });
 
-      if (clickedNode && onNodeClick) {
-        onNodeClick(clickedNode.id);
+      if (onNodeClick) {
+        onNodeClick(clickedNode ? clickedNode.id : null);
       }
     };
 
@@ -898,6 +931,42 @@ const NetworkGraph: React.FC<NetworkGraphProps> = ({
         }}
       />
       
+      {/* Shake / reheat button */}
+      <Box
+        onMouseDown={startShaking}
+        onMouseUp={stopShaking}
+        onMouseLeave={stopShaking}
+        onTouchStart={startShaking}
+        onTouchEnd={stopShaking}
+        sx={{
+          position: 'absolute',
+          bottom: 16,
+          right: 16,
+          width: 56,
+          height: 56,
+          borderRadius: '50%',
+          cursor: 'pointer',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          userSelect: 'none',
+          zIndex: 10,
+          transition: 'transform 0.15s ease',
+          transform: isShaking ? 'scale(1.15)' : 'scale(1)',
+          filter: isShaking ? 'drop-shadow(0 0 8px rgba(100, 180, 255, 0.6))' : 'none',
+          '&:hover': {
+            transform: isShaking ? 'scale(1.15)' : 'scale(1.08)',
+          }
+        }}
+      >
+        <img
+          src={PENGUIN_GIF}
+          alt="Shake graph"
+          draggable={false}
+          style={{ width: 48, height: 48, pointerEvents: 'none' }}
+        />
+      </Box>
+
       {/* Tooltip */}
       {tooltip && (
         <Box

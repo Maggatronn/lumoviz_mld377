@@ -41,7 +41,8 @@ interface UseNetworkDataParams {
 }
 
 /**
- * Build name-based ID merges for deduplicating people across teams and meetings
+ * Build name-based ID merges for deduplicating people across teams and meetings.
+ * Matches on FULL name (first + last) to avoid merging different people who share a first name.
  */
 export const buildNameBasedMerges = (
   teamsData: TeamData[],
@@ -51,53 +52,39 @@ export const buildNameBasedMerges = (
   
   if (!teamsData || !meetingsData) return merges;
   
-  // Name variation mapping
-  const nameVariations = new Map<string, string>([
-    ['lufti', 'leo'],
-    ['lutfi', 'leo'],
-    ['ben', 'benjamin'],
-    ['benny', 'benjamin'],
-  ]);
-  
-  const normalizeFirstName = (firstName: string): string => {
-    const normalized = firstName.toLowerCase().trim();
-    return nameVariations.get(normalized) || normalized;
+  const normalizeName = (name: string): string => {
+    return name.toLowerCase().trim().replace(/\s+/g, ' ');
   };
   
-  // Get all team members and merge duplicates by name
-  const teamMembers = new Map<string, { id: string; name: string; normalizedFirstName: string }>();
-  const nameToIds = new Map<string, Set<string>>();
+  // Get all team members, keyed by full name
+  const teamMembersByFullName = new Map<string, { id: string; name: string }>();
+  const fullNameToIds = new Map<string, Set<string>>();
   
   teamsData.forEach(team => {
     if (team.organizers) {
       team.organizers.forEach((member) => {
         const memberId = String(member.id || '');
         const memberName = member.name || '';
-        const firstName = memberName.split(' ')[0]?.toLowerCase().trim();
-        const normalizedFirstName = normalizeFirstName(firstName);
+        const fullName = normalizeName(memberName);
         
-        if (memberId && firstName) {
-          if (!nameToIds.has(normalizedFirstName)) {
-            nameToIds.set(normalizedFirstName, new Set());
+        if (memberId && fullName && fullName.includes(' ')) {
+          if (!fullNameToIds.has(fullName)) {
+            fullNameToIds.set(fullName, new Set());
           }
-          nameToIds.get(normalizedFirstName)!.add(memberId);
+          fullNameToIds.get(fullName)!.add(memberId);
           
-          if (!teamMembers.has(normalizedFirstName)) {
-            teamMembers.set(normalizedFirstName, {
-              id: memberId,
-              name: memberName,
-              normalizedFirstName
-            });
+          if (!teamMembersByFullName.has(fullName)) {
+            teamMembersByFullName.set(fullName, { id: memberId, name: memberName });
           }
         }
       });
     }
   });
   
-  // Create merges for duplicate team member IDs
-  nameToIds.forEach((ids, normalizedName) => {
+  // Create merges for duplicate team member IDs (same full name, different IDs)
+  fullNameToIds.forEach((ids, fullName) => {
     if (ids.size > 1) {
-      const canonical = teamMembers.get(normalizedName);
+      const canonical = teamMembersByFullName.get(fullName);
       if (canonical) {
         ids.forEach(id => {
           if (id !== canonical.id) {
@@ -108,17 +95,16 @@ export const buildNameBasedMerges = (
     }
   });
   
-  // Find organizers AND contacts in meetings who match team members by first name
+  // Find people in meetings who match team members by full name
   meetingsData.forEach((meeting) => {
     const pairs = [
       { vanId: String(meeting.organizer_vanid || ''), name: meeting.organizer || '' },
       { vanId: String(meeting.vanid || ''), name: (meeting as any).contact || '' },
     ];
     pairs.forEach(({ vanId, name }) => {
-      const firstName = name.split(' ')[0]?.toLowerCase().trim();
-      const normalized = normalizeFirstName(firstName);
-      if (vanId && normalized && teamMembers.has(normalized)) {
-        const teamMember = teamMembers.get(normalized)!;
+      const fullName = normalizeName(name);
+      if (vanId && fullName && teamMembersByFullName.has(fullName)) {
+        const teamMember = teamMembersByFullName.get(fullName)!;
         if (vanId !== teamMember.id) {
           merges.set(vanId, teamMember.id);
         }

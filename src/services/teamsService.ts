@@ -264,14 +264,19 @@ class TeamsService {
             } as PersonRecord;
           });
 
-          // Team lead = member with "Team Lead" functional role, or fall back to team.teamLead name match
-          const leadFromRoles = withRoles.find(m =>
-            m.functionalRole?.toLowerCase().includes('lead') ||
-            m.name.toLowerCase() === team.teamLead?.toLowerCase()
-          );
-          teamLead = leadFromRoles
-            ? (uniqueOrganizers.find(o => o.id === leadFromRoles.id) ?? null)
-            : this.findPersonByName(team.teamLead, allPeople, contacts, orgIds);
+          // Team lead: only set if the DB has an explicit team_leader value
+          if (team.teamLead?.trim()) {
+            const leadFromRoles = withRoles.find(m =>
+              m.name.toLowerCase() === team.teamLead.toLowerCase()
+            ) || withRoles.find(m =>
+              m.functionalRole?.toLowerCase().includes('lead')
+            );
+            teamLead = leadFromRoles
+              ? (uniqueOrganizers.find(o => o.id === leadFromRoles.id) ?? null)
+              : this.findPersonByName(team.teamLead, allPeople, contacts, orgIds);
+          } else {
+            teamLead = null;
+          }
 
         } else {
           // Fallback path: no lumoviz_team_members data yet — use name-based lookup.
@@ -390,7 +395,7 @@ class TeamsService {
       norms?: string;
       normCorrection?: string;
       constituency?: string;
-      organizerDetails?: Array<{ id: string; name: string; team_role: string; turf: string }>;
+      organizerDetails?: Array<{ id: string; name: string; constituentRole?: string; functionalRole?: string }>;
       version?: string;
       dateCreated?: string;
       updatedBy?: { vanid?: string; name?: string };

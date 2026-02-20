@@ -19,7 +19,6 @@ import {
   DialogContent,
   DialogActions,
   Checkbox,
-  FormControlLabel,
   Table,
   TableBody,
   TableCell,
@@ -34,7 +33,9 @@ import {
   InputAdornment,
   Tooltip,
   Tabs,
-  Tab
+  Tab,
+  useTheme,
+  useMediaQuery,
 } from '@mui/material';
 import { 
   addToList, 
@@ -76,7 +77,6 @@ import { ParentCampaign } from '../dialogs/ParentCampaignDialog';
 import AddTeamDialog from '../dialogs/AddTeamDialog';
 import EditTeamDialog from '../dialogs/EditTeamDialog';
 import CampaignActionDialog from '../dialogs/CampaignActionDialog';
-import AddPersonDialog, { NewPerson } from '../dialogs/AddPersonDialog';
 import EditPersonDialog, { PersonUpdate } from '../dialogs/EditPersonDialog';
 import LogConversationDialog, { NewConversation, EditableConversation } from '../dialogs/LogConversationDialog';
 import BatchAddPeopleDialog from '../dialogs/BatchAddPeopleDialog';
@@ -306,16 +306,20 @@ const Dashboard: React.FC<DashboardProps> = ({
   const [showConversions, setShowConversions] = React.useState(false);
   const [leaderGoalsMap, setLeaderGoalsMap] = React.useState<Record<string, Record<string, number>>>({});
   
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
+
   // State for managing turf
   const [turfList, setTurfList] = React.useState<TurfPerson[]>([]);
   const [reloadTrigger, setReloadTrigger] = React.useState(0);
   const [showAddTurfDialog, setShowAddTurfDialog] = React.useState(false);
   const [selectedActionForAdd, setSelectedActionForAdd] = React.useState<string>(''); // Action to add people to
   const [selectedPeopleForAdd, setSelectedPeopleForAdd] = React.useState<string[]>([]); // Selected people IDs
-  const [showAddPersonDialog, setShowAddPersonDialog] = React.useState(false);
+  
   const [showEditPersonDialog, setShowEditPersonDialog] = React.useState(false);
   const [showLogConversationDialog, setShowLogConversationDialog] = React.useState(false);
   const [showBatchAddDialog, setShowBatchAddDialog] = React.useState(false);
+  const [teamScope, setTeamScope] = React.useState<string>('me');
   const [editingConversation, setEditingConversation] = React.useState<EditableConversation | null>(null);
   const [selectedPersonForEdit, setSelectedPersonForEdit] = React.useState<any>(null);
   const [selectedPersonForConversation, setSelectedPersonForConversation] = React.useState<any>(null);
@@ -341,51 +345,100 @@ const Dashboard: React.FC<DashboardProps> = ({
     return params.get('organizer') || '';
   };
 
-  // Dynamically build organizer list from userMap + teamsData (org IDs + all team members)
+  // Dynamically build organizer list from userMap + teamsData
   const dashboardOrganizers = React.useMemo(() => {
     const organizers: { vanid: string; name: string }[] = [];
-    const seen = new Set<string>();
+    const seenVanids = new Set<string>();
+    const seenNames = new Set<string>();
     
-    // Add all people from userMap (org IDs / contacts)
+    // Add all people from userMap (contacts table)
     userMapRef.current.forEach((info, vanid) => {
-      if (!seen.has(vanid) && info.fullName && info.fullName.trim() !== '') {
-        seen.add(vanid);
-        organizers.push({ vanid, name: info.fullName });
+      const name = info.fullName?.trim();
+      if (!seenVanids.has(vanid) && name) {
+        seenVanids.add(vanid);
+        seenNames.add(name.toLowerCase());
+        organizers.push({ vanid, name });
       }
     });
 
-    // Add team members from teamsData
+    // Add team members not already present (dedup by vanid AND name)
     for (const team of teamsDataRef.current) {
       const members = team.organizers || [];
       for (const m of members) {
         const vid = (m.id || m.vanId)?.toString();
-        if (vid && !seen.has(vid) && m.name) {
-          seen.add(vid);
-          organizers.push({ vanid: vid, name: m.name });
+        const name = m.name?.trim();
+        if (vid && !seenVanids.has(vid) && name && !seenNames.has(name.toLowerCase())) {
+          seenVanids.add(vid);
+          seenNames.add(name.toLowerCase());
+          organizers.push({ vanid: vid, name });
         }
       }
     }
     
-    // Ensure Maggie Hughes is always present as a default
-    if (!seen.has('100001')) {
+    if (!seenVanids.has('100001')) {
       organizers.unshift({ vanid: '100001', name: 'Maggie Hughes' });
     }
     
-    // Sort alphabetically by name
     organizers.sort((a, b) => a.name.localeCompare(b.name));
     
     return organizers;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userMap, teamsData]);
   
-  // TEMPORARY FIX: Just default to Maggie Hughes
-  const [selectedOrganizerId, setSelectedOrganizerId] = React.useState<string>('100001');
+  // Read URL organizer name once at mount (before any effects)
+  const urlOrganizerNameRef = React.useRef(getOrganizerFromURL());
+
+  const [selectedOrganizerId, setSelectedOrganizerId] = React.useState<string>(() => {
+    // If URL has an organizer, start empty so we don't flash Maggie
+    if (urlOrganizerNameRef.current) return '';
+    // Otherwise try localStorage, then fall back to Maggie
+    return localStorage.getItem('dashboard_selected_organizer') || '100001';
+  });
   const [selectedOrganizerInfo, setSelectedOrganizerInfo] = React.useState<any>(currentUserInfo);
+  const urlOrganizerResolved = React.useRef(false);
 
-  // TEMPORARY FIX: Remove the effect that was causing loops
+  // Resolve the URL organizer name → vanid once the organizer list loads
+  React.useEffect(() => {
+    if (urlOrganizerResolved.current) return;
+    const urlName = urlOrganizerNameRef.current;
+    if (!urlName) {
+      urlOrganizerResolved.current = true;
+      return;
+    }
 
-  // Update selected organizer when dropdown changes
-  // Only depend on selectedOrganizerId (primitive string) to prevent loops
+    // Try to find the organizer by name
+    const match = dashboardOrganizers.find(
+      org => org.name.toLowerCase() === urlName.toLowerCase()
+    );
+    if (match) {
+      urlOrganizerResolved.current = true;
+      setSelectedOrganizerId(match.vanid);
+      localStorage.setItem('dashboard_selected_organizer', match.vanid);
+      return;
+    }
+
+    // Also try partial match (first + last name somewhere in the full name)
+    const urlParts = urlName.toLowerCase().split(/\s+/);
+    const partialMatch = dashboardOrganizers.find(
+      org => urlParts.every(part => org.name.toLowerCase().includes(part))
+    );
+    if (partialMatch) {
+      urlOrganizerResolved.current = true;
+      setSelectedOrganizerId(partialMatch.vanid);
+      localStorage.setItem('dashboard_selected_organizer', partialMatch.vanid);
+      return;
+    }
+
+    // If organizer list has loaded (more than just the Maggie fallback)
+    // but we still can't find the person, fall back to Maggie
+    if (dashboardOrganizers.length > 1) {
+      console.warn(`[Dashboard] Could not find organizer "${urlName}" in list of ${dashboardOrganizers.length} organizers`);
+      urlOrganizerResolved.current = true;
+      setSelectedOrganizerId('100001');
+    }
+  }, [dashboardOrganizers]);
+
+  // Update selected organizer info when dropdown changes
   React.useEffect(() => {
     if (selectedOrganizerId) {
       const selectedOrg = dashboardOrganizers.find(org => 
@@ -1298,12 +1351,16 @@ const Dashboard: React.FC<DashboardProps> = ({
     const userFirstName = selectedOrganizerInfo?.firstname;
     
     return teamsData.filter(team => {
-      // Check if selected organizer is the team lead
       const isLead = team.bigQueryData?.teamLead === userFullName || 
                      team.bigQueryData?.teamLead === userFirstName;
       
-      // Check if user is in team members
-      const isMember = team.bigQueryData?.teamMembers?.some((memberName: string) => {
+      // Check by vanid in team.organizers (most reliable)
+      const isMemberById = selectedOrganizerId && team.organizers?.some(
+        (m: any) => (m.id || m.vanId)?.toString() === selectedOrganizerId
+      );
+      
+      // Fallback: check by name in bigQueryData.teamMembers
+      const isMemberByName = team.bigQueryData?.teamMembers?.some((memberName: string) => {
         const memberNameLower = memberName.toLowerCase();
         const userFullNameLower = userFullName?.toLowerCase();
         const userFirstNameLower = userFirstName?.toLowerCase();
@@ -1313,9 +1370,9 @@ const Dashboard: React.FC<DashboardProps> = ({
                memberNameLower.split(' ')[0] === userFirstNameLower;
       });
       
-      return isLead || isMember;
+      return isLead || isMemberById || isMemberByName;
     });
-  }, [teamsData, selectedOrganizerInfo]);
+  }, [teamsData, selectedOrganizerInfo, selectedOrganizerId]);
 
   // Find selected organizer's team (where they're the leader)
   const myTeam = useMemo(() => {
@@ -1330,7 +1387,7 @@ const Dashboard: React.FC<DashboardProps> = ({
       (firstName && team.bigQueryData?.teamLead?.toLowerCase().includes(firstName.toLowerCase()))
     );
   }, [teamsData, selectedOrganizerId, selectedOrganizerInfo]);
-  
+
   // Helper: Get goal for rate-based actions
   const calculateAdjustedGoal = (
     action: CampaignAction | any,
@@ -1398,6 +1455,97 @@ const Dashboard: React.FC<DashboardProps> = ({
 
   // Selected organizer's chapter
   const userChapter = selectedOrganizerInfo?.chapter || currentUserInfo?.chapter || 'Unknown';
+
+  // All teams in the organizer's section/chapter
+  const sectionTeams = useMemo(() => {
+    if (!teamsData || !userChapter || userChapter === 'Unknown') return [];
+    return teamsData.filter(team =>
+      team.chapter?.toLowerCase() === userChapter.toLowerCase() ||
+      team.bigQueryData?.chapter?.toLowerCase() === userChapter.toLowerCase()
+    );
+  }, [teamsData, userChapter]);
+
+  // Build the list of scope options for the dropdown
+  const scopeOptions = useMemo(() => {
+    const options: { value: string; label: string; type: 'me' | 'team' | 'section' | 'all' }[] = [
+      { value: 'me', label: 'Just Me', type: 'me' }
+    ];
+
+    for (const team of myTeamsData) {
+      options.push({
+        value: `team:${team.id}`,
+        label: team.teamName || team.bigQueryData?.teamName || 'Unnamed Team',
+        type: 'team'
+      });
+    }
+
+    for (const team of sectionTeams) {
+      const alreadyAdded = myTeamsData.some(t => t.id === team.id);
+      if (!alreadyAdded) {
+        options.push({
+          value: `team:${team.id}`,
+          label: team.teamName || team.bigQueryData?.teamName || 'Unnamed Team',
+          type: 'team'
+        });
+      }
+    }
+
+    const allTeamIds = myTeamsData.map(t => t.id).concat(sectionTeams.map(t => t.id));
+    const teamCount = new Set(allTeamIds).size;
+    if (teamCount > 1) {
+      options.push({
+        value: 'all',
+        label: `All ${userChapter} Teams`,
+        type: 'all'
+      });
+    }
+
+    return options;
+  }, [myTeamsData, sectionTeams, userChapter]);
+
+  // Compute the effective team member vanids based on selected scope
+  const teamMemberVanIds = useMemo(() => {
+    if (teamScope === 'me') return [];
+
+    const collectMembers = (teams: any[]) => {
+      const idSet = new Set<string>();
+      for (const team of teams) {
+        const members = team.organizers || [];
+        for (const m of members) {
+          const vid = (m.id || m.vanId)?.toString();
+          if (vid && vid !== selectedOrganizerId) {
+            idSet.add(vid);
+          }
+        }
+      }
+      return Array.from(idSet);
+    };
+
+    if (teamScope === 'all') {
+      const allTeams = [...myTeamsData];
+      for (const t of sectionTeams) {
+        if (!allTeams.some(at => at.id === t.id)) allTeams.push(t);
+      }
+      return collectMembers(allTeams);
+    }
+
+    if (teamScope.startsWith('team:')) {
+      const teamId = teamScope.replace('team:', '');
+      const team = myTeamsData.concat(sectionTeams).find(t => t.id === teamId);
+      return team ? collectMembers([team]) : [];
+    }
+
+    return [];
+  }, [teamScope, myTeamsData, sectionTeams, selectedOrganizerId]);
+
+  const showTeamScope = teamScope !== 'me';
+  const scopeLabel = useMemo(() => {
+    if (teamScope === 'me') return 'My';
+    if (teamScope === 'all') return 'All';
+    const opt = scopeOptions.find(o => o.value === teamScope);
+    if (opt) return opt.label;
+    return 'Team';
+  }, [teamScope, scopeOptions]);
 
   // Helper: Get ALL VAN IDs for the selected organizer (primary + alternates from mapping table)
   const getAllOrganizerVanIds = useMemo(() => {
@@ -1493,35 +1641,30 @@ const Dashboard: React.FC<DashboardProps> = ({
   }, [selectedOrganizerId, turfList, getAllOrganizerVanIds, getAllOrganizerNames, sharedAllContacts]);
 
   // MY PEOPLE: People organized by the selected organizer (from peopleRecords/meetings + primary organizer)
+  // When showTeamScope is on, also includes people organized by any team member
   const myPeople = useMemo(() => {
     if (!selectedOrganizerId) return [];
     
     const allVanIds = getAllOrganizerVanIds;
     const allNames = getAllOrganizerNames;
     
-    console.log('[Dashboard] Computing myPeople for organizer:', selectedOrganizerId);
+    const effectiveVanIds = showTeamScope && teamMemberVanIds.length > 0
+      ? Array.from(new Set(allVanIds.concat(teamMemberVanIds)))
+      : allVanIds;
     
-    // Use sharedAllContacts for comprehensive list (includes primary organizer field)
     const allContactsList = sharedAllContacts && sharedAllContacts.length > 0 
       ? sharedAllContacts 
       : (peopleRecords || []);
     
-    console.log('[Dashboard] Total contacts to check:', allContactsList.length);
-    
-    // Filter people where EITHER:
-    // 1. I was the organizer in a meeting, OR
-    // 2. I'm set as their primary organizer
     let filtered = allContactsList
       .filter((person: any) => {
-        // Check primary organizer field (from lumoviz_contacts table)
         const primaryOrganizerVanid = person.primary_organizer_vanid?.toString();
-        const hasPrimaryOrganizer = primaryOrganizerVanid && allVanIds.includes(primaryOrganizerVanid);
+        const hasPrimaryOrganizer = primaryOrganizerVanid && effectiveVanIds.includes(primaryOrganizerVanid);
         
         if (hasPrimaryOrganizer) {
           return true;
         }
         
-        // Check if this person has any meetings where I was the organizer
         const organizers = person.organizers || [];
         
         if (organizers.length === 0) {
@@ -1530,8 +1673,7 @@ const Dashboard: React.FC<DashboardProps> = ({
         
         const isMyContact = organizers.some((organizer: string) => {
           const orgStr = organizer?.toString().trim();
-          // Check against ALL VAN IDs and ALL name variations
-          const matchesVanId = allVanIds.includes(orgStr);
+          const matchesVanId = effectiveVanIds.includes(orgStr);
           const matchesName = allNames.some(name => name && orgStr === name);
           
           return matchesVanId || matchesName;
@@ -1540,7 +1682,6 @@ const Dashboard: React.FC<DashboardProps> = ({
         return isMyContact;
       })
       .sort((a: any, b: any) => {
-        // Sort by most recent contact, descending
         const aDate = a.mostRecentContact || a.last_contact_date;
         const bDate = b.mostRecentContact || b.last_contact_date;
         if (!aDate && !bDate) return 0;
@@ -1549,16 +1690,8 @@ const Dashboard: React.FC<DashboardProps> = ({
         return new Date(bDate).getTime() - new Date(aDate).getTime();
       });
     
-    console.log('[Dashboard] myPeople filtered result:', filtered.length, 'people');
-    if (filtered.length > 0) {
-      console.log('[Dashboard] Sample person:', {
-        name: `${filtered[0].first_name || filtered[0].firstname || ''} ${filtered[0].last_name || filtered[0].lastname || ''}`.trim(),
-        vanid: filtered[0].vanid,
-        primary_organizer_vanid: filtered[0].primary_organizer_vanid
-      });
-    }
     return filtered;
-  }, [sharedAllContacts, peopleRecords, selectedOrganizerId, getAllOrganizerVanIds, getAllOrganizerNames]);
+  }, [sharedAllContacts, peopleRecords, selectedOrganizerId, getAllOrganizerVanIds, getAllOrganizerNames, showTeamScope, teamMemberVanIds]);
 
   // Auto-add Team Leaders from myPeople to leadersList
   // DISABLED: This was auto-adding all Team Leaders, preventing manual addition
@@ -1975,31 +2108,6 @@ const Dashboard: React.FC<DashboardProps> = ({
     }
   };
 
-  const handleAddPerson = async (person: NewPerson) => {
-    try {
-      const response = await fetch(`${API_BASE_URL}/api/contacts`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(person)
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to add person');
-      }
-
-      const result = await response.json();
-      alert(`✓ ${person.firstname} ${person.lastname} added successfully!`);
-      
-      // Trigger a reload of contacts if needed
-      if (onPersonAdd) {
-        onPersonAdd();
-      }
-    } catch (error) {
-      console.error('Error adding person:', error);
-      throw error;
-    }
-  };
-
   const handleLogConversation = async (conversation: NewConversation) => {
     try {
       // Include action_id if this is linked to an action
@@ -2102,6 +2210,30 @@ const Dashboard: React.FC<DashboardProps> = ({
     };
     setEditingConversation(editable);
     setShowLogConversationDialog(true);
+  };
+
+  const handleDeleteConversation = async (meetingId: string) => {
+    const response = await fetch(`${API_BASE_URL}/api/meetings/${meetingId}`, {
+      method: 'DELETE'
+    });
+    if (!response.ok) {
+      throw new Error('Failed to delete conversation');
+    }
+    if (onConversationLog) {
+      onConversationLog();
+    }
+  };
+
+  const handleDeletePerson = async (personId: string) => {
+    const response = await fetch(`${API_BASE_URL}/api/contacts/${personId}`, {
+      method: 'DELETE'
+    });
+    if (!response.ok) {
+      throw new Error('Failed to delete person');
+    }
+    if (onPersonAdd) {
+      onPersonAdd();
+    }
   };
 
   const handleEditPerson = async (personId: string, updates: PersonUpdate) => {
@@ -2568,17 +2700,45 @@ const Dashboard: React.FC<DashboardProps> = ({
       });
     }
     
+    // When showTeamScope is on, also include team members from teams led by our team members
+    if (showTeamScope && teamMemberVanIds.length > 0) {
+      teamMemberVanIds.forEach(memberVanId => {
+        if (processedIds.has(memberVanId)) return;
+        const memberTeam = teamsData.find(team => {
+          const leadInfo = userMap.get(memberVanId);
+          const leadName = leadInfo?.fullName || leadInfo?.firstname;
+          return team.bigQueryData?.teamLead === leadName ||
+            (leadName && team.bigQueryData?.teamLead?.toLowerCase() === leadName.toLowerCase());
+        });
+        if (memberTeam?.bigQueryData?.teamMembers) {
+          memberTeam.bigQueryData.teamMembers.forEach((subMemberName: string) => {
+            const person = peopleRecords?.find(p => p.name.toLowerCase() === subMemberName.toLowerCase());
+            const node = !person ? nodes.find(n => n.name?.toLowerCase() === subMemberName.toLowerCase()) : null;
+            const subId = person?.id || node?.id;
+            if (subId && !processedIds.has(subId)) {
+              const progress = calculateLeaderProgress(subId, subMemberName);
+              if (progress) {
+                leaders.push({ ...progress, isAutomatic: true });
+                processedIds.add(subId);
+              }
+            }
+          });
+        }
+      });
+    }
+
     // SOURCE 2: Leader Hierarchy (from lumoviz_leader_hierarchy BigQuery table)
     // Show leaders where parent_leader_vanid === selectedOrganizerId (direct reports)
     // OR where organizer_vanid === selectedOrganizerId AND no parent (top-level entries this person created)
+    const effectiveLeaderScopeIds = showTeamScope && teamMemberVanIds.length > 0
+      ? [selectedOrganizerId, ...teamMemberVanIds]
+      : [selectedOrganizerId];
+
     leaderHierarchyProp.forEach(entry => {
       const leaderId = entry.leader_vanid;
       
-      // Include this leader if:
-      // 1. They report directly to the selected organizer (parent_leader_vanid === selectedOrganizerId)
-      // 2. OR this organizer created this entry and it has no parent (top-level)
-      const isDirectReport = entry.parent_leader_vanid === selectedOrganizerId;
-      const isTopLevelEntry = entry.organizer_vanid === selectedOrganizerId && !entry.parent_leader_vanid;
+      const isDirectReport = effectiveLeaderScopeIds.includes(entry.parent_leader_vanid || '');
+      const isTopLevelEntry = effectiveLeaderScopeIds.includes(entry.organizer_vanid || '') && !entry.parent_leader_vanid;
       
       if (!isDirectReport && !isTopLevelEntry) {
         return;
@@ -2586,7 +2746,6 @@ const Dashboard: React.FC<DashboardProps> = ({
       
       if (processedIds.has(leaderId)) return;
       
-      // Find person info
       const person = peopleRecords?.find(p => p.id === leaderId);
       const node = nodes.find(n => n.id === leaderId);
       const userInfo = userMap.get(leaderId);
@@ -2642,7 +2801,7 @@ const Dashboard: React.FC<DashboardProps> = ({
     };
     
     return sortLeadersRecursive(leaders);
-  }, [selectedOrganizerId, selectedOrganizerInfo, nodes, links, userMap, myTeam, teamsData, leadersList, peopleRecords, leaderHierarchyProp, leaderActionsMap, listsDataProp, ACTIONS, allLeaderGoalsMap]); // Removed organizerMappings to prevent infinite loop
+  }, [selectedOrganizerId, selectedOrganizerInfo, nodes, links, userMap, myTeam, teamsData, leadersList, peopleRecords, leaderHierarchyProp, leaderActionsMap, listsDataProp, ACTIONS, allLeaderGoalsMap, showTeamScope, teamMemberVanIds]); // Removed organizerMappings to prevent infinite loop
 
   // No longer need these - simplified leader-to-my-list flow
 
@@ -3107,6 +3266,7 @@ const Dashboard: React.FC<DashboardProps> = ({
               onChange={(e) => {
                 const newOrganizerId = e.target.value;
                 setSelectedOrganizerId(newOrganizerId);
+                setTeamScope('me');
                 
                 // Find the organizer name for URL
                 const selectedOrg = dashboardOrganizers.find(org => org.vanid === newOrganizerId);
@@ -3143,6 +3303,39 @@ const Dashboard: React.FC<DashboardProps> = ({
               ))}
             </Select>
           </FormControl>
+
+          {scopeOptions.length > 1 && (
+            <FormControl size="small" sx={{ minWidth: 140 }}>
+              <Select
+                value={teamScope}
+                onChange={(e) => setTeamScope(e.target.value)}
+                renderValue={(val) => {
+                  const opt = scopeOptions.find(o => o.value === val);
+                  return (
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                      <GroupsIcon sx={{ fontSize: 16, color: val === 'me' ? 'text.secondary' : 'primary.main' }} />
+                      <Typography variant="caption" sx={{ fontSize: '0.75rem', fontWeight: val === 'me' ? 400 : 600, color: val === 'me' ? 'text.secondary' : 'primary.main' }}>
+                        {opt?.label || 'Just Me'}
+                      </Typography>
+                    </Box>
+                  );
+                }}
+                sx={{
+                  fontSize: '0.8rem',
+                  '& .MuiSelect-select': { py: 0.5, pl: 1.5 }
+                }}
+              >
+                {scopeOptions.map(opt => (
+                  <MenuItem key={opt.value} value={opt.value} sx={{ fontSize: '0.8rem' }}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      {opt.type === 'me' ? null : <GroupsIcon sx={{ fontSize: 14, color: 'text.secondary' }} />}
+                      {opt.label}
+                    </Box>
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          )}
         </Box>
       </Box>
 
@@ -3534,7 +3727,7 @@ const Dashboard: React.FC<DashboardProps> = ({
           <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
           {/* Your People Card - Lists, People, and Leaders */}
           <Box sx={{ flex: '1 1 450px', minWidth: '350px', display: 'flex' }}>
-            <Card elevation={1} sx={{ width: '100%', display: 'flex', flexDirection: 'column', height: 'calc(100vh - 280px)', minHeight: '600px' }}>
+            <Card elevation={1} sx={{ width: '100%', display: 'flex', flexDirection: 'column', height: 'calc(100vh - 280px)', minHeight: '600px', pb: isMobile ? '60px' : 0 }}>
               <CardContent sx={{ py: 1, px: 1.5, flexGrow: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
                 <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5, mb: 1 }}>
                   {/* Header row with title and actions */}
@@ -3657,63 +3850,80 @@ const Dashboard: React.FC<DashboardProps> = ({
                       params.set('dashboardTab', newValue);
                       window.history.pushState({}, '', `${window.location.pathname}?${params.toString()}`);
                     }}
+                    variant="scrollable"
+                    scrollButtons="auto"
+                    allowScrollButtonsMobile
                     sx={{ 
                       minHeight: 36,
                       flex: 1,
                       '& .MuiTab-root': { 
                         minHeight: 36, 
                         py: 0.5,
-                        fontSize: '0.8rem'
+                        fontSize: '0.8rem',
+                        whiteSpace: 'nowrap',
+                      },
+                      '& .MuiTabs-scrollButtons': {
+                        width: 28,
+                        '&.Mui-disabled': { opacity: 0.3 }
                       }
                     }}
                   >
                     <Tab 
                       label={
                         (dashboardPeopleFilters.loeStatus.length > 0 || dashboardPeopleFilters.memberStatus.length > 0 || dashboardPeopleFilters.chapter || dashboardPeopleFilters.searchText || dashboardPeopleFilters.lastContactFilter !== 'all' || dashboardPeopleFilters.meetingCountFilter !== 'all' || dashboardPeopleFilters.actionStatus !== 'all')
-                          ? `My People (filtered)`
-                          : `My People`
+                          ? `${scopeLabel} People (filtered)`
+                          : `${scopeLabel} People`
                       } 
                       value="people" 
                     />
-                    <Tab label={`My Leaders (${myLeaders.length})`} value="leaders" />
+                    <Tab label={`${scopeLabel} Leaders (${myLeaders.length})`} value="leaders" />
                     <Tab 
-                      label={`My Conversations (${sharedCachedMeetings.filter((m: any) => getAllOrganizerVanIds.includes(m.organizer_vanid?.toString())).length})`}
+                      label={`${scopeLabel} Conversations (${sharedCachedMeetings.filter((m: any) => {
+                        const effectiveIds = showTeamScope && teamMemberVanIds.length > 0
+                          ? Array.from(new Set(getAllOrganizerVanIds.concat(teamMemberVanIds)))
+                          : getAllOrganizerVanIds;
+                        return effectiveIds.includes(m.organizer_vanid?.toString());
+                      }).length})`}
                       value="conversations" 
                     />
-                    <Tab label="My Lists" value="lists" />
-                    <Tab label="My Actions" value="actions" />
+                    <Tab label={`${scopeLabel} Lists`} value="lists" />
+                    <Tab label={`${scopeLabel} Actions`} value="actions" />
                   </Tabs>
                 </Box>
 
                 {/* Action buttons + search bar row */}
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
-                  <Button
-                    variant="contained"
-                    size="small"
-                    startIcon={<PersonIcon />}
-                    onClick={() => setShowBatchAddDialog(true)}
-                    sx={{ fontSize: '0.75rem', px: 1.5 }}
-                  >
-                    Add People
-                  </Button>
-                  <Button
-                    variant="outlined"
-                    size="small"
-                    startIcon={<AddIcon />}
-                    onClick={() => setShowAddTurfDialog(true)}
-                    sx={{ fontSize: '0.75rem', px: 1.5 }}
-                  >
-                    Add to List
-                  </Button>
-                  <Button
-                    variant="outlined"
-                    size="small"
-                    startIcon={<ChatIcon />}
-                    onClick={() => setShowLogConversationDialog(true)}
-                    sx={{ fontSize: '0.75rem', px: 1.5 }}
-                  >
-                    Log Conversation
-                  </Button>
+                  {!isMobile && (
+                    <>
+                      <Button
+                        variant="contained"
+                        size="small"
+                        startIcon={<PersonIcon />}
+                        onClick={() => setShowBatchAddDialog(true)}
+                        sx={{ fontSize: '0.75rem', px: 1.5 }}
+                      >
+                        Add People
+                      </Button>
+                      <Button
+                        variant="outlined"
+                        size="small"
+                        startIcon={<AddIcon />}
+                        onClick={() => setShowAddTurfDialog(true)}
+                        sx={{ fontSize: '0.75rem', px: 1.5 }}
+                      >
+                        Add to List
+                      </Button>
+                      <Button
+                        variant="outlined"
+                        size="small"
+                        startIcon={<ChatIcon />}
+                        onClick={() => setShowLogConversationDialog(true)}
+                        sx={{ fontSize: '0.75rem', px: 1.5 }}
+                      >
+                        Log Conversation
+                      </Button>
+                    </>
+                  )}
                   <Box sx={{ flex: 1 }} />
                   {turfTab === 'people' && (
                     <TextField
@@ -4399,10 +4609,15 @@ const Dashboard: React.FC<DashboardProps> = ({
                       sharedCachedMeetings={sharedCachedMeetings}
                       organizerMappings={organizerMappings}
                       onEditPerson={handleOpenEditPerson}
+                      onSavePerson={handleEditPerson}
+                      availableOrganizers={dashboardOrganizers.map(org => ({ id: org.vanid, name: org.name }))}
+                      chapters={chapters}
                       onAddConversation={handleOpenLogConversation}
                       onAddToAction={handleOpenAddToAction}
                       hideActionButtons={true}
                       onEditConversation={handleEditConversationFromMeeting}
+                      onDeleteConversation={handleDeleteConversation}
+                      onDeletePerson={handleDeletePerson}
                     />
                   </Box>
                 </Box>
@@ -4641,9 +4856,12 @@ const Dashboard: React.FC<DashboardProps> = ({
                     {/* Conversations table */}
                     {(() => {
                       const orgVanIds = getAllOrganizerVanIds;
+                      const effectiveConvVanIds = showTeamScope && teamMemberVanIds.length > 0
+                        ? Array.from(new Set(orgVanIds.concat(teamMemberVanIds)))
+                        : orgVanIds;
 
                       const myConversations = sharedCachedMeetings
-                        .filter((m: any) => orgVanIds.includes(m.organizer_vanid?.toString()))
+                        .filter((m: any) => effectiveConvVanIds.includes(m.organizer_vanid?.toString()))
                         .filter((m: any) => {
                           if (!conversationSearchText.trim()) return true;
                           const q = conversationSearchText.toLowerCase();
@@ -4718,7 +4936,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                                 <th style={{ ...thStyle, width: 140 }}>Person</th>
                                 <th style={{ ...thStyle, minWidth: 160 }}>Purpose</th>
                                 <th style={{ ...thStyle, minWidth: 140 }}>Values</th>
-                                <th style={{ ...thStyle, minWidth: 140 }}>Stakes</th>
+                                <th style={{ ...thStyle, minWidth: 140 }}>Interests</th>
                                 <th style={{ ...thStyle, minWidth: 140 }}>Resources</th>
                                 <th style={{ ...thStyle, minWidth: 140 }}>Commitments</th>
                                 <th style={{ ...thStyle, minWidth: 140 }}>Constituency</th>
@@ -4852,8 +5070,9 @@ const Dashboard: React.FC<DashboardProps> = ({
                   <Box sx={{ p: 2, flex: 1, overflow: 'auto', display: 'flex', flexDirection: 'column' }}>
                     <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
                       <Typography variant="h6">
-                        My Actions
+                        {scopeLabel} Actions
                       </Typography>
+
                       <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
                         <Tooltip title="Copy this view to clipboard">
                           <IconButton 
@@ -5187,7 +5406,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                     startIcon={<PersonIcon />}
                     onClick={() => {
                       setShowAddTurfDialog(false);
-                      setShowAddPersonDialog(true);
+                      setShowBatchAddDialog(true);
                     }}
                   >
                     Add New Person
@@ -5205,7 +5424,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                 startIcon={<PersonIcon />}
                 onClick={() => {
                   setShowAddTurfDialog(false);
-                  setShowAddPersonDialog(true);
+                  setShowBatchAddDialog(true);
                 }}
                 size="small"
               >
@@ -5380,7 +5599,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                     startIcon={<PersonIcon />}
                     onClick={() => {
                       setShowAddLeaderDialog(false);
-                      setShowAddPersonDialog(true);
+                      setShowBatchAddDialog(true);
                     }}
                   >
                     Add New Person
@@ -5398,7 +5617,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                 startIcon={<PersonIcon />}
                 onClick={() => {
                   setShowAddLeaderDialog(false);
-                  setShowAddPersonDialog(true);
+                  setShowBatchAddDialog(true);
                 }}
                 size="small"
               >
@@ -5709,16 +5928,6 @@ const Dashboard: React.FC<DashboardProps> = ({
         </DialogActions>
       </Dialog>
 
-      {/* Add Person Dialog */}
-      <AddPersonDialog
-        open={showAddPersonDialog}
-        onClose={() => setShowAddPersonDialog(false)}
-        onSave={handleAddPerson}
-        availableChapters={chapters}
-        availableOrganizers={dashboardOrganizers.map(org => ({ id: org.vanid, name: org.name }))}
-        currentUserId={selectedOrganizerId || ''}
-      />
-
       {/* Edit Person Dialog */}
       <EditPersonDialog
         open={showEditPersonDialog}
@@ -5762,6 +5971,7 @@ const Dashboard: React.FC<DashboardProps> = ({
 
       {/* Batch Add People Dialog */}
       <BatchAddPeopleDialog
+        key={`batch-add-${selectedOrganizerId}`}
         open={showBatchAddDialog}
         onClose={() => setShowBatchAddDialog(false)}
         onSaved={(_count) => {
@@ -5769,10 +5979,63 @@ const Dashboard: React.FC<DashboardProps> = ({
           if (onPersonAdd) onPersonAdd();
         }}
         availableSections={chapters}
-        availableOrganizers={dashboardOrganizers.map(org => ({ id: org.vanid, name: org.name }))}
-        availableActions={ACTIONS}
-        currentUserId={currentUserId || undefined}
+        availableOrganizers={dashboardOrganizers.map(org => {
+          const info = userMapRef.current.get(org.vanid);
+          return { id: org.vanid, name: org.name, section: info?.chapter };
+        })}
+        availableActions={availableActions.length > 0 ? availableActions.map(a => ({ id: a.id || a.action_id, name: a.name || a.action_name })) : ACTIONS}
+        currentUserId={selectedOrganizerId || undefined}
       />
+
+      {/* Mobile bottom action bar */}
+      {isMobile && (
+        <Box
+          sx={{
+            position: 'fixed',
+            bottom: 0,
+            left: 0,
+            right: 0,
+            bgcolor: 'background.paper',
+            borderTop: '1px solid',
+            borderColor: 'divider',
+            display: 'flex',
+            justifyContent: 'space-around',
+            alignItems: 'center',
+            py: 1,
+            px: 1,
+            zIndex: 1200,
+            boxShadow: '0 -2px 8px rgba(0,0,0,0.1)',
+          }}
+        >
+          <Button
+            variant="contained"
+            size="small"
+            startIcon={<PersonIcon />}
+            onClick={() => setShowBatchAddDialog(true)}
+            sx={{ fontSize: '0.7rem', px: 1.5, py: 0.75, flex: 1, mx: 0.5 }}
+          >
+            Add People
+          </Button>
+          <Button
+            variant="outlined"
+            size="small"
+            startIcon={<AddIcon />}
+            onClick={() => setShowAddTurfDialog(true)}
+            sx={{ fontSize: '0.7rem', px: 1.5, py: 0.75, flex: 1, mx: 0.5 }}
+          >
+            Add to List
+          </Button>
+          <Button
+            variant="outlined"
+            size="small"
+            startIcon={<ChatIcon />}
+            onClick={() => setShowLogConversationDialog(true)}
+            sx={{ fontSize: '0.7rem', px: 1.5, py: 0.75, flex: 1, mx: 0.5 }}
+          >
+            Log
+          </Button>
+        </Box>
+      )}
     </Box>
   );
 };

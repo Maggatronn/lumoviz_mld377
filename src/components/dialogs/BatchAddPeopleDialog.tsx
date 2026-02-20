@@ -68,16 +68,19 @@ interface BatchAddPeopleDialogProps {
 
 const uid = () => Math.random().toString(36).slice(2);
 
-const makeRow = (organizer_vanid = ''): PersonRow => ({
-  id: uid(),
-  firstname: '',
-  lastname: '',
-  section: '',
-  organizer_vanid,
-  phone: '',
-  email: '',
-  status: 'idle',
-});
+const makeRow = (organizer_vanid = '', organizers: OrganizerOption[] = []): PersonRow => {
+  const org = organizers.find(o => o.id === organizer_vanid);
+  return {
+    id: uid(),
+    firstname: '',
+    lastname: '',
+    section: org?.section || '',
+    organizer_vanid,
+    phone: '',
+    email: '',
+    status: 'idle',
+  };
+};
 
 function parsePasteText(
   raw: string,
@@ -115,6 +118,12 @@ function parsePasteText(
       }
     }
 
+    // Auto-fill section from organizer if not explicitly provided
+    if (!section && organizer_vanid) {
+      const org = availableOrganizers.find(o => o.id === organizer_vanid);
+      section = org?.section || '';
+    }
+
     return { firstname, lastname, section, organizer_vanid, phone: '', email: '' };
   });
 }
@@ -129,7 +138,7 @@ const BatchAddPeopleDialog: React.FC<BatchAddPeopleDialogProps> = ({
   currentUserId = '',
   currentUserName = '',
 }) => {
-  const [rows, setRows] = useState<PersonRow[]>([makeRow(currentUserId)]);
+  const [rows, setRows] = useState<PersonRow[]>([makeRow(currentUserId, availableOrganizers)]);
   const [saving, setSaving] = useState(false);
   const [isDone, setIsDone] = useState(false);
   const [showOptional, setShowOptional] = useState(false);
@@ -138,14 +147,14 @@ const BatchAddPeopleDialog: React.FC<BatchAddPeopleDialogProps> = ({
   const [selectedActionId, setSelectedActionId] = useState('');
 
   const reset = useCallback(() => {
-    setRows([makeRow(currentUserId)]);
+    setRows([makeRow(currentUserId, availableOrganizers)]);
     setSaving(false);
     setIsDone(false);
     setShowOptional(false);
     setPasteHint(false);
     setAddToAction(false);
     setSelectedActionId('');
-  }, [currentUserId]);
+  }, [currentUserId, availableOrganizers]);
 
   const handleClose = () => {
     if (!saving) { reset(); onClose(); }
@@ -157,7 +166,6 @@ const BatchAddPeopleDialog: React.FC<BatchAddPeopleDialogProps> = ({
     );
   };
 
-  // When organizer is changed, auto-fill section if it's still empty
   const handleOrganizerChange = (rowId: string, newOrgVanid: string) => {
     const org = availableOrganizers.find(o => o.id === newOrgVanid);
     setRows(prev =>
@@ -166,8 +174,7 @@ const BatchAddPeopleDialog: React.FC<BatchAddPeopleDialogProps> = ({
         return {
           ...r,
           organizer_vanid: newOrgVanid,
-          // Only auto-fill section if none is set yet
-          section: r.section || org?.section || r.section,
+          section: org?.section || '',
           status: 'idle',
           errorMsg: undefined,
         };
@@ -177,10 +184,7 @@ const BatchAddPeopleDialog: React.FC<BatchAddPeopleDialogProps> = ({
 
   const addRow = () => {
     const last = rows[rows.length - 1];
-    const newRow = makeRow(last?.organizer_vanid || currentUserId);
-    // Carry forward the last row's section too
-    newRow.section = last?.section || '';
-    setRows(prev => [...prev, newRow]);
+    setRows(prev => [...prev, makeRow(last?.organizer_vanid || currentUserId, availableOrganizers)]);
   };
 
   const removeRow = (id: string) => {
@@ -349,7 +353,7 @@ const BatchAddPeopleDialog: React.FC<BatchAddPeopleDialogProps> = ({
             </Typography>
             <Typography variant="caption" color="text.disabled">
               Accepts tab-separated (Excel / Sheets), comma-separated, or one name per line.
-              Columns: First Name, Last Name, Section, Organizer
+              Columns: First Name, Last Name, Organizer
             </Typography>
           </Box>
         )}
@@ -360,11 +364,10 @@ const BatchAddPeopleDialog: React.FC<BatchAddPeopleDialogProps> = ({
           </Alert>
         )}
 
-        {/* Column headers */}
-        <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr 160px 180px 28px', gap: 1, mb: 0.5, px: 0.5 }}>
+        {/* Column headers (hidden on mobile) */}
+        <Box sx={{ display: { xs: 'none', sm: 'grid' }, gridTemplateColumns: '1fr 1fr 200px 28px', gap: 1, mb: 0.5, px: 0.5 }}>
           <Typography variant="caption" color="text.secondary" fontWeight={600}>First Name *</Typography>
           <Typography variant="caption" color="text.secondary" fontWeight={600}>Last Name *</Typography>
-          <Typography variant="caption" color="text.secondary" fontWeight={600}>{TERMS.chapter}</Typography>
           <Typography variant="caption" color="text.secondary" fontWeight={600}>Organizer</Typography>
           <span />
         </Box>
@@ -372,10 +375,11 @@ const BatchAddPeopleDialog: React.FC<BatchAddPeopleDialogProps> = ({
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
           {rows.map((row, idx) => (
             <Box key={row.id}>
+              {/* Desktop: single row grid */}
               <Box
                 sx={{
-                  display: 'grid',
-                  gridTemplateColumns: '1fr 1fr 160px 180px 28px',
+                  display: { xs: 'none', sm: 'grid' },
+                  gridTemplateColumns: '1fr 1fr 200px 28px',
                   gap: 1,
                   alignItems: 'center',
                   opacity: row.status === 'success' ? 0.7 : 1,
@@ -400,20 +404,6 @@ const BatchAddPeopleDialog: React.FC<BatchAddPeopleDialogProps> = ({
                   disabled={saving || row.status === 'success'}
                   error={row.status === 'error'}
                 />
-                <FormControl size="small" fullWidth>
-                  <Select
-                    value={row.section}
-                    onChange={e => updateRow(row.id, 'section', e.target.value as string)}
-                    displayEmpty
-                    disabled={saving || row.status === 'success'}
-                    renderValue={v => v ? String(v) : <span style={{ color: '#9ca3af' }}>None</span>}
-                  >
-                    <MenuItem value=""><em>None</em></MenuItem>
-                    {availableSections.filter(s => s !== `All ${TERMS.chapters}`).map(s => (
-                      <MenuItem key={s} value={s}>{s}</MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
                 <FormControl size="small" fullWidth>
                   <Select
                     value={row.organizer_vanid}
@@ -457,6 +447,84 @@ const BatchAddPeopleDialog: React.FC<BatchAddPeopleDialogProps> = ({
                     <DeleteIcon fontSize="small" />
                   </IconButton>
                 )}
+              </Box>
+
+              {/* Mobile: stacked layout */}
+              <Box
+                sx={{
+                  display: { xs: 'flex', sm: 'none' },
+                  flexDirection: 'column',
+                  gap: 1,
+                  opacity: row.status === 'success' ? 0.7 : 1,
+                }}
+              >
+                <TextField
+                  size="small"
+                  label="First Name *"
+                  placeholder="First"
+                  value={row.firstname}
+                  onChange={e => updateRow(row.id, 'firstname', e.target.value)}
+                  onPaste={e => handleFirstnamePaste(e, row.id, idx)}
+                  disabled={saving || row.status === 'success'}
+                  error={row.status === 'error'}
+                  autoFocus={idx === 0}
+                  fullWidth
+                  inputProps={{ 'aria-label': 'First name' }}
+                />
+                <TextField
+                  size="small"
+                  label="Last Name *"
+                  placeholder="Last"
+                  value={row.lastname}
+                  onChange={e => updateRow(row.id, 'lastname', e.target.value)}
+                  disabled={saving || row.status === 'success'}
+                  error={row.status === 'error'}
+                  fullWidth
+                />
+                <FormControl size="small" fullWidth>
+                  <Select
+                    value={row.organizer_vanid}
+                    onChange={e => handleOrganizerChange(row.id, e.target.value as string)}
+                    displayEmpty
+                    disabled={saving || row.status === 'success'}
+                    renderValue={v => {
+                      const org = availableOrganizers.find(o => o.id === v);
+                      return org ? org.name : <span style={{ color: '#9ca3af' }}>Organizer</span>;
+                    }}
+                  >
+                    <MenuItem value=""><em>None</em></MenuItem>
+                    {availableOrganizers.map(org => (
+                      <MenuItem key={org.id} value={org.id}>
+                        <Box sx={{ display: 'flex', flexDirection: 'column' }}>
+                          <span>{org.name}</span>
+                          {org.section && (
+                            <Typography variant="caption" color="text.secondary" sx={{ lineHeight: 1 }}>
+                              {org.section}
+                            </Typography>
+                          )}
+                        </Box>
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+                <Box sx={{ display: 'flex', justifyContent: 'flex-end' }}>
+                  {row.status === 'success' ? (
+                    <CheckCircleIcon fontSize="small" sx={{ color: 'success.main' }} />
+                  ) : row.status === 'error' ? (
+                    <Tooltip title={row.errorMsg || 'Failed'}>
+                      <ErrorIcon fontSize="small" sx={{ color: 'error.main', cursor: 'help' }} />
+                    </Tooltip>
+                  ) : (
+                    <IconButton
+                      size="small"
+                      onClick={() => removeRow(row.id)}
+                      disabled={rows.length === 1 || saving}
+                      sx={{ color: '#9ca3af', '&:hover': { color: 'error.main' } }}
+                    >
+                      <DeleteIcon fontSize="small" />
+                    </IconButton>
+                  )}
+                </Box>
               </Box>
 
               {showOptional && row.status !== 'success' && (
