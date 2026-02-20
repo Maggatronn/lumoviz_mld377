@@ -42,7 +42,7 @@ import {
 import { TERMS, BRANDING } from '../config/appConfig';
 
 // API and services
-import { fetchChapters, fetchOrgIds, fetchMeetings, fetchCurrentUserInfo, fetchContacts, fetchMeetingsByContacts, fetchLOECounts, fetchActions, fetchLeaderHierarchy, fetchLists, fetchOrganizerGoals, fetchCampaigns, createCampaign, updateCampaign, deleteCampaign, ActionDefinition, fetchAllContactOrganizers, addContactOrganizer, removeContactOrganizer } from '../services/api';
+import { fetchChapters, fetchOrgIds, fetchMeetings, fetchCurrentUserInfo, fetchContacts, fetchMeetingsByContacts, fetchLOECounts, fetchActions, fetchLeaderHierarchy, fetchLists, fetchOrganizerGoals, fetchCampaigns, createCampaign, updateCampaign, deleteCampaign, ActionDefinition, fetchAllContactOrganizers, addContactOrganizer, removeContactOrganizer, fetchSections, SectionLead } from '../services/api';
 import { teamsService } from '../services/teamsService';
 import { getOrganizerMappings, OrganizerMapping, getCanonicalOrganizerName, mergePeople } from '../services/organizerMappingService';
 import { API_BASE_URL } from '../config';
@@ -762,6 +762,7 @@ const MainAppContent: React.FC = () => {
   const [contactsData, setContactsData] = useState<any[]>([]);
   const [orgIds, setOrgIds] = useState<any[]>([]);
   const [userMap, setUserMap] = useState<Map<string, any>>(new Map());
+  const [sectionLeads, setSectionLeads] = useState<SectionLead[]>([]);
 
   // Build combined organizer options from contacts + team members (dedup by vanid AND name)
   const allOrganizerOptions = React.useMemo(() => {
@@ -1280,6 +1281,10 @@ const MainAppContent: React.FC = () => {
         // Fetch org data
         const orgData = await fetchOrgIds();
         setOrgIds(orgData || []);
+
+        // Fetch section leads
+        const sectionsData = await fetchSections();
+        setSectionLeads(sectionsData || []);
         
         // Build userMap from org data (includes all organizers)
         const newUserMap = new Map<string, any>();
@@ -2520,38 +2525,29 @@ const MainAppContent: React.FC = () => {
 
       // Find or create the section leader node (once per section)
       if (!sectionLeaderIdMap.has(sectionName)) {
-        const sectionLower = sectionName.toLowerCase();
-
-        // 1. Check orgIds
-        const leaderOrg = (orgIds as any[]).find((org: any) =>
-          (org.firstname || '').trim().toLowerCase() === sectionLower
+        // Look up the section lead from the DB-seeded sectionLeads
+        const sectionEntry = sectionLeads.find(
+          (s: SectionLead) => s.chapter_name?.toLowerCase() === sectionName.toLowerCase()
         );
 
-        // 2. Check existing network nodes (team members already in the graph)
-        const existingNode = !leaderOrg && filteredNodes.find((n: any) => {
-          const firstName = (n.name || '').split(' ')[0].toLowerCase();
-          return firstName === sectionLower;
-        });
+        let leaderId: string;
+        let leaderName: string;
 
-        // 3. Check all team member data
-        let teamMemberMatch: any = null;
-        if (!leaderOrg && !existingNode) {
-          for (const t of teamsData as any[]) {
-            const match = (t.organizers || []).find((m: any) => {
-              const firstName = (m.name || '').split(' ')[0].toLowerCase();
-              return firstName === sectionLower;
-            });
-            if (match) { teamMemberMatch = match; break; }
-          }
+        if (sectionEntry?.lead_vanid) {
+          leaderId = sectionEntry.lead_vanid;
+          leaderName = [sectionEntry.lead_firstname, sectionEntry.lead_lastname]
+            .filter(Boolean).join(' ') || sectionName;
+        } else {
+          // Fallback: try to find by first name in orgIds (legacy behavior)
+          const sectionLower = sectionName.toLowerCase();
+          const leaderOrg = (orgIds as any[]).find((org: any) =>
+            (org.firstname || '').trim().toLowerCase() === sectionLower
+          );
+          leaderId = leaderOrg?.vanid?.toString() || `section_leader_${sectionName}`;
+          leaderName = leaderOrg
+            ? `${(leaderOrg.firstname || '')} ${(leaderOrg.lastname || '')}`.trim()
+            : sectionName;
         }
-
-        const leaderId = leaderOrg?.vanid?.toString()
-          || (existingNode as any)?.id
-          || (teamMemberMatch?.id ? String(teamMemberMatch.id) : null)
-          || `section_leader_${sectionName}`;
-        const leaderName = leaderOrg
-          ? `${(leaderOrg.firstname || '')} ${(leaderOrg.lastname || '')}`.trim()
-          : (existingNode as any)?.name || teamMemberMatch?.name || sectionName;
 
         sectionLeaderIdMap.set(sectionName, leaderId);
 
@@ -2699,6 +2695,7 @@ const MainAppContent: React.FC = () => {
             organizerMappings={organizerMappings}
             onFilterByOrganizer={handleFilterByOrganizer}
             onEditOrganizerMapping={handleEditOrganizerMapping}
+            sectionLeads={sectionLeads}
           />
         </Box>
       </Box>
@@ -3382,6 +3379,7 @@ const MainAppContent: React.FC = () => {
           organizerMappings={organizerMappings}
           onFilterByOrganizer={handleFilterByOrganizer}
           onEditOrganizerMapping={handleEditOrganizerMapping}
+          sectionLeads={sectionLeads}
         />
       </Box>
 

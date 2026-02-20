@@ -131,6 +131,8 @@ interface DashboardProps {
   organizerMappings?: any[];
   onFilterByOrganizer?: (name: string, vanId?: string) => void;
   onEditOrganizerMapping?: (name: string, vanId?: string) => void;
+  // Section lead data
+  sectionLeads?: Array<{ chapter_name: string; lead_vanid: string | null; lead_firstname?: string | null; lead_lastname?: string | null }>;
 }
 
 // Action definitions interface
@@ -237,7 +239,8 @@ const Dashboard: React.FC<DashboardProps> = ({
   onOrganizerGoalsChange,
   organizerMappings = [],
   onFilterByOrganizer,
-  onEditOrganizerMapping
+  onEditOrganizerMapping,
+  sectionLeads = []
 }) => {
   const { updateChapterColor } = useChapterColors();
   
@@ -311,6 +314,7 @@ const Dashboard: React.FC<DashboardProps> = ({
 
   // State for managing turf
   const [turfList, setTurfList] = React.useState<TurfPerson[]>([]);
+  const [teamTurfList, setTeamTurfList] = React.useState<TurfPerson[]>([]);
   const [reloadTrigger, setReloadTrigger] = React.useState(0);
   const [showAddTurfDialog, setShowAddTurfDialog] = React.useState(false);
   const [selectedActionForAdd, setSelectedActionForAdd] = React.useState<string>(''); // Action to add people to
@@ -1456,14 +1460,28 @@ const Dashboard: React.FC<DashboardProps> = ({
   // Selected organizer's chapter
   const userChapter = selectedOrganizerInfo?.chapter || currentUserInfo?.chapter || 'Unknown';
 
-  // All teams in the organizer's section/chapter
+  // Sections this organizer leads (from lumoviz_sections table)
+  const ledSections = useMemo(() => {
+    if (!selectedOrganizerId || !sectionLeads) return [];
+    return sectionLeads.filter(s => s.lead_vanid === selectedOrganizerId);
+  }, [selectedOrganizerId, sectionLeads]);
+
+  // All teams in any section this organizer leads, or in their own chapter
   const sectionTeams = useMemo(() => {
-    if (!teamsData || !userChapter || userChapter === 'Unknown') return [];
-    return teamsData.filter(team =>
-      team.chapter?.toLowerCase() === userChapter.toLowerCase() ||
-      team.bigQueryData?.chapter?.toLowerCase() === userChapter.toLowerCase()
-    );
-  }, [teamsData, userChapter]);
+    if (!teamsData) return [];
+    const sectionNames = new Set<string>();
+    for (const s of ledSections) {
+      if (s.chapter_name) sectionNames.add(s.chapter_name.toLowerCase());
+    }
+    if (userChapter && userChapter !== 'Unknown') {
+      sectionNames.add(userChapter.toLowerCase());
+    }
+    if (sectionNames.size === 0) return [];
+    return teamsData.filter(team => {
+      const ch = (team.chapter || team.bigQueryData?.chapter || '').toLowerCase();
+      return sectionNames.has(ch);
+    });
+  }, [teamsData, ledSections, userChapter]);
 
   // Build the list of scope options for the dropdown
   const scopeOptions = useMemo(() => {
@@ -1493,15 +1511,18 @@ const Dashboard: React.FC<DashboardProps> = ({
     const allTeamIds = myTeamsData.map(t => t.id).concat(sectionTeams.map(t => t.id));
     const teamCount = new Set(allTeamIds).size;
     if (teamCount > 1) {
+      const sectionLabel = ledSections.length > 0
+        ? `${ledSections[0].chapter_name} Section`
+        : `${userChapter} Teams`;
       options.push({
         value: 'all',
-        label: `All ${userChapter} Teams`,
+        label: `All ${sectionLabel}`,
         type: 'all'
       });
     }
 
     return options;
-  }, [myTeamsData, sectionTeams, userChapter]);
+  }, [myTeamsData, sectionTeams, userChapter, ledSections]);
 
   // Compute the effective team member vanids based on selected scope
   const teamMemberVanIds = useMemo(() => {
@@ -1546,6 +1567,58 @@ const Dashboard: React.FC<DashboardProps> = ({
     if (opt) return opt.label;
     return 'Team';
   }, [teamScope, scopeOptions]);
+
+  // Which team cards to display in the "My Teams" section
+  const displayedTeams = useMemo(() => {
+    if (teamScope === 'me') return myTeamsData;
+    if (teamScope === 'all') {
+      const combined = [...myTeamsData];
+      for (const t of sectionTeams) {
+        if (!combined.some(c => c.id === t.id)) combined.push(t);
+      }
+      return combined;
+    }
+    if (teamScope.startsWith('team:')) {
+      const teamId = teamScope.replace('team:', '');
+      const match = myTeamsData.concat(sectionTeams).find(t => t.id === teamId);
+      return match ? [match] : myTeamsData;
+    }
+    return myTeamsData;
+  }, [teamScope, myTeamsData, sectionTeams]);
+
+  // Load list data for team members when team scope is active
+  React.useEffect(() => {
+    if (teamScope === 'me' || teamMemberVanIds.length === 0) {
+      setTeamTurfList([]);
+      return;
+    }
+
+    let cancelled = false;
+    const loadTeamLists = async () => {
+      try {
+        const results = await Promise.all(
+          teamMemberVanIds.map(vid => fetchLists(vid))
+        );
+        if (cancelled) return;
+        const combined: TurfPerson[] = results.flat().map((item: any) => ({
+          vanid: parseInt(item.vanid),
+          firstName: item.contact_name?.split(' ')[0] || '',
+          lastName: item.contact_name?.split(' ').slice(1).join(' ') || '',
+          desiredChange: item.desired_change || '',
+          action: item.action_id,
+          fields: item.progress || {},
+          datePledged: item.date_pledged,
+          list_id: item.list_id
+        }));
+        setTeamTurfList(combined);
+      } catch (error) {
+        if (!cancelled) setTeamTurfList([]);
+      }
+    };
+
+    loadTeamLists();
+    return () => { cancelled = true; };
+  }, [teamScope, teamMemberVanIds]);
 
   // Helper: Get ALL VAN IDs for the selected organizer (primary + alternates from mapping table)
   const getAllOrganizerVanIds = useMemo(() => {
@@ -2967,6 +3040,74 @@ const Dashboard: React.FC<DashboardProps> = ({
     });
   }, [turfList, userPledgeCount, availableActions, organizerGoals]);
 
+  // Team-aggregate action goals (mirrors individualActionGoals but uses teamTurfList)
+  const teamActionGoals = useMemo(() => {
+    if (!showTeamScope || teamTurfList.length === 0) return [];
+
+    const liveActions = availableActions.filter((a: any) => a.status === 'live');
+    const memberCount = teamMemberVanIds.length || 1;
+
+    const now = new Date();
+    const startOfDay = new Date(now); startOfDay.setHours(0, 0, 0, 0);
+    const startOfWeek = new Date(now); startOfWeek.setDate(now.getDate() - now.getDay()); startOfWeek.setHours(0, 0, 0, 0);
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const startOfQuarter = new Date(now.getFullYear(), Math.floor(now.getMonth() / 3) * 3, 1);
+    const startOfYear = new Date(now.getFullYear(), 0, 1);
+
+    return liveActions.map((action: any) => {
+      const goalFieldKey = action.goal_field_key || null;
+      const isRateBased = action.action_type === 'rate_based';
+      const recurrencePeriod = action.recurrence_period;
+
+      let completedCount = 0;
+      let periodLabel = '';
+      let periodSuffix = '';
+
+      const isFromCurrentPeriod = (entry: any) => {
+        if (!isRateBased) return true;
+        const entryDate = entry.updated_at ? new Date(entry.updated_at) : new Date(entry.date_added || entry.created_at || entry.datePledged);
+        switch (recurrencePeriod) {
+          case 'daily': periodLabel = 'today'; periodSuffix = '/day'; return entryDate >= startOfDay;
+          case 'weekly': periodLabel = 'this week'; periodSuffix = '/wk'; return entryDate >= startOfWeek;
+          case 'monthly': periodLabel = 'this month'; periodSuffix = '/mo'; return entryDate >= startOfMonth;
+          case 'quarterly': periodLabel = 'this quarter'; periodSuffix = '/qtr'; return entryDate >= startOfQuarter;
+          case 'annual': periodLabel = 'this year'; periodSuffix = '/yr'; return entryDate >= startOfYear;
+          default: return true;
+        }
+      };
+
+      let actionEntries = teamTurfList.filter((entry: any) => entry.action === action.action_id);
+      if (isRateBased) actionEntries = actionEntries.filter(isFromCurrentPeriod);
+
+      if (goalFieldKey) {
+        completedCount = actionEntries.filter((entry: any) => entry.fields && entry.fields[goalFieldKey] === true).length;
+      } else {
+        const lastField = action.fields?.[action.fields.length - 1];
+        if (lastField) {
+          completedCount = actionEntries.filter((entry: any) => entry.fields && entry.fields[lastField.key] === true).length;
+        }
+      }
+
+      const perPersonGoal = action.default_individual_goal || (isRateBased && action.recurrence_count ? action.recurrence_count : 5);
+      const goal = perPersonGoal * memberCount;
+      const percentage = goal > 0 ? (completedCount / goal) * 100 : 0;
+
+      return {
+        actionId: action.action_id,
+        actionName: action.action_name,
+        current: completedCount,
+        goal,
+        percentage: Math.min(percentage, 100),
+        hasMetGoal: completedCount >= goal,
+        hasGoal: action.has_goal !== false,
+        targetAudience: action.target_audience || 'constituent',
+        isRateBased,
+        periodLabel,
+        periodSuffix
+      };
+    });
+  }, [showTeamScope, teamTurfList, availableActions, teamMemberVanIds]);
+
   // Calculate conversion metrics for each action
   const conversionMetrics = useMemo(() => {
     return ACTIONS.map(action => {
@@ -3412,6 +3553,68 @@ const Dashboard: React.FC<DashboardProps> = ({
             </CardContent>
           </Card>
           
+          {/* Card 1b: Team Goals (only when a team scope is active) */}
+          {showTeamScope && teamActionGoals.length > 0 && (
+            <Card elevation={1} sx={{ flex: '1 1 250px', minWidth: '200px' }}>
+              <CardContent sx={{ p: 0.75, '&:last-child': { pb: 0.75 } }}>
+                <Typography variant="caption" sx={{ fontWeight: 600, color: '#7b1fa2', textTransform: 'uppercase', letterSpacing: 0.3, fontSize: '0.7rem', display: 'block', mb: 0.5 }}>
+                  {scopeLabel} Goals
+                </Typography>
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5, maxHeight: '200px', overflow: 'auto' }}>
+                  {teamActionGoals.map(actionGoal => (
+                    <Box key={actionGoal.actionId}>
+                      {actionGoal.hasGoal ? (
+                        <>
+                          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 0.25 }}>
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                              <GroupsIcon sx={{ fontSize: 10, color: '#7b1fa2' }} />
+                              <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.6rem' }}>
+                                {actionGoal.actionName}
+                                {actionGoal.isRateBased && actionGoal.periodLabel && (
+                                  <span style={{ color: '#7b1fa2', fontStyle: 'italic' }}> ({actionGoal.periodLabel})</span>
+                                )}
+                              </Typography>
+                            </Box>
+                            <Typography variant="caption" sx={{ fontWeight: 600, fontSize: '0.6rem' }}>
+                              {actionGoal.current} / {actionGoal.goal}
+                              {actionGoal.isRateBased && actionGoal.periodSuffix && (
+                                <span style={{ color: '#7b1fa2' }}>{actionGoal.periodSuffix}</span>
+                              )}
+                            </Typography>
+                          </Box>
+                          <LinearProgress
+                            variant="determinate"
+                            value={actionGoal.percentage}
+                            sx={{
+                              height: 6,
+                              borderRadius: 1,
+                              backgroundColor: '#e0e0e0',
+                              '& .MuiLinearProgress-bar': {
+                                backgroundColor: actionGoal.hasMetGoal ? '#4caf50' : '#7b1fa2'
+                              }
+                            }}
+                          />
+                        </>
+                      ) : (
+                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                            <GroupsIcon sx={{ fontSize: 10, color: '#7b1fa2' }} />
+                            <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.6rem' }}>
+                              {actionGoal.actionName}
+                            </Typography>
+                          </Box>
+                          <Typography variant="caption" sx={{ fontWeight: 600, fontSize: '0.6rem' }}>
+                            {actionGoal.current} {actionGoal.current === 1 ? 'item' : 'items'}
+                          </Typography>
+                        </Box>
+                      )}
+                    </Box>
+                  ))}
+                </Box>
+              </CardContent>
+            </Card>
+          )}
+
           {/* Card 2: My Leaders (only show if there are leaders) */}
           {myLeaders.length > 0 && (() => {
             // Calculate leader metrics
@@ -3442,7 +3645,7 @@ const Dashboard: React.FC<DashboardProps> = ({
               <Card elevation={1} sx={{ flex: '1 1 250px', minWidth: '200px' }}>
                 <CardContent sx={{ p: 0.75, '&:last-child': { pb: 0.75 } }}>
                   <Typography variant="caption" sx={{ fontWeight: 600, color: '#1976d2', textTransform: 'uppercase', letterSpacing: 0.3, fontSize: '0.7rem', display: 'block', mb: 0.5 }}>
-                    My Leaders
+                    {scopeLabel} Leaders
                   </Typography>
                   
                   {/* Leaders at Goal Summary */}
@@ -3581,11 +3784,11 @@ const Dashboard: React.FC<DashboardProps> = ({
         </Box>
 
         {/* My Teams Section */}
-        {myTeamsData.length > 0 && (
+        {displayedTeams.length > 0 && (
           <Box sx={{ mb: 2 }}>
             <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1 }}>
               <Typography variant="subtitle2" sx={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                <GroupsIcon sx={{ fontSize: 18 }} /> My Teams
+                <GroupsIcon sx={{ fontSize: 18 }} /> {scopeLabel === 'My' ? 'My Teams' : `${scopeLabel}`}
               </Typography>
               <Button
                 size="small"
@@ -3597,7 +3800,7 @@ const Dashboard: React.FC<DashboardProps> = ({
               </Button>
             </Box>
             <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 1.5 }}>
-              {myTeamsData.map((team: any) => {
+              {displayedTeams.map((team: any) => {
                 const isLead = team.lead && selectedOrganizerId &&
                   (String(team.lead.id) === String(selectedOrganizerId));
                 const members = team.organizers || [];
