@@ -1240,6 +1240,44 @@ app.get('/api/chapters', async (req, res) => {
   }
 });
 
+// Get section leads
+app.get('/api/sections', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT s.chapter_name, s.lead_vanid,
+             c.first_name AS lead_firstname,
+             c.last_name AS lead_lastname,
+             c.chapter AS lead_chapter
+      FROM lumoviz_sections s
+      LEFT JOIN contacts c ON CAST(c.vanid AS TEXT) = s.lead_vanid
+      ORDER BY s.chapter_name
+    `);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching sections:', error);
+    res.status(500).json({ error: 'Failed to fetch sections' });
+  }
+});
+
+// Update section lead
+app.put('/api/sections/:chapterName', async (req, res) => {
+  try {
+    const { chapterName } = req.params;
+    const { lead_vanid } = req.body;
+    const result = await pool.query(`
+      INSERT INTO lumoviz_sections (chapter_name, lead_vanid, updated_at)
+      VALUES ($1, $2, CURRENT_TIMESTAMP)
+      ON CONFLICT (chapter_name)
+      DO UPDATE SET lead_vanid = $2, updated_at = CURRENT_TIMESTAMP
+      RETURNING *
+    `, [chapterName, lead_vanid]);
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error updating section lead:', error);
+    res.status(500).json({ error: 'Failed to update section lead' });
+  }
+});
+
 // Get contacts from contacts table with pagination, filtering, sorting
 // PostgreSQL version
 app.get('/api/contacts', async (req, res) => {
@@ -5418,5 +5456,61 @@ app.listen(port, '0.0.0.0', async () => {
     console.log('✅ contacts table consolidation complete (type + primary_organizer_vanid columns)');
   } catch (e) {
     console.warn('contacts consolidation migration note:', e.message);
+  }
+
+  // === Create and seed lumoviz_sections table ===
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS lumoviz_sections (
+        chapter_name VARCHAR(255) PRIMARY KEY,
+        lead_vanid VARCHAR(255),
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    const existing = await pool.query(`SELECT COUNT(*) AS cnt FROM lumoviz_sections`);
+    if (parseInt(existing.rows[0].cnt) === 0) {
+      const sections = ['Alyssa', 'Ruhee', 'Edgar', 'Zoe', 'Svitlana', 'Sepi', 'Teaching'];
+      for (const section of sections) {
+        let leadVanid = null;
+        if (section === 'Teaching') {
+          leadVanid = '100001';
+        } else {
+          const match = await pool.query(
+            `SELECT vanid FROM contacts
+             WHERE LOWER(TRIM(first_name)) = LOWER($1)
+               AND type = 'organizer'
+             LIMIT 1`,
+            [section]
+          );
+          if (match.rows.length > 0) {
+            leadVanid = match.rows[0].vanid?.toString();
+          } else {
+            const fallback = await pool.query(
+              `SELECT vanid FROM contacts
+               WHERE LOWER(TRIM(first_name)) = LOWER($1)
+               LIMIT 1`,
+              [section]
+            );
+            if (fallback.rows.length > 0) {
+              leadVanid = fallback.rows[0].vanid?.toString();
+            }
+          }
+        }
+        await pool.query(
+          `INSERT INTO lumoviz_sections (chapter_name, lead_vanid)
+           VALUES ($1, $2)
+           ON CONFLICT (chapter_name) DO NOTHING`,
+          [section, leadVanid]
+        );
+        console.log(`  Section "${section}" -> lead vanid: ${leadVanid || '(not found)'}`);
+      }
+      console.log('✅ lumoviz_sections table seeded');
+    } else {
+      console.log('✅ lumoviz_sections table already populated');
+    }
+  } catch (e) {
+    console.warn('lumoviz_sections migration note:', e.message);
   }
 });

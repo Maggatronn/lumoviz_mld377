@@ -131,6 +131,8 @@ interface DashboardProps {
   organizerMappings?: any[];
   onFilterByOrganizer?: (name: string, vanId?: string) => void;
   onEditOrganizerMapping?: (name: string, vanId?: string) => void;
+  // Section lead data
+  sectionLeads?: Array<{ chapter_name: string; lead_vanid: string | null; lead_firstname?: string | null; lead_lastname?: string | null }>;
 }
 
 // Action definitions interface
@@ -237,7 +239,8 @@ const Dashboard: React.FC<DashboardProps> = ({
   onOrganizerGoalsChange,
   organizerMappings = [],
   onFilterByOrganizer,
-  onEditOrganizerMapping
+  onEditOrganizerMapping,
+  sectionLeads = []
 }) => {
   const { updateChapterColor } = useChapterColors();
   
@@ -1456,14 +1459,28 @@ const Dashboard: React.FC<DashboardProps> = ({
   // Selected organizer's chapter
   const userChapter = selectedOrganizerInfo?.chapter || currentUserInfo?.chapter || 'Unknown';
 
-  // All teams in the organizer's section/chapter
+  // Sections this organizer leads (from lumoviz_sections table)
+  const ledSections = useMemo(() => {
+    if (!selectedOrganizerId || !sectionLeads) return [];
+    return sectionLeads.filter(s => s.lead_vanid === selectedOrganizerId);
+  }, [selectedOrganizerId, sectionLeads]);
+
+  // All teams in any section this organizer leads, or in their own chapter
   const sectionTeams = useMemo(() => {
-    if (!teamsData || !userChapter || userChapter === 'Unknown') return [];
-    return teamsData.filter(team =>
-      team.chapter?.toLowerCase() === userChapter.toLowerCase() ||
-      team.bigQueryData?.chapter?.toLowerCase() === userChapter.toLowerCase()
-    );
-  }, [teamsData, userChapter]);
+    if (!teamsData) return [];
+    const sectionNames = new Set<string>();
+    for (const s of ledSections) {
+      if (s.chapter_name) sectionNames.add(s.chapter_name.toLowerCase());
+    }
+    if (userChapter && userChapter !== 'Unknown') {
+      sectionNames.add(userChapter.toLowerCase());
+    }
+    if (sectionNames.size === 0) return [];
+    return teamsData.filter(team => {
+      const ch = (team.chapter || team.bigQueryData?.chapter || '').toLowerCase();
+      return sectionNames.has(ch);
+    });
+  }, [teamsData, ledSections, userChapter]);
 
   // Build the list of scope options for the dropdown
   const scopeOptions = useMemo(() => {
@@ -1493,15 +1510,18 @@ const Dashboard: React.FC<DashboardProps> = ({
     const allTeamIds = myTeamsData.map(t => t.id).concat(sectionTeams.map(t => t.id));
     const teamCount = new Set(allTeamIds).size;
     if (teamCount > 1) {
+      const sectionLabel = ledSections.length > 0
+        ? `${ledSections[0].chapter_name} Section`
+        : `${userChapter} Teams`;
       options.push({
         value: 'all',
-        label: `All ${userChapter} Teams`,
+        label: `All ${sectionLabel}`,
         type: 'all'
       });
     }
 
     return options;
-  }, [myTeamsData, sectionTeams, userChapter]);
+  }, [myTeamsData, sectionTeams, userChapter, ledSections]);
 
   // Compute the effective team member vanids based on selected scope
   const teamMemberVanIds = useMemo(() => {
@@ -1546,6 +1566,24 @@ const Dashboard: React.FC<DashboardProps> = ({
     if (opt) return opt.label;
     return 'Team';
   }, [teamScope, scopeOptions]);
+
+  // Which team cards to display in the "My Teams" section
+  const displayedTeams = useMemo(() => {
+    if (teamScope === 'me') return myTeamsData;
+    if (teamScope === 'all') {
+      const combined = [...myTeamsData];
+      for (const t of sectionTeams) {
+        if (!combined.some(c => c.id === t.id)) combined.push(t);
+      }
+      return combined;
+    }
+    if (teamScope.startsWith('team:')) {
+      const teamId = teamScope.replace('team:', '');
+      const match = myTeamsData.concat(sectionTeams).find(t => t.id === teamId);
+      return match ? [match] : myTeamsData;
+    }
+    return myTeamsData;
+  }, [teamScope, myTeamsData, sectionTeams]);
 
   // Helper: Get ALL VAN IDs for the selected organizer (primary + alternates from mapping table)
   const getAllOrganizerVanIds = useMemo(() => {
@@ -3581,11 +3619,11 @@ const Dashboard: React.FC<DashboardProps> = ({
         </Box>
 
         {/* My Teams Section */}
-        {myTeamsData.length > 0 && (
+        {displayedTeams.length > 0 && (
           <Box sx={{ mb: 2 }}>
             <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1 }}>
               <Typography variant="subtitle2" sx={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                <GroupsIcon sx={{ fontSize: 18 }} /> My Teams
+                <GroupsIcon sx={{ fontSize: 18 }} /> {scopeLabel === 'My' ? 'My Teams' : `${scopeLabel}`}
               </Typography>
               <Button
                 size="small"
@@ -3597,7 +3635,7 @@ const Dashboard: React.FC<DashboardProps> = ({
               </Button>
             </Box>
             <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 1.5 }}>
-              {myTeamsData.map((team: any) => {
+              {displayedTeams.map((team: any) => {
                 const isLead = team.lead && selectedOrganizerId &&
                   (String(team.lead.id) === String(selectedOrganizerId));
                 const members = team.organizers || [];

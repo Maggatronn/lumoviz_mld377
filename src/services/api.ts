@@ -127,6 +127,27 @@ export const fetchChapters = async (): Promise<string[]> => {
   }
 };
 
+export interface SectionLead {
+  chapter_name: string;
+  lead_vanid: string | null;
+  lead_firstname: string | null;
+  lead_lastname: string | null;
+  lead_chapter: string | null;
+}
+
+export const fetchSections = async (): Promise<SectionLead[]> => {
+  try {
+    const response = await fetch(`${API_URL}/sections`);
+    if (!response.ok) {
+      throw new Error(`Failed to fetch sections: ${response.statusText}`);
+    }
+    return await response.json();
+  } catch (error) {
+    console.error('Error fetching sections:', error);
+    return [];
+  }
+};
+
 export interface ContactsParams {
   chapter?: string;
   member_status?: string | string[];
