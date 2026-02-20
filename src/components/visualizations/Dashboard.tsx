@@ -314,6 +314,7 @@ const Dashboard: React.FC<DashboardProps> = ({
 
   // State for managing turf
   const [turfList, setTurfList] = React.useState<TurfPerson[]>([]);
+  const [teamTurfList, setTeamTurfList] = React.useState<TurfPerson[]>([]);
   const [reloadTrigger, setReloadTrigger] = React.useState(0);
   const [showAddTurfDialog, setShowAddTurfDialog] = React.useState(false);
   const [selectedActionForAdd, setSelectedActionForAdd] = React.useState<string>(''); // Action to add people to
@@ -1584,6 +1585,40 @@ const Dashboard: React.FC<DashboardProps> = ({
     }
     return myTeamsData;
   }, [teamScope, myTeamsData, sectionTeams]);
+
+  // Load list data for team members when team scope is active
+  React.useEffect(() => {
+    if (teamScope === 'me' || teamMemberVanIds.length === 0) {
+      setTeamTurfList([]);
+      return;
+    }
+
+    let cancelled = false;
+    const loadTeamLists = async () => {
+      try {
+        const results = await Promise.all(
+          teamMemberVanIds.map(vid => fetchLists(vid))
+        );
+        if (cancelled) return;
+        const combined: TurfPerson[] = results.flat().map((item: any) => ({
+          vanid: parseInt(item.vanid),
+          firstName: item.contact_name?.split(' ')[0] || '',
+          lastName: item.contact_name?.split(' ').slice(1).join(' ') || '',
+          desiredChange: item.desired_change || '',
+          action: item.action_id,
+          fields: item.progress || {},
+          datePledged: item.date_pledged,
+          list_id: item.list_id
+        }));
+        setTeamTurfList(combined);
+      } catch (error) {
+        if (!cancelled) setTeamTurfList([]);
+      }
+    };
+
+    loadTeamLists();
+    return () => { cancelled = true; };
+  }, [teamScope, teamMemberVanIds]);
 
   // Helper: Get ALL VAN IDs for the selected organizer (primary + alternates from mapping table)
   const getAllOrganizerVanIds = useMemo(() => {
@@ -3005,6 +3040,74 @@ const Dashboard: React.FC<DashboardProps> = ({
     });
   }, [turfList, userPledgeCount, availableActions, organizerGoals]);
 
+  // Team-aggregate action goals (mirrors individualActionGoals but uses teamTurfList)
+  const teamActionGoals = useMemo(() => {
+    if (!showTeamScope || teamTurfList.length === 0) return [];
+
+    const liveActions = availableActions.filter((a: any) => a.status === 'live');
+    const memberCount = teamMemberVanIds.length || 1;
+
+    const now = new Date();
+    const startOfDay = new Date(now); startOfDay.setHours(0, 0, 0, 0);
+    const startOfWeek = new Date(now); startOfWeek.setDate(now.getDate() - now.getDay()); startOfWeek.setHours(0, 0, 0, 0);
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const startOfQuarter = new Date(now.getFullYear(), Math.floor(now.getMonth() / 3) * 3, 1);
+    const startOfYear = new Date(now.getFullYear(), 0, 1);
+
+    return liveActions.map((action: any) => {
+      const goalFieldKey = action.goal_field_key || null;
+      const isRateBased = action.action_type === 'rate_based';
+      const recurrencePeriod = action.recurrence_period;
+
+      let completedCount = 0;
+      let periodLabel = '';
+      let periodSuffix = '';
+
+      const isFromCurrentPeriod = (entry: any) => {
+        if (!isRateBased) return true;
+        const entryDate = entry.updated_at ? new Date(entry.updated_at) : new Date(entry.date_added || entry.created_at || entry.datePledged);
+        switch (recurrencePeriod) {
+          case 'daily': periodLabel = 'today'; periodSuffix = '/day'; return entryDate >= startOfDay;
+          case 'weekly': periodLabel = 'this week'; periodSuffix = '/wk'; return entryDate >= startOfWeek;
+          case 'monthly': periodLabel = 'this month'; periodSuffix = '/mo'; return entryDate >= startOfMonth;
+          case 'quarterly': periodLabel = 'this quarter'; periodSuffix = '/qtr'; return entryDate >= startOfQuarter;
+          case 'annual': periodLabel = 'this year'; periodSuffix = '/yr'; return entryDate >= startOfYear;
+          default: return true;
+        }
+      };
+
+      let actionEntries = teamTurfList.filter((entry: any) => entry.action === action.action_id);
+      if (isRateBased) actionEntries = actionEntries.filter(isFromCurrentPeriod);
+
+      if (goalFieldKey) {
+        completedCount = actionEntries.filter((entry: any) => entry.fields && entry.fields[goalFieldKey] === true).length;
+      } else {
+        const lastField = action.fields?.[action.fields.length - 1];
+        if (lastField) {
+          completedCount = actionEntries.filter((entry: any) => entry.fields && entry.fields[lastField.key] === true).length;
+        }
+      }
+
+      const perPersonGoal = action.default_individual_goal || (isRateBased && action.recurrence_count ? action.recurrence_count : 5);
+      const goal = perPersonGoal * memberCount;
+      const percentage = goal > 0 ? (completedCount / goal) * 100 : 0;
+
+      return {
+        actionId: action.action_id,
+        actionName: action.action_name,
+        current: completedCount,
+        goal,
+        percentage: Math.min(percentage, 100),
+        hasMetGoal: completedCount >= goal,
+        hasGoal: action.has_goal !== false,
+        targetAudience: action.target_audience || 'constituent',
+        isRateBased,
+        periodLabel,
+        periodSuffix
+      };
+    });
+  }, [showTeamScope, teamTurfList, availableActions, teamMemberVanIds]);
+
   // Calculate conversion metrics for each action
   const conversionMetrics = useMemo(() => {
     return ACTIONS.map(action => {
@@ -3450,6 +3553,68 @@ const Dashboard: React.FC<DashboardProps> = ({
             </CardContent>
           </Card>
           
+          {/* Card 1b: Team Goals (only when a team scope is active) */}
+          {showTeamScope && teamActionGoals.length > 0 && (
+            <Card elevation={1} sx={{ flex: '1 1 250px', minWidth: '200px' }}>
+              <CardContent sx={{ p: 0.75, '&:last-child': { pb: 0.75 } }}>
+                <Typography variant="caption" sx={{ fontWeight: 600, color: '#7b1fa2', textTransform: 'uppercase', letterSpacing: 0.3, fontSize: '0.7rem', display: 'block', mb: 0.5 }}>
+                  {scopeLabel} Goals
+                </Typography>
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5, maxHeight: '200px', overflow: 'auto' }}>
+                  {teamActionGoals.map(actionGoal => (
+                    <Box key={actionGoal.actionId}>
+                      {actionGoal.hasGoal ? (
+                        <>
+                          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 0.25 }}>
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                              <GroupsIcon sx={{ fontSize: 10, color: '#7b1fa2' }} />
+                              <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.6rem' }}>
+                                {actionGoal.actionName}
+                                {actionGoal.isRateBased && actionGoal.periodLabel && (
+                                  <span style={{ color: '#7b1fa2', fontStyle: 'italic' }}> ({actionGoal.periodLabel})</span>
+                                )}
+                              </Typography>
+                            </Box>
+                            <Typography variant="caption" sx={{ fontWeight: 600, fontSize: '0.6rem' }}>
+                              {actionGoal.current} / {actionGoal.goal}
+                              {actionGoal.isRateBased && actionGoal.periodSuffix && (
+                                <span style={{ color: '#7b1fa2' }}>{actionGoal.periodSuffix}</span>
+                              )}
+                            </Typography>
+                          </Box>
+                          <LinearProgress
+                            variant="determinate"
+                            value={actionGoal.percentage}
+                            sx={{
+                              height: 6,
+                              borderRadius: 1,
+                              backgroundColor: '#e0e0e0',
+                              '& .MuiLinearProgress-bar': {
+                                backgroundColor: actionGoal.hasMetGoal ? '#4caf50' : '#7b1fa2'
+                              }
+                            }}
+                          />
+                        </>
+                      ) : (
+                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                            <GroupsIcon sx={{ fontSize: 10, color: '#7b1fa2' }} />
+                            <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.6rem' }}>
+                              {actionGoal.actionName}
+                            </Typography>
+                          </Box>
+                          <Typography variant="caption" sx={{ fontWeight: 600, fontSize: '0.6rem' }}>
+                            {actionGoal.current} {actionGoal.current === 1 ? 'item' : 'items'}
+                          </Typography>
+                        </Box>
+                      )}
+                    </Box>
+                  ))}
+                </Box>
+              </CardContent>
+            </Card>
+          )}
+
           {/* Card 2: My Leaders (only show if there are leaders) */}
           {myLeaders.length > 0 && (() => {
             // Calculate leader metrics
@@ -3480,7 +3645,7 @@ const Dashboard: React.FC<DashboardProps> = ({
               <Card elevation={1} sx={{ flex: '1 1 250px', minWidth: '200px' }}>
                 <CardContent sx={{ p: 0.75, '&:last-child': { pb: 0.75 } }}>
                   <Typography variant="caption" sx={{ fontWeight: 600, color: '#1976d2', textTransform: 'uppercase', letterSpacing: 0.3, fontSize: '0.7rem', display: 'block', mb: 0.5 }}>
-                    My Leaders
+                    {scopeLabel} Leaders
                   </Typography>
                   
                   {/* Leaders at Goal Summary */}
