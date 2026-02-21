@@ -896,7 +896,7 @@ const CampaignActionDialog: React.FC<CampaignActionDialogProps> = ({
                 Goal Tracking Field (Optional)
               </Typography>
               <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1 }}>
-                Choose which checkbox field represents "completion" for goal tracking
+                Choose which field represents "completion" for goal tracking
               </Typography>
               <FormControl fullWidth>
                 <InputLabel>Goal Field</InputLabel>
@@ -908,14 +908,17 @@ const CampaignActionDialog: React.FC<CampaignActionDialogProps> = ({
                   <MenuItem value="">
                     <em>Count all people added (Named — no field filter)</em>
                   </MenuItem>
-                  {fields.filter(f => f.type === 'boolean').map(field => (
+                  {fields.filter(f => f.key && f.label).map(field => (
                     <MenuItem key={field.key} value={field.key}>
                       {field.label}
+                      <Typography variant="caption" color="text.secondary" sx={{ ml: 1 }}>
+                        {field.type === 'boolean' ? '(checked)' : field.type === 'select' ? '(option selected)' : '(filled in)'}
+                      </Typography>
                     </MenuItem>
                   ))}
                 </Select>
                 <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
-                  When you set a goal (e.g., 10), progress will track how many people have this field completed
+                  Checkbox fields count when checked. Text/note fields count when filled in. Select fields count when an option is chosen.
                 </Typography>
               </FormControl>
             </>
