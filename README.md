@@ -15,7 +15,7 @@ A React + Node.js application for visualizing and managing organizing networks, 
 
 #### Start Cloud SQL Proxy (in a separate terminal)
 ```bash
-cloud-sql-proxy mld-377:us-central1:lumoviz-db --port 5432
+cloud-sql-proxy lumoviz-production:us-central1:lumoviz-db --port 5433
 ```
 
 Keep this running while you work.
