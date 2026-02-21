@@ -31,7 +31,7 @@ npm install
 # Set up environment variables
 # Create server/.env with:
 DB_HOST=localhost
-DB_PORT=5432
+DB_PORT=5433
 DB_NAME=lumoviz
 DB_USER=lumoviz_app
 DB_PASSWORD="your-password-here"
@@ -109,7 +109,7 @@ lumoviz/
 ### Database Connection
 
 The app connects to Cloud SQL via:
-1. **Local Development**: Cloud SQL Proxy → localhost:5432
+1. **Local Development**: Cloud SQL Proxy → localhost:5433
 2. **Production**: Direct Cloud SQL connection (Cloud Run)
 
 Connection config is in `server/db.js` using the `pg` package.
@@ -174,7 +174,7 @@ PostgreSQL (Cloud SQL)
 1. Write SQL migration in `postgres-schema/`
 2. Apply via Cloud SQL Proxy:
    ```bash
-   psql "host=localhost port=5432 dbname=lumoviz user=lumoviz_app" -f postgres-schema/my-migration.sql
+   psql "host=localhost port=5433 dbname=lumoviz user=lumoviz_app" -f postgres-schema/my-migration.sql
    ```
 
 ### Change Branding/Terminology
@@ -231,7 +231,7 @@ lsof -ti:3003 | xargs kill -9
 #### Backend (`server/.env`)
 ```env
 DB_HOST=localhost
-DB_PORT=5432
+DB_PORT=5433
 DB_NAME=lumoviz
 DB_USER=lumoviz_app
 DB_PASSWORD="your-password-here"
@@ -323,6 +323,6 @@ If you encounter issues:
 1. Check server logs (terminal running `node index.js`)
 2. Check browser console (F12 → Console tab)
 3. Verify Cloud SQL Proxy is running
-4. Check database with: `psql "host=localhost port=5432 dbname=lumoviz user=lumoviz_app"`
+4. Check database with: `psql "host=localhost port=5433 dbname=lumoviz user=lumoviz_app"`
 
 **Last Updated**: February 2026
