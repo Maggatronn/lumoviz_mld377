@@ -326,6 +326,8 @@ const Dashboard: React.FC<DashboardProps> = ({
   const [showLogConversationDialog, setShowLogConversationDialog] = React.useState(false);
   const [showBatchAddDialog, setShowBatchAddDialog] = React.useState(false);
   const [teamScope, setTeamScope] = React.useState<string>('me');
+  const [showCelebrationPenguin, setShowCelebrationPenguin] = React.useState(false);
+  const celebrationTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const [editingConversation, setEditingConversation] = React.useState<EditableConversation | null>(null);
   const [selectedPersonForEdit, setSelectedPersonForEdit] = React.useState<any>(null);
   const [selectedPersonForConversation, setSelectedPersonForConversation] = React.useState<any>(null);
@@ -345,11 +347,7 @@ const Dashboard: React.FC<DashboardProps> = ({
   const [listStatusFilter, setListStatusFilter] = React.useState<'all' | 'complete' | 'in_progress'>('all'); // Filter for My Lists by status
   const [listAudienceFilter, setListAudienceFilter] = React.useState<'constituent' | 'leadership'>('constituent'); // Filter for My Lists by target audience
   
-  // Get organizer from URL or default to Courtney
-  const getOrganizerFromURL = () => {
-    const params = new URLSearchParams(window.location.search);
-    return params.get('organizer') || '';
-  };
+  const getOrganizerFromURL = () => '';
 
   // Dynamically build organizer list from userMap + teamsData
   const dashboardOrganizers = React.useMemo(() => {
@@ -2086,6 +2084,13 @@ const Dashboard: React.FC<DashboardProps> = ({
     
     const newValue = !person.fields[fieldKey];
     
+    // Celebration penguin on task completion
+    if (newValue) {
+      if (celebrationTimerRef.current) clearTimeout(celebrationTimerRef.current);
+      setShowCelebrationPenguin(true);
+      celebrationTimerRef.current = setTimeout(() => setShowCelebrationPenguin(false), 2200);
+    }
+
     // Optimistic update
     setTurfList(prev => prev.map(p => 
       p.vanid === vanid && p.action === action
@@ -3263,24 +3268,11 @@ const Dashboard: React.FC<DashboardProps> = ({
                   const newOrganizerId = e.target.value;
                   setSelectedOrganizerId(newOrganizerId);
                   
-                  // Cache in localStorage
                   if (newOrganizerId) {
                     localStorage.setItem('dashboard_selected_organizer', newOrganizerId);
                   } else {
                     localStorage.removeItem('dashboard_selected_organizer');
                   }
-                  
-                  // Update URL with organizer name only
-                  const params = new URLSearchParams(window.location.search);
-                  if (newOrganizerId) {
-                    const selectedOrg = dashboardOrganizers.find(org => org.vanid === newOrganizerId);
-                    if (selectedOrg) {
-                      params.set('organizer', selectedOrg.name);
-                    }
-                  } else {
-                    params.delete('organizer');
-                  }
-                  window.history.pushState({}, '', `${window.location.pathname}?${params.toString()}`);
                 }}
                 displayEmpty
                 sx={{ 
@@ -3323,54 +3315,42 @@ const Dashboard: React.FC<DashboardProps> = ({
 
   return (
     <Box sx={{ p: 2, height: '100%', overflow: 'auto', bgcolor: '#fafafa' }}>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-          <Typography variant="h5" sx={{ fontWeight: 600, color: '#1976d2' }}>
-            {selectedOrganizerInfo?.firstname || currentUserInfo?.firstname 
-              ? `${selectedOrganizerInfo?.firstname || currentUserInfo?.firstname} View`
-              : 'Dashboard'}
-          </Typography>
-          
+      {/* Header */}
+      <Box sx={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', justifyContent: 'space-between', alignItems: isMobile ? 'stretch' : 'center', gap: 1, mb: 2 }}>
+        <Typography variant="h5" sx={{ fontWeight: 600, color: '#1976d2', fontSize: isMobile ? '1.25rem' : '1.5rem' }}>
+          {selectedOrganizerInfo?.firstname || currentUserInfo?.firstname 
+            ? `${selectedOrganizerInfo?.firstname || currentUserInfo?.firstname}'s View`
+            : 'Dashboard'}
+        </Typography>
+        
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
           {/* Organizer Selector - only visible for teaching team / section leads */}
           {isTeachingTeamOrSectionLead && (
-            <FormControl size="small" sx={{ minWidth: 200 }}>
+            <FormControl size="small" sx={{ minWidth: isMobile ? '100%' : 180, flex: isMobile ? 1 : 'none' }}>
               <Select
                 value={selectedOrganizerId}
                 onChange={(e) => {
                   const newOrganizerId = e.target.value;
                   setSelectedOrganizerId(newOrganizerId);
                   setTeamScope('me');
-                  
-                  // Find the organizer name for URL
                   const selectedOrg = dashboardOrganizers.find(org => org.vanid === newOrganizerId);
-                  
-                  // Cache in localStorage
                   if (newOrganizerId) {
                     localStorage.setItem('dashboard_selected_organizer', newOrganizerId);
                   } else {
                     localStorage.removeItem('dashboard_selected_organizer');
                   }
-                  
-                  // Update URL with organizer name only
-                  const params = new URLSearchParams(window.location.search);
-                  if (newOrganizerId && selectedOrg) {
-                    params.set('organizer', selectedOrg.name);
-                  } else {
-                    params.delete('organizer');
-                  }
-                  window.history.pushState({}, '', `${window.location.pathname}?${params.toString()}`);
                 }}
                 displayEmpty
                 sx={{ 
-                  fontSize: '0.875rem',
-                  '& .MuiSelect-select': { py: 0.75 }
+                  fontSize: '0.8rem',
+                  '& .MuiSelect-select': { py: 0.5 }
                 }}
               >
-                <MenuItem value="" sx={{ fontSize: '0.875rem', fontStyle: 'italic', color: 'text.secondary' }}>
-                  Select an organizer to view dashboard
+                <MenuItem value="" sx={{ fontSize: '0.8rem', fontStyle: 'italic', color: 'text.secondary' }}>
+                  Select organizer...
                 </MenuItem>
                 {dashboardOrganizers.length > 0 && dashboardOrganizers.map(org => (
-                  <MenuItem key={org.vanid} value={org.vanid} sx={{ fontSize: '0.875rem' }}>
+                  <MenuItem key={org.vanid} value={org.vanid} sx={{ fontSize: '0.8rem' }}>
                     {org.name}
                   </MenuItem>
                 ))}
@@ -3379,7 +3359,7 @@ const Dashboard: React.FC<DashboardProps> = ({
           )}
 
           {scopeOptions.length > 1 && (
-            <FormControl size="small" sx={{ minWidth: 140 }}>
+            <FormControl size="small" sx={{ minWidth: isMobile ? (isTeachingTeamOrSectionLead ? '100%' : '50%') : 140 }}>
               <Select
                 value={teamScope}
                 onChange={(e) => setTeamScope(e.target.value)}
@@ -3410,6 +3390,15 @@ const Dashboard: React.FC<DashboardProps> = ({
               </Select>
             </FormControl>
           )}
+
+          <Button
+            size="small"
+            startIcon={<AddIcon />}
+            onClick={() => setShowAddTeamDialog(true)}
+            sx={{ fontSize: '0.75rem', textTransform: 'none', whiteSpace: 'nowrap' }}
+          >
+            Add Team
+          </Button>
         </Box>
       </Box>
 
@@ -3650,26 +3639,12 @@ const Dashboard: React.FC<DashboardProps> = ({
         {/* My Teams Section */}
         {displayedTeams.length > 0 && (
           <Box sx={{ mb: 2 }}>
-            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1 }}>
-              <Typography variant="subtitle2" sx={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                <GroupsIcon sx={{ fontSize: 18 }} /> {scopeLabel === 'My' ? 'My Teams' : `${scopeLabel}`}
-              </Typography>
-              <Button
-                size="small"
-                startIcon={<AddIcon />}
-                onClick={() => setShowAddTeamDialog(true)}
-                sx={{ fontSize: '0.75rem', textTransform: 'none' }}
-              >
-                Add Team
-              </Button>
-            </Box>
             <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 1.5 }}>
               {displayedTeams.map((team: any) => {
                 const isLead = team.lead && selectedOrganizerId &&
                   (String(team.lead.id) === String(selectedOrganizerId));
                 const members = team.organizers || [];
 
-                // Aggregate affirm/challenge counts from team members' conversations
                 const memberIds = new Set(members.map((m: any) => String(m.id)));
                 const teamMeetings = sharedCachedMeetings.filter((m: any) => {
                   const participantId = String(m.participant_vanid || m.vanid || '');
@@ -3715,7 +3690,6 @@ const Dashboard: React.FC<DashboardProps> = ({
                         </IconButton>
                       </Box>
 
-                      {/* Constituency / Turf */}
                       {team.constituency && (
                         <Box sx={{ mt: 0.75, p: 0.75, borderRadius: 1, bgcolor: '#f8f9fa', border: '1px solid #e9ecef' }}>
                           <Typography variant="caption" sx={{ fontWeight: 700, fontSize: '0.6rem', textTransform: 'uppercase', letterSpacing: 0.5, color: 'text.secondary', display: 'block', mb: 0.25 }}>
@@ -3737,7 +3711,6 @@ const Dashboard: React.FC<DashboardProps> = ({
                         </Box>
                       )}
 
-                      {/* Shared Purpose */}
                       {team.sharedPurpose && (
                         <Box sx={{ mt: 0.75, p: 0.75, borderRadius: 1, bgcolor: '#f8f9fa', border: '1px solid #e9ecef' }}>
                           <Typography variant="caption" sx={{ fontWeight: 700, fontSize: '0.6rem', textTransform: 'uppercase', letterSpacing: 0.5, color: 'text.secondary', display: 'block', mb: 0.25 }}>
@@ -3796,119 +3769,8 @@ const Dashboard: React.FC<DashboardProps> = ({
           <Box sx={{ flex: '1 1 450px', minWidth: '350px', display: 'flex' }}>
             <Card elevation={1} sx={{ width: '100%', display: 'flex', flexDirection: 'column', height: 'calc(100vh - 280px)', minHeight: '600px', pb: isMobile ? '60px' : 0 }}>
               <CardContent sx={{ py: 1, px: 1.5, flexGrow: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5, mb: 1 }}>
-                  {/* Header row with title and actions */}
-                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
-                      Your People
-                    </Typography>
-                    <Box sx={{ display: 'flex', gap: 1 }}>
-                      {turfTab === 'people' && (
-                        <IconButton
-                          size="small"
-                          onClick={() => setShowMyPeopleFilters(!showMyPeopleFilters)}
-                          sx={{ 
-                            color: showMyPeopleFilters || dashboardPeopleFilters.loeStatus.length > 0 || dashboardPeopleFilters.memberStatus.length > 0 || dashboardPeopleFilters.chapter || dashboardPeopleFilters.searchText || dashboardPeopleFilters.lastContactFilter !== 'all' || dashboardPeopleFilters.meetingCountFilter !== 'all' || dashboardPeopleFilters.actionStatus !== 'all'
-                              ? 'primary.main' 
-                              : 'text.secondary',
-                            position: 'relative'
-                          }}
-                        >
-                          <FilterListIcon fontSize="small" />
-                          {(dashboardPeopleFilters.loeStatus.length > 0 || dashboardPeopleFilters.memberStatus.length > 0 || dashboardPeopleFilters.chapter || dashboardPeopleFilters.searchText || dashboardPeopleFilters.lastContactFilter !== 'all' || dashboardPeopleFilters.meetingCountFilter !== 'all' || dashboardPeopleFilters.actionStatus !== 'all') && (
-                            <Box
-                              sx={{
-                                position: 'absolute',
-                                top: -4,
-                                right: -4,
-                                backgroundColor: 'primary.main',
-                                color: 'white',
-                                borderRadius: '50%',
-                                width: 16,
-                                height: 16,
-                                fontSize: '0.7rem',
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                fontWeight: 'bold'
-                              }}
-                            >
-                              {[
-                                dashboardPeopleFilters.chapter,
-                                dashboardPeopleFilters.searchText,
-                                dashboardPeopleFilters.loeStatus.length > 0,
-                                dashboardPeopleFilters.memberStatus.length > 0,
-                                dashboardPeopleFilters.lastContactFilter !== 'all',
-                                dashboardPeopleFilters.meetingCountFilter !== 'all',
-                                dashboardPeopleFilters.actionStatus !== 'all'
-                              ].filter(Boolean).length}
-                            </Box>
-                          )}
-                        </IconButton>
-                      )}
-                    </Box>
-                  </Box>
-
-                  {/* Filter Chips Row - directly under header for My People */}
-                  {turfTab === 'people' && (dashboardPeopleFilters.chapter || dashboardPeopleFilters.loeStatus.length > 0 || dashboardPeopleFilters.memberStatus.length > 0 || dashboardPeopleFilters.lastContactFilter !== 'all' || dashboardPeopleFilters.meetingCountFilter !== 'all' || dashboardPeopleFilters.actionStatus !== 'all') && (
-                    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, alignItems: 'center' }}>
-                      {dashboardPeopleFilters.chapter && (
-                        <Chip
-                          label={`Chapter: ${dashboardPeopleFilters.chapter}`}
-                          size="small"
-                          onDelete={() => setDashboardPeopleFilters((prev: any) => ({ ...prev, chapter: '' }))}
-                        />
-                      )}
-                      {dashboardPeopleFilters.loeStatus.map((status: string) => (
-                        <Chip
-                          key={`loe-${status}`}
-                          label={`LOE: ${status.replace(/^\d+[_.]/, '')}`}
-                          size="small"
-                          onDelete={() => setDashboardPeopleFilters((prev: any) => ({ 
-                            ...prev, 
-                            loeStatus: prev.loeStatus.filter((s: string) => s !== status) 
-                          }))}
-                        />
-                      ))}
-                      {dashboardPeopleFilters.memberStatus.map((status: string) => (
-                        <Chip
-                          key={`member-${status}`}
-                          label={`Member: ${status}`}
-                          size="small"
-                          onDelete={() => setDashboardPeopleFilters((prev: any) => ({ 
-                            ...prev, 
-                            memberStatus: prev.memberStatus.filter((s: string) => s !== status) 
-                          }))}
-                          color={status === 'Active' ? 'success' : status === 'Lapsed' ? 'warning' : 'default'}
-                        />
-                      ))}
-                      {dashboardPeopleFilters.lastContactFilter !== 'all' && (
-                        <Chip
-                          label={`Last Contact: ${dashboardPeopleFilters.lastContactFilter}`}
-                          size="small"
-                          onDelete={() => setDashboardPeopleFilters((prev: any) => ({ ...prev, lastContactFilter: 'all' }))}
-                        />
-                      )}
-                      {dashboardPeopleFilters.meetingCountFilter !== 'all' && (
-                        <Chip
-                          label={`Meetings: ${dashboardPeopleFilters.meetingCountFilter}`}
-                          size="small"
-                          onDelete={() => setDashboardPeopleFilters((prev: any) => ({ ...prev, meetingCountFilter: 'all' }))}
-                        />
-                      )}
-                      {dashboardPeopleFilters.actionStatus !== 'all' && (
-                        <Chip
-                          label={`Action: ${dashboardPeopleFilters.actionStatus}`}
-                          size="small"
-                          onDelete={() => setDashboardPeopleFilters((prev: any) => ({ ...prev, actionStatus: 'all' }))}
-                        />
-                      )}
-                    </Box>
-                  )}
-                </Box>
-
-                {/* Tabs row */}
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
+                {/* Tabs + action buttons row */}
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: 0.5 }}>
                   <Tabs 
                     value={turfTab} 
                     onChange={(_, newValue) => {
@@ -3938,14 +3800,14 @@ const Dashboard: React.FC<DashboardProps> = ({
                     <Tab 
                       label={
                         (dashboardPeopleFilters.loeStatus.length > 0 || dashboardPeopleFilters.memberStatus.length > 0 || dashboardPeopleFilters.chapter || dashboardPeopleFilters.searchText || dashboardPeopleFilters.lastContactFilter !== 'all' || dashboardPeopleFilters.meetingCountFilter !== 'all' || dashboardPeopleFilters.actionStatus !== 'all')
-                          ? `${scopeLabel} People (filtered)`
-                          : `${scopeLabel} People`
+                          ? `People (filtered)`
+                          : `People`
                       } 
                       value="people" 
                     />
-                    <Tab label={`${scopeLabel} Lists`} value="lists" />
+                    <Tab label={`Lists`} value="lists" />
                     <Tab 
-                      label={`${scopeLabel} Conversations (${sharedCachedMeetings.filter((m: any) => {
+                      label={`Conversations (${sharedCachedMeetings.filter((m: any) => {
                         const effectiveIds = showTeamScope && teamMemberVanIds.length > 0
                           ? Array.from(new Set(getAllOrganizerVanIds.concat(teamMemberVanIds)))
                           : getAllOrganizerVanIds;
@@ -3953,21 +3815,18 @@ const Dashboard: React.FC<DashboardProps> = ({
                       }).length})`}
                       value="conversations" 
                     />
-                    <Tab label={`${scopeLabel} Actions`} value="actions" />
-                    <Tab label={`${scopeLabel} Leaders (${myLeaders.length})`} value="leaders" />
+                    <Tab label={`Toodledoos`} value="actions" />
+                    <Tab label={`Leaders (${myLeaders.length})`} value="leaders" />
                   </Tabs>
-                </Box>
 
-                {/* Action buttons + search bar row */}
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
                   {!isMobile && (
-                    <>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, flexShrink: 0 }}>
                       <Button
                         variant="contained"
                         size="small"
                         startIcon={<PersonIcon />}
                         onClick={() => setShowBatchAddDialog(true)}
-                        sx={{ fontSize: '0.75rem', px: 1.5 }}
+                        sx={{ fontSize: '0.7rem', px: 1, py: 0.5, minWidth: 'auto', textTransform: 'none' }}
                       >
                         Add People
                       </Button>
@@ -3976,7 +3835,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                         size="small"
                         startIcon={<AddIcon />}
                         onClick={() => setShowAddTurfDialog(true)}
-                        sx={{ fontSize: '0.75rem', px: 1.5 }}
+                        sx={{ fontSize: '0.7rem', px: 1, py: 0.5, minWidth: 'auto', textTransform: 'none' }}
                       >
                         Add to List
                       </Button>
@@ -3985,14 +3844,48 @@ const Dashboard: React.FC<DashboardProps> = ({
                         size="small"
                         startIcon={<ChatIcon />}
                         onClick={() => setShowLogConversationDialog(true)}
-                        sx={{ fontSize: '0.75rem', px: 1.5 }}
+                        sx={{ fontSize: '0.7rem', px: 1, py: 0.5, minWidth: 'auto', textTransform: 'none' }}
                       >
                         Log Conversation
                       </Button>
-                    </>
+                    </Box>
                   )}
-                  <Box sx={{ flex: 1 }} />
-                  {turfTab === 'people' && (
+                </Box>
+
+                {/* Filter, search, and active filter chips — below tabs, only for People tab */}
+                {turfTab === 'people' && (
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: 0.5, flexWrap: 'wrap' }}>
+                    <IconButton
+                      size="small"
+                      onClick={() => setShowMyPeopleFilters(!showMyPeopleFilters)}
+                      sx={{ 
+                        color: showMyPeopleFilters || dashboardPeopleFilters.loeStatus.length > 0 || dashboardPeopleFilters.memberStatus.length > 0 || dashboardPeopleFilters.chapter || dashboardPeopleFilters.lastContactFilter !== 'all' || dashboardPeopleFilters.meetingCountFilter !== 'all' || dashboardPeopleFilters.actionStatus !== 'all'
+                          ? 'primary.main' 
+                          : 'text.secondary',
+                        position: 'relative',
+                        flexShrink: 0,
+                      }}
+                    >
+                      <FilterListIcon fontSize="small" />
+                      {(dashboardPeopleFilters.loeStatus.length > 0 || dashboardPeopleFilters.memberStatus.length > 0 || dashboardPeopleFilters.chapter || dashboardPeopleFilters.lastContactFilter !== 'all' || dashboardPeopleFilters.meetingCountFilter !== 'all' || dashboardPeopleFilters.actionStatus !== 'all') && (
+                        <Box sx={{
+                          position: 'absolute', top: -4, right: -4,
+                          backgroundColor: 'primary.main', color: 'white',
+                          borderRadius: '50%', width: 16, height: 16,
+                          fontSize: '0.7rem', display: 'flex', alignItems: 'center',
+                          justifyContent: 'center', fontWeight: 'bold'
+                        }}>
+                          {[
+                            dashboardPeopleFilters.chapter,
+                            dashboardPeopleFilters.loeStatus.length > 0,
+                            dashboardPeopleFilters.memberStatus.length > 0,
+                            dashboardPeopleFilters.lastContactFilter !== 'all',
+                            dashboardPeopleFilters.meetingCountFilter !== 'all',
+                            dashboardPeopleFilters.actionStatus !== 'all'
+                          ].filter(Boolean).length}
+                        </Box>
+                      )}
+                    </IconButton>
                     <TextField
                       size="small"
                       placeholder="Search..."
@@ -4016,16 +3909,36 @@ const Dashboard: React.FC<DashboardProps> = ({
                         )
                       }}
                       sx={{
-                        width: 200,
+                        flex: isMobile ? 1 : 'none',
+                        width: isMobile ? 'auto' : 200,
                         bgcolor: 'background.paper',
                         '& .MuiOutlinedInput-root': {
                           fontSize: '0.8rem',
-                          height: 36
+                          height: 32
                         }
                       }}
                     />
-                  )}
-                </Box>
+                    {/* Active filter chips inline */}
+                    {dashboardPeopleFilters.chapter && (
+                      <Chip label={`Chapter: ${dashboardPeopleFilters.chapter}`} size="small" onDelete={() => setDashboardPeopleFilters((prev: any) => ({ ...prev, chapter: '' }))} sx={{ height: 24, fontSize: '0.7rem' }} />
+                    )}
+                    {dashboardPeopleFilters.loeStatus.map((status: string) => (
+                      <Chip key={`loe-${status}`} label={`LOE: ${status.replace(/^\d+[_.]/, '')}`} size="small" onDelete={() => setDashboardPeopleFilters((prev: any) => ({ ...prev, loeStatus: prev.loeStatus.filter((s: string) => s !== status) }))} sx={{ height: 24, fontSize: '0.7rem' }} />
+                    ))}
+                    {dashboardPeopleFilters.memberStatus.map((status: string) => (
+                      <Chip key={`member-${status}`} label={`Member: ${status}`} size="small" onDelete={() => setDashboardPeopleFilters((prev: any) => ({ ...prev, memberStatus: prev.memberStatus.filter((s: string) => s !== status) }))} color={status === 'Active' ? 'success' : status === 'Lapsed' ? 'warning' : 'default'} sx={{ height: 24, fontSize: '0.7rem' }} />
+                    ))}
+                    {dashboardPeopleFilters.lastContactFilter !== 'all' && (
+                      <Chip label={`Last Contact: ${dashboardPeopleFilters.lastContactFilter}`} size="small" onDelete={() => setDashboardPeopleFilters((prev: any) => ({ ...prev, lastContactFilter: 'all' }))} sx={{ height: 24, fontSize: '0.7rem' }} />
+                    )}
+                    {dashboardPeopleFilters.meetingCountFilter !== 'all' && (
+                      <Chip label={`Meetings: ${dashboardPeopleFilters.meetingCountFilter}`} size="small" onDelete={() => setDashboardPeopleFilters((prev: any) => ({ ...prev, meetingCountFilter: 'all' }))} sx={{ height: 24, fontSize: '0.7rem' }} />
+                    )}
+                    {dashboardPeopleFilters.actionStatus !== 'all' && (
+                      <Chip label={`Action: ${dashboardPeopleFilters.actionStatus}`} size="small" onDelete={() => setDashboardPeopleFilters((prev: any) => ({ ...prev, actionStatus: 'all' }))} sx={{ height: 24, fontSize: '0.7rem' }} />
+                    )}
+                  </Box>
+                )}
 
                 {/* My Lists Tab Content */}
                 <Box sx={{ display: turfTab === 'lists' ? 'block' : 'none', flex: 1, overflow: 'hidden' }}>
@@ -4485,6 +4398,11 @@ const Dashboard: React.FC<DashboardProps> = ({
                                             if (!entry.list_id) return;
                                             
                                             const newValue = e.target.checked;
+                                            if (newValue) {
+                                              if (celebrationTimerRef.current) clearTimeout(celebrationTimerRef.current);
+                                              setShowCelebrationPenguin(true);
+                                              celebrationTimerRef.current = setTimeout(() => setShowCelebrationPenguin(false), 2200);
+                                            }
                                             const newFields = { ...entry.fields, [field.key]: newValue };
                                             await updateListItem(entry.list_id, {
                                               progress: newFields
@@ -5141,7 +5059,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                   <Box sx={{ p: 2, flex: 1, overflow: 'auto', display: 'flex', flexDirection: 'column' }}>
                     <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
                       <Typography variant="h6">
-                        {scopeLabel} Actions
+                        {scopeLabel} Toodledoos
                       </Typography>
 
                       <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
@@ -5159,7 +5077,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                           variant="contained"
                           onClick={() => setShowAddActionDialog(true)}
                         >
-                          Create Action
+                          Create Toodledoo
                         </Button>
                       </Box>
                     </Box>
@@ -5170,7 +5088,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                       onChange={(e, newValue) => setActionStatusFilter(newValue)}
                       sx={{ mb: 2, borderBottom: 1, borderColor: 'divider' }}
                     >
-                      <Tab label="Live Actions" value="live" />
+                      <Tab label="Live" value="live" />
                       <Tab label="Archived" value="archived" />
                     </Tabs>
                     
@@ -6105,6 +6023,54 @@ const Dashboard: React.FC<DashboardProps> = ({
           >
             Log
           </Button>
+        </Box>
+      )}
+
+      {/* Celebration penguin — appears briefly when a list task is completed */}
+      {showCelebrationPenguin && (
+        <Box
+          sx={{
+            position: 'fixed',
+            bottom: 40,
+            left: '50%',
+            transform: 'translateX(-50%)',
+            zIndex: 9999,
+            pointerEvents: 'none',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            animation: 'penguinBounceIn 0.35s ease-out, penguinFadeOut 0.5s ease-in 1.7s forwards',
+            '@keyframes penguinBounceIn': {
+              '0%': { opacity: 0, transform: 'translateX(-50%) scale(0.3) translateY(40px)' },
+              '60%': { opacity: 1, transform: 'translateX(-50%) scale(1.15) translateY(-10px)' },
+              '100%': { opacity: 1, transform: 'translateX(-50%) scale(1) translateY(0)' },
+            },
+            '@keyframes penguinFadeOut': {
+              '0%': { opacity: 1, transform: 'translateX(-50%) scale(1)' },
+              '100%': { opacity: 0, transform: 'translateX(-50%) scale(0.5) translateY(-30px)' },
+            },
+          }}
+        >
+          <img
+            src="https://cdn3.emoji.gg/emojis/5709-dancing-penguin.gif"
+            alt="Celebration!"
+            style={{ width: 80, height: 80 }}
+          />
+          <Typography
+            sx={{
+              mt: 0.5,
+              fontSize: '0.75rem',
+              fontWeight: 700,
+              color: '#1976d2',
+              textShadow: '0 1px 3px rgba(0,0,0,0.1)',
+              bgcolor: 'rgba(255,255,255,0.9)',
+              px: 1.5,
+              py: 0.25,
+              borderRadius: 2,
+            }}
+          >
+            Nice work!
+          </Typography>
         </Box>
       )}
     </Box>
