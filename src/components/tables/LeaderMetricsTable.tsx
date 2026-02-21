@@ -104,6 +104,8 @@ interface LeaderMetricsTableProps {
   currentDateRange?: { start: Date; end: Date } | null; // Date range for rate-based goal adjustments
 }
 
+const EMPTY_RELOAD_TRIGGERS: {[key: string]: number} = {};
+
 const LeaderTableRow: React.FC<{ 
   leader: LeaderProgress; 
   depth: number;
@@ -129,7 +131,7 @@ const LeaderTableRow: React.FC<{
   calculateCheckpointConversion?: (leaderId: string, actionId: string, fromFieldKey: string, toFieldKey: string) => number;
   calculateCheckpointCount?: (leaderId: string, actionId: string, fieldKey: string) => number;
   getGoalForAction?: (leaderId: string, actionId: string) => number;
-}> = ({ leader, depth, leaderActionsMap, leaderGoalsMap, unifiedActionIds, onRemove, onRemoveLeader, currentUserId, pledgeSubmissions = [], onAddToList, reloadTriggers = {}, peopleRecords = [], onPersonDetailsOpen, onFilterByOrganizer, onEditOrganizerMapping, onViewOrganizerDetails, ACTIONS, availableActions = [], flatView = false, listsData, displayMode = 'progress', calculateCheckpointConversion, calculateCheckpointCount, getGoalForAction }) => {
+}> = ({ leader, depth, leaderActionsMap, leaderGoalsMap, unifiedActionIds, onRemove, onRemoveLeader, currentUserId, pledgeSubmissions = [], onAddToList, reloadTriggers = EMPTY_RELOAD_TRIGGERS, peopleRecords = [], onPersonDetailsOpen, onFilterByOrganizer, onEditOrganizerMapping, onViewOrganizerDetails, ACTIONS, availableActions = [], flatView = false, listsData, displayMode = 'progress', calculateCheckpointConversion, calculateCheckpointCount, getGoalForAction }) => {
   const showConversions = displayMode === 'conversions';
   const showProgress = displayMode === 'progress';
   const [expanded, setExpanded] = useState(false);
@@ -502,12 +504,27 @@ const LeaderTableRow: React.FC<{
               </TableCell>
             );
           } else if (showProgress) {
-            // Progress mode: just show the count number
+            const pct = goal > 0 ? Math.min((count / goal) * 100, 100) : 0;
             personalColumns = (
-              <TableCell align="center">
-                <Typography variant="body2" sx={{ fontWeight: 600, fontSize: '0.8rem', color: hasMetGoal ? '#4caf50' : undefined }}>
-                  {count}/{goal}
-                </Typography>
+              <TableCell>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <LinearProgress
+                    variant="determinate"
+                    value={pct}
+                    sx={{
+                      flex: 1,
+                      height: 8,
+                      borderRadius: 1,
+                      backgroundColor: '#e0e0e0',
+                      '& .MuiLinearProgress-bar': {
+                        backgroundColor: hasMetGoal ? '#4caf50' : '#1976d2'
+                      }
+                    }}
+                  />
+                  <Typography variant="body2" sx={{ fontWeight: 600, fontSize: '0.75rem', minWidth: 40, whiteSpace: 'nowrap' }}>
+                    {count}/{goal}
+                  </Typography>
+                </Box>
               </TableCell>
             );
           } else {
@@ -856,7 +873,7 @@ const LeaderTableRow: React.FC<{
                                       >
                                         {entry ? (
                                           <Checkbox 
-                                            checked={fieldValue === true}
+                                            checked={fieldValue === true || fieldValue === 'true' || fieldValue === 1 || fieldValue === '1'}
                                             disabled
                                             size="small"
                                             sx={{ p: 0 }}
@@ -935,7 +952,7 @@ export const LeaderMetricsTable: React.FC<LeaderMetricsTableProps> = ({
   pledgeSubmissions = [],
   currentUserId,
   peopleRecords = [],
-  reloadTriggers = {},
+  reloadTriggers = EMPTY_RELOAD_TRIGGERS,
   showSummary = false,
   flatView = false,
   onRemoveLeader,
@@ -1014,14 +1031,14 @@ export const LeaderMetricsTable: React.FC<LeaderMetricsTableProps> = ({
     
     if (leaderEntries.length === 0) return 0;
     
-    // Count people at the "from" checkpoint
+    const isTruthy = (v: any) => v === true || v === 'true' || v === 1 || v === '1';
+    
     const fromCheckpointCount = leaderEntries.filter((entry: any) => 
-      entry.fields?.[fromFieldKey] === true || entry.progress?.[fromFieldKey] === true
+      isTruthy(entry.fields?.[fromFieldKey]) || isTruthy(entry.progress?.[fromFieldKey])
     ).length;
     
-    // Count people at the "to" checkpoint
     const toCheckpointCount = leaderEntries.filter((entry: any) => 
-      entry.fields?.[toFieldKey] === true || entry.progress?.[toFieldKey] === true
+      isTruthy(entry.fields?.[toFieldKey]) || isTruthy(entry.progress?.[toFieldKey])
     ).length;
     
     if (fromCheckpointCount === 0) return 0;
@@ -1037,8 +1054,9 @@ export const LeaderMetricsTable: React.FC<LeaderMetricsTableProps> = ({
       return (organizerVanid?.toString() === leaderId.toString() || organizerVanid === parseInt(leaderId))
         && item.action_id === actionId;
     });
+    const isTruthy = (v: any) => v === true || v === 'true' || v === 1 || v === '1';
     return leaderEntries.filter((entry: any) =>
-      entry.fields?.[fieldKey] === true || entry.progress?.[fieldKey] === true
+      isTruthy(entry.fields?.[fieldKey]) || isTruthy(entry.progress?.[fieldKey])
     ).length;
   };
 

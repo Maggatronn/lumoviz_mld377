@@ -180,8 +180,10 @@ interface PeoplePanelProps {
   pledgeSubmissions?: any[];
   selectedActions?: string[];
   currentUserId?: string;
-  currentUserName?: string; // Full name of current user for organizer field
-  actions?: any[]; // Actions from database
+  currentUserName?: string;
+  selectedOrganizerId?: string;
+  selectedOrganizerName?: string;
+  actions?: any[];
   turfLists?: any[]; // List of people on various action lists
   // Column visibility
   hideColumns?: string[]; // Array of column keys to hide (e.g., ['chapter', 'organizer'])
@@ -204,6 +206,7 @@ interface PeoplePanelProps {
   hideActionButtons?: boolean;
   onEditConversation?: (meeting: any) => void;
   onDeleteConversation?: (meetingId: string) => Promise<void>;
+  organizerVanIds?: string[];
   onDeletePerson?: (personId: string) => Promise<void>;
 }
 
@@ -260,6 +263,8 @@ const PeoplePanel: React.FC<PeoplePanelProps> = ({
   selectedActions = [],
   currentUserId,
   currentUserName,
+  selectedOrganizerId: propSelectedOrganizerId,
+  selectedOrganizerName: propSelectedOrganizerName,
   actions = [],
   turfLists = [],
   // Column visibility
@@ -287,6 +292,7 @@ const PeoplePanel: React.FC<PeoplePanelProps> = ({
   onEditConversation,
   onDeleteConversation,
   onDeletePerson,
+  organizerVanIds: propOrganizerVanIds,
 }) => {
   // Normalize actions from database format to component format
   const ACTIONS = React.useMemo(() => {
@@ -309,18 +315,63 @@ const PeoplePanel: React.FC<PeoplePanelProps> = ({
   // Build a lookup from personId → team names they belong to
   const personToTeams = useMemo(() => {
     const map = new Map<string, string[]>();
+    const addEntry = (id: string, teamName: string) => {
+      if (!id || !teamName) return;
+      if (!map.has(id)) map.set(id, []);
+      if (!map.get(id)!.includes(teamName)) map.get(id)!.push(teamName);
+    };
     teamsData.forEach((team: any) => {
-      const teamName = team.teamName || team.team_name || '';
+      const teamName = team.teamName || team.team_name || team.bigQueryData?.teamName || '';
       if (!teamName) return;
+      // Source 1: enhanced organizers array (PersonRecord[])
       (team.organizers || []).forEach((member: any) => {
-        const id = member.id?.toString() || '';
-        if (!id) return;
-        if (!map.has(id)) map.set(id, []);
-        if (!map.get(id)!.includes(teamName)) map.get(id)!.push(teamName);
+        addEntry(member.id?.toString() || '', teamName);
       });
+      // Source 2: teamMembersWithRoles from DB (has vanid)
+      (team.bigQueryData?.teamMembersWithRoles || team.teamMembersWithRoles || []).forEach((member: any) => {
+        addEntry(member.id?.toString() || '', teamName);
+      });
+      // Source 3: name-based fallback using userMap
+      (team.bigQueryData?.teamMembers || []).forEach((memberName: string) => {
+        if (!memberName) return;
+        const nameLower = memberName.toLowerCase().trim();
+        userMap.forEach((info, vanid) => {
+          const fullName = (info.fullName || `${info.firstname || ''} ${info.lastname || ''}`.trim()).toLowerCase();
+          if (fullName === nameLower) {
+            addEntry(vanid.toString(), teamName);
+          }
+        });
+      });
+      // Source 4: team lead
+      if (team.bigQueryData?.teamLead) {
+        const leadName = team.bigQueryData.teamLead.toLowerCase().trim();
+        userMap.forEach((info, vanid) => {
+          const fullName = (info.fullName || `${info.firstname || ''} ${info.lastname || ''}`.trim()).toLowerCase();
+          if (fullName === leadName) {
+            addEntry(vanid.toString(), teamName);
+          }
+        });
+      }
     });
     return map;
-  }, [teamsData]);
+  }, [teamsData, userMap]);
+
+  // Note-visibility: current user's teams and whether they're on the Teaching team
+  const { currentUserTeams, isCurrentUserTeachingTeam } = useMemo(() => {
+    const teams = personToTeams.get(currentUserId || '') || [];
+    const isTeaching = teams.some(t => t.toLowerCase().includes('teaching'));
+    return { currentUserTeams: new Set(teams), isCurrentUserTeachingTeam: isTeaching };
+  }, [personToTeams, currentUserId]);
+
+  const canSeeNotesForOrganizer = useCallback((organizerVanid: string | number | undefined): boolean => {
+    if (isCurrentUserTeachingTeam) return true;
+    if (!organizerVanid) return false;
+    const orgId = organizerVanid.toString();
+    if (orgId === currentUserId) return true;
+    const orgTeams = personToTeams.get(orgId) || [];
+    return orgTeams.some(t => currentUserTeams.has(t));
+  }, [isCurrentUserTeachingTeam, currentUserId, personToTeams, currentUserTeams]);
+
   const [showBatchAddDialog, setShowBatchAddDialog] = useState(false);
   const [showLogConversationDialog, setShowLogConversationDialog] = useState(false);
   const [searchText, setSearchText] = useState('');
@@ -396,9 +447,12 @@ const PeoplePanel: React.FC<PeoplePanelProps> = ({
     }
   };
   
-  // State for action selection menu
-  const [actionMenuAnchor, setActionMenuAnchor] = useState<null | HTMLElement>(null);
+  // State for action selection dialog
+  const [actionDialogOpen, setActionDialogOpen] = useState(false);
   const [personForActionMenu, setPersonForActionMenu] = useState<{ vanid: string; name: string } | null>(null);
+  const [selectedActionId, setSelectedActionId] = useState<string>('');
+  const [dialogOrganizerId, setDialogOrganizerId] = useState<string>('');
+  const [dialogOrganizerName, setDialogOrganizerName] = useState<string>('');
 
   // State for ALL contacts (loaded once, filtered client-side)
   const [allContacts, setAllContacts] = useState<Contact[]>([]);
@@ -563,9 +617,15 @@ const PeoplePanel: React.FC<PeoplePanelProps> = ({
     
     // console.log('[PeoplePanel] After chapter filter:', result.length, 'contacts');
     
-    // Filter by organizer (check if organizer name is in the organizers array)
-    // Uses mapping table to match alternate VAN IDs and name variations
-    if (filters.organizer && filters.organizer.trim()) {
+    // Filter by organizer: use explicit VAN ID list if provided, otherwise derive from name
+    if (propOrganizerVanIds && propOrganizerVanIds.length > 0) {
+      const vanIdSet = new Set(propOrganizerVanIds.map(id => id.toString()));
+      result = result.filter(c => {
+        if (c.primary_organizer_vanid && vanIdSet.has(c.primary_organizer_vanid.toString())) return true;
+        const organizers = c.organizers || [];
+        return organizers.some((org: string) => vanIdSet.has(org.toString()));
+      });
+    } else if (filters.organizer && filters.organizer.trim()) {
       const organizerLower = filters.organizer.toLowerCase().trim();
       
       // Get all VAN IDs and names for this organizer from mapping table
@@ -617,25 +677,17 @@ const PeoplePanel: React.FC<PeoplePanelProps> = ({
           const primaryOrgVanid = c.primary_organizer_vanid.toString();
           const matchByPrimaryOrg = vanIds.some(id => id === primaryOrgVanid);
           if (matchByPrimaryOrg) {
-            console.log('[PeoplePanel] ✅ Contact matches by primary_organizer_vanid:', c.firstname, c.lastname, primaryOrgVanid);
             return true;
           }
         }
         
         // Also check organizers array (from meeting history)
         const organizers = c.organizers || [];
-        const matchByOrganizers = organizers.some(org => {
+        return organizers.some(org => {
           const orgLower = org.toLowerCase();
-          // Check against all VAN IDs and all name variations
           return vanIds.some(id => orgLower === id.toLowerCase()) ||
                  names.some(name => orgLower.includes(name.toLowerCase()));
         });
-        
-        if (matchByOrganizers) {
-          console.log('[PeoplePanel] ✅ Contact matches by organizers array:', c.firstname, c.lastname);
-        }
-        
-        return matchByOrganizers;
       });
     }
     
@@ -702,7 +754,7 @@ const PeoplePanel: React.FC<PeoplePanelProps> = ({
     });
     
     return result;
-  }, [allContacts, filters.chapter, filters.organizer, filters.memberStatus, filters.loeStatus, selectedChapter, sortColumn, sortDirection]);
+  }, [allContacts, filters.chapter, filters.organizer, filters.memberStatus, filters.loeStatus, selectedChapter, sortColumn, sortDirection, propOrganizerVanIds]);
   
   // Paginated display of filtered contacts - show all loaded so far (0 to displayLimit)
   const [displayLimit, setDisplayLimit] = useState(DISPLAY_LIMIT);
@@ -1224,9 +1276,10 @@ const PeoplePanel: React.FC<PeoplePanelProps> = ({
       const lists = await fetchLists(currentUserId);
       setListsData(lists);
       
-      // Close menu
-      setActionMenuAnchor(null);
+      // Close dialog
+      setActionDialogOpen(false);
       setPersonForActionMenu(null);
+      setSelectedActionId('');
     } catch (error) {
       console.error('[PeoplePanel] Error adding to list:', error);
     }
@@ -1234,18 +1287,42 @@ const PeoplePanel: React.FC<PeoplePanelProps> = ({
   
   const handleOpenActionMenu = (event: React.MouseEvent<HTMLElement>, vanid: string, name: string) => {
     event.stopPropagation();
-    setActionMenuAnchor(event.currentTarget);
     setPersonForActionMenu({ vanid, name });
+    setSelectedActionId('');
+    const defaultOrgId = propSelectedOrganizerId || currentUserId || '';
+    const defaultOrgName = propSelectedOrganizerName || currentUserName || '';
+    setDialogOrganizerId(defaultOrgId);
+    setDialogOrganizerName(defaultOrgName);
+    setActionDialogOpen(true);
   };
   
-  const handleCloseActionMenu = () => {
-    setActionMenuAnchor(null);
+  const handleCloseActionDialog = () => {
+    setActionDialogOpen(false);
     setPersonForActionMenu(null);
+    setSelectedActionId('');
   };
   
-  const handleSelectAction = (actionId: string) => {
-    if (personForActionMenu) {
-      handleAddToList(personForActionMenu.vanid, personForActionMenu.name, actionId);
+  const handleConfirmAddToAction = async () => {
+    if (personForActionMenu && selectedActionId && dialogOrganizerId) {
+      try {
+        const result = await addToList({
+          organizer_vanid: dialogOrganizerId,
+          organizer_name: dialogOrganizerName,
+          contact_vanid: parseInt(personForActionMenu.vanid),
+          contact_name: personForActionMenu.name,
+          action_id: selectedActionId,
+          action: selectedActionId
+        });
+        
+        const lists = await fetchLists(dialogOrganizerId);
+        setListsData(lists);
+        
+        setActionDialogOpen(false);
+        setPersonForActionMenu(null);
+        setSelectedActionId('');
+      } catch (error) {
+        console.error('[PeoplePanel] Error adding to list:', error);
+      }
     }
   };
 
@@ -1471,10 +1548,14 @@ const PeoplePanel: React.FC<PeoplePanelProps> = ({
         
         // Apply organizer filter to pledge submissions
         const leaderName = submission.leader || '';
-        if (filters.organizer) {
-          // Only include if the leader matches the organizer filter (case-insensitive partial match)
+        if (propOrganizerVanIds && propOrganizerVanIds.length > 0) {
+          const leaderVanid = (submission as any).leader_vanid?.toString() || '';
+          if (!propOrganizerVanIds.includes(leaderVanid)) {
+            return;
+          }
+        } else if (filters.organizer) {
           if (!leaderName.toLowerCase().includes(filters.organizer.toLowerCase())) {
-            return; // Skip this pledge submission
+            return;
           }
         }
         
@@ -1716,8 +1797,18 @@ const PeoplePanel: React.FC<PeoplePanelProps> = ({
       const searchLower = filters.searchText.toLowerCase().trim();
       filtered = filtered.filter(person => {
         const nameLower = person.name.toLowerCase();
-        const notesLower = (person.latestNotes || '').toLowerCase();
         const emailLower = (person.email || '').toLowerCase();
+        let notesLower = '';
+        if (person.latestNotes) {
+          const latestMtg = [...(person.allMeetings || [])].sort((a, b) => {
+            const aD = (typeof a.date_contacted === 'object' ? a.date_contacted?.value : a.date_contacted) || '';
+            const bD = (typeof b.date_contacted === 'object' ? b.date_contacted?.value : b.date_contacted) || '';
+            return bD.localeCompare(aD);
+          })[0];
+          if (!latestMtg || canSeeNotesForOrganizer(latestMtg.organizer_vanid)) {
+            notesLower = person.latestNotes.toLowerCase();
+          }
+        }
         return nameLower.includes(searchLower) || 
                notesLower.includes(searchLower) || 
                emailLower.includes(searchLower);
@@ -1965,9 +2056,20 @@ const PeoplePanel: React.FC<PeoplePanelProps> = ({
         cells.push(String(person.totalMeetingsAllTime || person.totalMeetings || 0));
         
         // Latest Notes (clean up any tabs or newlines that would break TSV format)
-        const notes = (person.latestNotes || '-')
-          .replace(/\t/g, ' ')  // Replace tabs with spaces
-          .replace(/\n/g, ' ')  // Replace newlines with spaces
+        let rawNotes = person.latestNotes || '-';
+        if (rawNotes !== '-') {
+          const latestMtg = [...(person.allMeetings || [])].sort((a, b) => {
+            const aD = (typeof a.date_contacted === 'object' ? a.date_contacted?.value : a.date_contacted) || '';
+            const bD = (typeof b.date_contacted === 'object' ? b.date_contacted?.value : b.date_contacted) || '';
+            return bD.localeCompare(aD);
+          })[0];
+          if (latestMtg && !canSeeNotesForOrganizer(latestMtg.organizer_vanid)) {
+            rawNotes = 'Team only';
+          }
+        }
+        const notes = rawNotes
+          .replace(/\t/g, ' ')
+          .replace(/\n/g, ' ')
           .trim();
         cells.push(notes);
         
@@ -2955,7 +3057,18 @@ const PeoplePanel: React.FC<PeoplePanelProps> = ({
                           wordWrap: 'break-word',
                           whiteSpace: 'normal'
                         }}>
-                          {person.latestNotes || '-'}
+                          {(() => {
+                            if (!person.latestNotes) return '-';
+                            const latestMeeting = [...(person.allMeetings || [])].sort((a, b) => {
+                              const aD = (typeof a.date_contacted === 'object' ? a.date_contacted?.value : a.date_contacted) || '';
+                              const bD = (typeof b.date_contacted === 'object' ? b.date_contacted?.value : b.date_contacted) || '';
+                              return bD.localeCompare(aD);
+                            })[0];
+                            if (latestMeeting && !canSeeNotesForOrganizer(latestMeeting.organizer_vanid)) {
+                              return <span style={{ fontStyle: 'italic', color: '#9e9e9e' }}>Team only</span>;
+                            }
+                            return person.latestNotes;
+                          })()}
                         </td>
 
                         {/* Commitment Asked */}
@@ -3159,6 +3272,7 @@ const PeoplePanel: React.FC<PeoplePanelProps> = ({
         onEditConversation={onEditConversation}
         onDeleteConversation={onDeleteConversation}
         onDeletePerson={onDeletePerson}
+        canSeeNotesForOrganizer={canSeeNotesForOrganizer}
       />
 
       {/* OrganizerDetailsDialog */}
@@ -3181,33 +3295,73 @@ const PeoplePanel: React.FC<PeoplePanelProps> = ({
         meetings={meetings}
       />
       
-      {/* Action Selection Menu */}
-      <Menu
-        anchorEl={actionMenuAnchor}
-        open={Boolean(actionMenuAnchor)}
-        onClose={handleCloseActionMenu}
-        anchorOrigin={{
-          vertical: 'bottom',
-          horizontal: 'left',
-        }}
-        transformOrigin={{
-          vertical: 'top',
-          horizontal: 'left',
-        }}
+      {/* Add to Action List Dialog */}
+      <Dialog
+        open={actionDialogOpen}
+        onClose={handleCloseActionDialog}
+        maxWidth="xs"
+        fullWidth
       >
-        {actions
-          .filter((action: any) => action.status === 'live')
-          .map((action: any) => (
-            <MenuItem 
-              key={action.action_id} 
-              onClick={() => handleSelectAction(action.action_id)}
-              sx={{ minWidth: 180 }}
-            >
-              {action.action_name}
-            </MenuItem>
-          ))
-        }
-      </Menu>
+        <DialogTitle sx={{ pb: 1 }}>Add to Action List</DialogTitle>
+        <DialogContent>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5, pt: 1 }}>
+            <Box>
+              <Typography variant="caption" color="text.secondary" sx={{ mb: 0.5, display: 'block' }}>Person</Typography>
+              <Typography variant="body1" sx={{ fontWeight: 600 }}>
+                {personForActionMenu?.name || ''}
+              </Typography>
+            </Box>
+
+            <FormControl fullWidth size="small">
+              <InputLabel>Action List</InputLabel>
+              <Select
+                value={selectedActionId}
+                onChange={(e) => setSelectedActionId(e.target.value)}
+                label="Action List"
+              >
+                {actions
+                  .filter((action: any) => action.status === 'live')
+                  .map((action: any) => (
+                    <MenuItem key={action.action_id} value={action.action_id}>
+                      {action.action_name}
+                    </MenuItem>
+                  ))
+                }
+              </Select>
+            </FormControl>
+
+            <FormControl fullWidth size="small">
+              <InputLabel>Organizer (whose list)</InputLabel>
+              <Select
+                value={dialogOrganizerId}
+                onChange={(e) => {
+                  const orgId = e.target.value;
+                  setDialogOrganizerId(orgId);
+                  const org = availableOrganizers.find(o => o.id === orgId);
+                  setDialogOrganizerName(org ? org.name : '');
+                }}
+                label="Organizer (whose list)"
+              >
+                {availableOrganizers.map((org) => (
+                  <MenuItem key={org.id} value={org.id}>
+                    {org.name}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCloseActionDialog}>Cancel</Button>
+          <Button
+            onClick={handleConfirmAddToAction}
+            variant="contained"
+            disabled={!selectedActionId || !dialogOrganizerId}
+          >
+            Add
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       {/* Filter Dialog */}
       <Dialog open={filterOpen} onClose={() => setFilterOpen(false)} maxWidth="md" fullWidth>

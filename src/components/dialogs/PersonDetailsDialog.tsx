@@ -126,6 +126,7 @@ interface PersonDetailsDialogProps {
   onEditConversation?: (meeting: any) => void;
   onDeleteConversation?: (meetingId: string) => Promise<void>;
   onDeletePerson?: (personId: string) => Promise<void>;
+  canSeeNotesForOrganizer?: (organizerVanid: string | number | undefined) => boolean;
 }
 
 const PersonDetailsDialog: React.FC<PersonDetailsDialogProps> = ({
@@ -146,7 +147,8 @@ const PersonDetailsDialog: React.FC<PersonDetailsDialogProps> = ({
   onAddToAction,
   onEditConversation,
   onDeleteConversation,
-  onDeletePerson
+  onDeletePerson,
+  canSeeNotesForOrganizer
 }) => {
   const [editing, setEditing] = useState(false);
   const [editFirstname, setEditFirstname] = useState('');
@@ -808,6 +810,8 @@ const PersonDetailsDialog: React.FC<PersonDetailsDialogProps> = ({
                           };
                         };
 
+                        const notesVisible = !canSeeNotesForOrganizer || canSeeNotesForOrganizer(meeting.organizer_vanid);
+
                         return (
                           <Box 
                             key={index} 
@@ -818,7 +822,7 @@ const PersonDetailsDialog: React.FC<PersonDetailsDialogProps> = ({
                               backgroundColor: '#fafafa'
                             }}
                           >
-                            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: (hasNotes || hasSharedPurpose) ? 1 : 0 }}>
+                            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: (notesVisible && (hasNotes || hasSharedPurpose)) ? 1 : 0 }}>
                               <Box>
                                 <Typography variant="body2" sx={{ fontSize: '0.875rem' }}>
                                   <strong>{meeting.conversation_type || meeting.meeting_type || 'Meeting'}</strong> with {organizer}
@@ -863,7 +867,13 @@ const PersonDetailsDialog: React.FC<PersonDetailsDialogProps> = ({
                               </Box>
                             </Box>
                             
-                            {hasNotes && (
+                            {!notesVisible && (hasNotes || hasSharedPurpose) && (
+                              <Typography variant="caption" sx={{ fontStyle: 'italic', color: '#9e9e9e', display: 'block', mt: 0.5 }}>
+                                Notes visible to team members only
+                              </Typography>
+                            )}
+
+                            {notesVisible && hasNotes && (
                               <Box sx={{ mt: 1, display: 'flex', flexDirection: 'column', gap: 0.75 }}>
                                 {noteFields.map((field, idx) => (
                                   <Typography 
@@ -877,7 +887,7 @@ const PersonDetailsDialog: React.FC<PersonDetailsDialogProps> = ({
                               </Box>
                             )}
 
-                            {hasSharedPurpose && (
+                            {notesVisible && hasSharedPurpose && (
                               <Box sx={{
                                 mt: 1.25,
                                 p: 1,

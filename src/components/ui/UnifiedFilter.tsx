@@ -155,51 +155,6 @@ const UnifiedFilter: React.FC<UnifiedFilterProps> = ({
               sx={{ mb: 2 }}
             />
 
-            {/* LOE Status Filter - Dynamic from data */}
-            <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 600 }}>
-              LOE Status
-            </Typography>
-            <Box sx={{ mb: 2 }}>
-              {(availableOptions.loeLevels || []).map((loeLevel) => {
-                return (
-                  <FormControlLabel
-                    key={loeLevel.rawValue}
-                    control={
-                      <Checkbox
-                        checked={filters.loeStatus.includes(loeLevel.rawValue)}
-                        onChange={(e) => {
-                          const newLoeStatus = e.target.checked
-                            ? [...filters.loeStatus, loeLevel.rawValue]
-                            : filters.loeStatus.filter(s => s !== loeLevel.rawValue);
-                          onFiltersChange({ loeStatus: newLoeStatus });
-                        }}
-                        size="small"
-                        sx={{
-                          color: loeLevel.color,
-                          '&.Mui-checked': {
-                            color: loeLevel.color,
-                          }
-                        }}
-                      />
-                    }
-                    label={
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                        <Typography variant="body2" sx={{ color: loeLevel.color, fontWeight: 500 }}>
-                          {loeLevel.label}
-                        </Typography>
-                        {loeLevel.level && (
-                          <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.7rem' }}>
-                            (Level {loeLevel.level})
-                          </Typography>
-                        )}
-                      </Box>
-                    }
-                    sx={{ display: 'block', mb: 0.5 }}
-                  />
-                );
-              })}
-            </Box>
-
             {/* Action Status Filter */}
             <FormControl fullWidth size="small" sx={{ mb: 2 }}>
               <InputLabel>Action Status</InputLabel>
@@ -214,32 +169,6 @@ const UnifiedFilter: React.FC<UnifiedFilterProps> = ({
                 <MenuItem value="notOnList">Not on Any List</MenuItem>
               </Select>
             </FormControl>
-
-            {/* Membership Status Filter */}
-            <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 600 }}>
-              Membership Status
-            </Typography>
-            <Box sx={{ mb: 2 }}>
-              {['Active', 'Lapsed', 'Former', 'Unknown'].map((status) => (
-                <FormControlLabel
-                  key={status}
-                  control={
-                    <Checkbox
-                      checked={filters.memberStatus.includes(status)}
-                      onChange={(e) => {
-                        const newMemberStatus = e.target.checked
-                          ? [...filters.memberStatus, status]
-                          : filters.memberStatus.filter(s => s !== status);
-                        onFiltersChange({ memberStatus: newMemberStatus });
-                      }}
-                      size="small"
-                    />
-                  }
-                  label={status}
-                  sx={{ display: 'block', mb: 0.5 }}
-                />
-              ))}
-            </Box>
 
             {/* Last Contact Filter */}
             <FormControl fullWidth size="small" sx={{ mb: 2 }}>

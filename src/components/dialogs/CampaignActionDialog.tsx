@@ -244,7 +244,7 @@ const CampaignActionDialog: React.FC<CampaignActionDialogProps> = ({
       return;
     }
     if (visibilityMode === 'chapter' && selectedChapters.length === 0) {
-      setError('Please select at least one chapter');
+      setError('Please select at least one team');
       return;
     }
 
@@ -637,7 +637,7 @@ const CampaignActionDialog: React.FC<CampaignActionDialogProps> = ({
                     control={<Radio />} 
                     label={
                       <Box>
-                        <Typography variant="body2">Only Me</Typography>
+                        <Typography variant="body2">Only Me ({currentUserName || 'you'})</Typography>
                         <Typography variant="caption" color="text.secondary">
                           Only {currentUserName || 'you'} can see and use this action
                         </Typography>
@@ -649,9 +649,9 @@ const CampaignActionDialog: React.FC<CampaignActionDialogProps> = ({
                     control={<Radio />} 
                     label={
                       <Box>
-                        <Typography variant="body2">Specific Chapter(s)</Typography>
+                        <Typography variant="body2">Specific Team(s)</Typography>
                         <Typography variant="caption" color="text.secondary">
-                          All organizers in selected chapters can see and use this action
+                          All organizers in selected teams can see and use this action
                         </Typography>
                       </Box>
                     }
@@ -671,15 +671,15 @@ const CampaignActionDialog: React.FC<CampaignActionDialogProps> = ({
                 </RadioGroup>
               </FormControl>
 
-              {/* Multi-select for chapters */}
+              {/* Multi-select for teams */}
               {visibilityMode === 'chapter' && (
                 <FormControl fullWidth sx={{ mt: 2 }}>
-                  <InputLabel>Select Chapters</InputLabel>
+                  <InputLabel>Select Teams</InputLabel>
                   <Select
                     multiple
                     value={selectedChapters}
                     onChange={(e) => setSelectedChapters(typeof e.target.value === 'string' ? [e.target.value] : e.target.value)}
-                    input={<OutlinedInput label="Select Chapters" />}
+                    input={<OutlinedInput label="Select Teams" />}
                     renderValue={(selected) => (
                       <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
                         {selected.map((chapter) => (

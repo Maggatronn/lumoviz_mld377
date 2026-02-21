@@ -17,7 +17,9 @@ import {
   InputLabel,
   Select,
   MenuItem,
-  Autocomplete
+  Autocomplete,
+  ToggleButton,
+  ToggleButtonGroup
 } from '@mui/material';
 import { 
   Close as CloseIcon, 
@@ -35,7 +37,8 @@ export interface ParentCampaign {
   goalTypes: CampaignGoalType[];
   milestones: CampaignMilestone[];
   createdDate: string;
-  chapters: string[]; // List of chapters this campaign applies to, or ["All Chapters"]
+  chapters: string[]; // Legacy: chapters this campaign applies to
+  teams: string[]; // List of team IDs this campaign applies to, or ["All Teams"]
   // Campaign relationships
   parentCampaignId?: string; // Links to another parent campaign
   relatedCampaignIds?: string[]; // Related campaigns
@@ -43,8 +46,7 @@ export interface ParentCampaign {
   sequenceOrder?: number; // Order in a sequence of campaigns
 }
 
-export type GoalDataSource = 'manual' | 'pledges' | 'meetings_membership' | 'meetings_leadership' | 'team_conversations';
-export type GoalLevel = 'individual' | 'team' | 'organization';
+export type GoalDataSource = 'manual' | 'constituent_1on1s' | 'team_1on1s' | 'team_conversations';
 
 export interface CampaignGoalType {
   id: string;
@@ -54,8 +56,6 @@ export interface CampaignGoalType {
   unit: string; // e.g., "pledges", "members"
   /** Which data source feeds this goal (pledges API, meetings, etc.). Manual = only from campaign actions. */
   dataSource?: GoalDataSource;
-  /** Whether this goal is tracked at individual, team, or organization level */
-  level?: GoalLevel;
   /** Chapter-specific goals (chapter name -> target) */
   chapterGoals?: Record<string, number>;
 }
@@ -67,13 +67,27 @@ export interface CampaignMilestone {
   goalTypeTargets: { [goalTypeId: string]: number }; // Target for each goal type at this milestone
 }
 
+interface TeamOption {
+  id: string;
+  name: string;
+}
+
+export interface RoleCounts {
+  student: number;
+  teacher: number;
+  constituent: number;
+}
+
 interface ParentCampaignDialogProps {
   open: boolean;
   onClose: () => void;
   onSave: (campaign: Omit<ParentCampaign, 'id' | 'createdDate'>) => void;
   editingCampaign?: ParentCampaign | null;
   allCampaigns?: ParentCampaign[];
-  availableChapters?: string[]; // List of available chapters
+  availableChapters?: string[];
+  availableTeams?: TeamOption[];
+  organizerCount?: number;
+  roleCounts?: RoleCounts;
 }
 
 const ParentCampaignDialog: React.FC<ParentCampaignDialogProps> = ({
@@ -82,7 +96,10 @@ const ParentCampaignDialog: React.FC<ParentCampaignDialogProps> = ({
   onSave,
   editingCampaign = null,
   allCampaigns = [],
-  availableChapters = []
+  availableChapters = [],
+  availableTeams = [],
+  organizerCount = 0,
+  roleCounts = { student: 0, teacher: 0, constituent: 0 }
 }) => {
   const [name, setName] = useState<string>('');
   const [description, setDescription] = useState<string>('');
@@ -92,6 +109,7 @@ const ParentCampaignDialog: React.FC<ParentCampaignDialogProps> = ({
   const [milestones, setMilestones] = useState<CampaignMilestone[]>([]);
   const [error, setError] = useState<string>('');
   const [selectedChapters, setSelectedChapters] = useState<string[]>(['All Chapters']);
+  const [selectedTeams, setSelectedTeams] = useState<string[]>(['All Teams']);
   
   // Campaign relationships
   const [parentCampaignId, setParentCampaignId] = useState<string>('');
@@ -100,22 +118,28 @@ const ParentCampaignDialog: React.FC<ParentCampaignDialogProps> = ({
   const [sequenceOrder, setSequenceOrder] = useState<string>('');
 
   // Goal type form state
+  const [targetMode, setTargetMode] = useState<'manual' | 'per_organizer'>('manual');
+  const [roleFilter, setRoleFilter] = useState<'student' | 'teacher' | 'constituent' | 'all'>('student');
   const [newGoalType, setNewGoalType] = useState<{
     name: string;
     description: string;
     totalTarget: string;
+    perOrganizerGoal: string;
     unit: string;
     dataSource?: GoalDataSource;
-    level?: GoalLevel;
   }>({
     name: '',
     description: '',
     totalTarget: '',
+    perOrganizerGoal: '',
     unit: '',
-    dataSource: 'manual',
-    level: 'organization'
+    dataSource: 'manual'
   });
   
+  const filteredOrganizerCount = roleFilter === 'all'
+    ? (roleCounts.student + roleCounts.teacher + roleCounts.constituent) || organizerCount
+    : roleCounts[roleFilter] || 0;
+
   // Chapter goals editing state
   const [editingChapterGoals, setEditingChapterGoals] = useState<string | null>(null); // goalTypeId being edited
   const [chapterGoalInputs, setChapterGoalInputs] = useState<Record<string, string>>({}); // chapter -> value
@@ -126,16 +150,28 @@ const ParentCampaignDialog: React.FC<ParentCampaignDialogProps> = ({
     description: ''
   });
 
+  const toDateInputValue = (dateStr: string): string => {
+    if (!dateStr) return '';
+    try {
+      const d = new Date(dateStr);
+      if (isNaN(d.getTime())) return dateStr;
+      return d.toISOString().split('T')[0];
+    } catch {
+      return dateStr;
+    }
+  };
+
   // Populate form when editing
   React.useEffect(() => {
     if (editingCampaign) {
       setName(editingCampaign.name);
       setDescription(editingCampaign.description);
-      setStartDate(editingCampaign.startDate);
-      setEndDate(editingCampaign.endDate);
+      setStartDate(toDateInputValue(editingCampaign.startDate));
+      setEndDate(toDateInputValue(editingCampaign.endDate));
       setGoalTypes(editingCampaign.goalTypes);
       setMilestones(editingCampaign.milestones);
       setSelectedChapters(editingCampaign.chapters || ['All Chapters']);
+      setSelectedTeams(editingCampaign.teams || ['All Teams']);
       setParentCampaignId(editingCampaign.parentCampaignId || '');
       setRelatedCampaignIds(editingCampaign.relatedCampaignIds || []);
       setCampaignType(editingCampaign.campaignType || 'standalone');
@@ -149,6 +185,7 @@ const ParentCampaignDialog: React.FC<ParentCampaignDialogProps> = ({
       setGoalTypes([]);
       setMilestones([]);
       setSelectedChapters(['All Chapters']);
+      setSelectedTeams(['All Teams']);
       setParentCampaignId('');
       setRelatedCampaignIds([]);
       setCampaignType('standalone');
@@ -168,12 +205,13 @@ const ParentCampaignDialog: React.FC<ParentCampaignDialogProps> = ({
       description: newGoalType.description.trim(),
       totalTarget: Number(newGoalType.totalTarget),
       unit: newGoalType.unit.trim() || 'items',
-      dataSource: newGoalType.dataSource || 'manual',
-      level: newGoalType.level || 'organization'
+      dataSource: newGoalType.dataSource || 'manual'
     };
 
     setGoalTypes([...goalTypes, goalType]);
-    setNewGoalType({ name: '', description: '', totalTarget: '', unit: '', dataSource: 'manual', level: 'organization' });
+    setNewGoalType({ name: '', description: '', totalTarget: '', perOrganizerGoal: '', unit: '', dataSource: 'manual' });
+    setTargetMode('manual');
+    setRoleFilter('student');
     setError('');
   };
 
@@ -303,6 +341,7 @@ const ParentCampaignDialog: React.FC<ParentCampaignDialogProps> = ({
       goalTypes,
       milestones: milestones.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()),
       chapters: selectedChapters,
+      teams: selectedTeams,
       parentCampaignId: parentCampaignId || undefined,
       relatedCampaignIds: relatedCampaignIds.length > 0 ? relatedCampaignIds : undefined,
       campaignType,
@@ -316,7 +355,10 @@ const ParentCampaignDialog: React.FC<ParentCampaignDialogProps> = ({
     setEndDate('');
     setGoalTypes([]);
     setMilestones([]);
-    setNewGoalType({ name: '', description: '', totalTarget: '', unit: '', dataSource: 'manual', level: 'organization' });
+    setSelectedTeams(['All Teams']);
+    setNewGoalType({ name: '', description: '', totalTarget: '', perOrganizerGoal: '', unit: '', dataSource: 'manual' });
+    setTargetMode('manual');
+    setRoleFilter('student');
     setNewMilestone({ date: '', description: '' });
     setError('');
     onClose();
@@ -389,43 +431,46 @@ const ParentCampaignDialog: React.FC<ParentCampaignDialogProps> = ({
                 />
               </Box>
               
-              {/* Chapter Selection */}
+              {/* Team Selection */}
               <Autocomplete
                 multiple
-                options={['All Chapters', ...availableChapters.filter(c => c !== 'All Chapters')]}
-                value={selectedChapters}
+                options={['All Teams', ...availableTeams.map(t => t.id)]}
+                getOptionLabel={(option) => {
+                  if (option === 'All Teams') return 'All Teams';
+                  const team = availableTeams.find(t => t.id === option);
+                  return team ? team.name : option;
+                }}
+                value={selectedTeams}
                 onChange={(event, newValue) => {
                   if (newValue.length === 0) {
-                    // If nothing selected, default to "All Chapters"
-                    setSelectedChapters(['All Chapters']);
-                  } else if (newValue.includes('All Chapters') && !selectedChapters.includes('All Chapters')) {
-                    // "All Chapters" was just added, so select only it
-                    setSelectedChapters(['All Chapters']);
-                  } else if (newValue.includes('All Chapters') && selectedChapters.includes('All Chapters') && newValue.length > 1) {
-                    // "All Chapters" was already selected, user is adding specific chapters, so remove "All Chapters"
-                    setSelectedChapters(newValue.filter(v => v !== 'All Chapters'));
+                    setSelectedTeams(['All Teams']);
+                  } else if (newValue.includes('All Teams') && !selectedTeams.includes('All Teams')) {
+                    setSelectedTeams(['All Teams']);
+                  } else if (newValue.includes('All Teams') && selectedTeams.includes('All Teams') && newValue.length > 1) {
+                    setSelectedTeams(newValue.filter(v => v !== 'All Teams'));
                   } else {
-                    // Normal selection
-                    setSelectedChapters(newValue);
+                    setSelectedTeams(newValue);
                   }
                 }}
+                isOptionEqualToValue={(option, value) => option === value}
                 renderInput={(params) => (
                   <TextField
                     {...params}
-                    label="Chapters"
-                    placeholder="Select chapters or All Chapters"
-                    helperText="Select which chapters this campaign applies to"
+                    label="Teams"
+                    placeholder="Select teams or All Teams"
+                    helperText="Select which teams this campaign applies to"
                   />
                 )}
                 renderTags={(value, getTagProps) =>
                   value.map((option, index) => {
                     const { key, ...tagProps } = getTagProps({ index });
+                    const team = availableTeams.find(t => t.id === option);
                     return (
                       <Chip
                         key={key}
-                        label={option}
+                        label={option === 'All Teams' ? 'All Teams' : (team ? team.name : option)}
                         {...tagProps}
-                        color={option === 'All Chapters' ? 'error' : 'primary'}
+                        color={option === 'All Teams' ? 'error' : 'primary'}
                         size="small"
                       />
                     );
@@ -546,16 +591,6 @@ const ParentCampaignDialog: React.FC<ParentCampaignDialogProps> = ({
                       sx={{ flex: 2 }}
                     />
                     <TextField
-                      label="Total Target"
-                      type="number"
-                      value={newGoalType.totalTarget}
-                      onChange={(e) => setNewGoalType({ ...newGoalType, totalTarget: e.target.value })}
-                      placeholder="e.g., 1000"
-                      size="small"
-                      fullWidth
-                      sx={{ flex: 1 }}
-                    />
-                    <TextField
                       label="Unit"
                       value={newGoalType.unit}
                       onChange={(e) => setNewGoalType({ ...newGoalType, unit: e.target.value })}
@@ -564,6 +599,87 @@ const ParentCampaignDialog: React.FC<ParentCampaignDialogProps> = ({
                       fullWidth
                       sx={{ flex: 1 }}
                     />
+                  </Box>
+                  <Box>
+                    <ToggleButtonGroup
+                      value={targetMode}
+                      exclusive
+                      onChange={(_, val) => { if (val) setTargetMode(val); }}
+                      size="small"
+                      sx={{ mb: 1 }}
+                    >
+                      <ToggleButton value="manual" sx={{ textTransform: 'none', px: 2, py: 0.5 }}>
+                        Enter total
+                      </ToggleButton>
+                      <ToggleButton value="per_organizer" sx={{ textTransform: 'none', px: 2, py: 0.5 }}>
+                        Per organizer
+                      </ToggleButton>
+                    </ToggleButtonGroup>
+
+                    {targetMode === 'manual' ? (
+                      <TextField
+                        label="Total Target"
+                        type="number"
+                        value={newGoalType.totalTarget}
+                        onChange={(e) => setNewGoalType({ ...newGoalType, totalTarget: e.target.value, perOrganizerGoal: '' })}
+                        placeholder="e.g., 1000"
+                        size="small"
+                        fullWidth
+                      />
+                    ) : (
+                      <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', flexWrap: 'wrap' }}>
+                        <TextField
+                          label="Goal per organizer"
+                          type="number"
+                          value={newGoalType.perOrganizerGoal}
+                          onChange={(e) => {
+                            const perOrg = e.target.value;
+                            const computed = perOrg && filteredOrganizerCount > 0
+                              ? String(Number(perOrg) * filteredOrganizerCount)
+                              : '';
+                            setNewGoalType({ ...newGoalType, perOrganizerGoal: perOrg, totalTarget: computed });
+                          }}
+                          placeholder="e.g., 5"
+                          size="small"
+                          sx={{ width: 120 }}
+                        />
+                        <Typography variant="body2" color="text.secondary">×</Typography>
+                        <FormControl size="small" sx={{ minWidth: 130 }}>
+                          <InputLabel>Count</InputLabel>
+                          <Select
+                            value={roleFilter}
+                            label="Count"
+                            onChange={(e) => {
+                              const newRole = e.target.value as typeof roleFilter;
+                              setRoleFilter(newRole);
+                              const count = newRole === 'all'
+                                ? (roleCounts.student + roleCounts.teacher + roleCounts.constituent) || organizerCount
+                                : roleCounts[newRole] || 0;
+                              if (newGoalType.perOrganizerGoal && count > 0) {
+                                setNewGoalType(prev => ({
+                                  ...prev,
+                                  totalTarget: String(Number(prev.perOrganizerGoal) * count)
+                                }));
+                              }
+                            }}
+                          >
+                            <MenuItem value="student">Students ({roleCounts.student})</MenuItem>
+                            <MenuItem value="teacher">Teachers ({roleCounts.teacher})</MenuItem>
+                            <MenuItem value="constituent">Constituents ({roleCounts.constituent})</MenuItem>
+                            <MenuItem value="all">All ({roleCounts.student + roleCounts.teacher + roleCounts.constituent || organizerCount})</MenuItem>
+                          </Select>
+                        </FormControl>
+                        <Typography variant="body2" color="text.secondary">=</Typography>
+                        <TextField
+                          label="Total"
+                          type="number"
+                          value={newGoalType.totalTarget}
+                          size="small"
+                          sx={{ width: 100 }}
+                          InputProps={{ readOnly: true }}
+                        />
+                      </Box>
+                    )}
                   </Box>
                   <TextField
                     label="Description (optional)"
@@ -582,22 +698,9 @@ const ParentCampaignDialog: React.FC<ParentCampaignDialogProps> = ({
                         onChange={(e) => setNewGoalType({ ...newGoalType, dataSource: e.target.value as GoalDataSource })}
                       >
                         <MenuItem value="manual">Manual (campaign actions only)</MenuItem>
-                        <MenuItem value="pledges">Pledges</MenuItem>
-                        <MenuItem value="meetings_membership">Meetings: Membership One-on-One</MenuItem>
-                        <MenuItem value="meetings_leadership">Meetings: Leadership One-on-One</MenuItem>
+                        <MenuItem value="constituent_1on1s">Constituent 1:1s</MenuItem>
+                        <MenuItem value="team_1on1s">Team 1:1s</MenuItem>
                         <MenuItem value="team_conversations">Team conversations</MenuItem>
-                      </Select>
-                    </FormControl>
-                    <FormControl size="small" sx={{ minWidth: 180 }}>
-                      <InputLabel>Goal level</InputLabel>
-                      <Select
-                        value={newGoalType.level ?? 'organization'}
-                        label="Goal level"
-                        onChange={(e) => setNewGoalType({ ...newGoalType, level: e.target.value as GoalLevel })}
-                      >
-                        <MenuItem value="individual">Individual</MenuItem>
-                        <MenuItem value="team">Team</MenuItem>
-                        <MenuItem value="organization">Organization</MenuItem>
                       </Select>
                     </FormControl>
                   </Box>
@@ -708,15 +811,15 @@ const ParentCampaignDialog: React.FC<ParentCampaignDialogProps> = ({
 
           {/* Milestones */}
           <Box>
-            <Typography variant="h6" gutterBottom>Milestones (Optional)</Typography>
+            <Typography variant="h6" gutterBottom>Peaks</Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-              Set intermediate checkpoints with specific targets for each goal type
+              Set peaks with specific targets for each goal type
             </Typography>
             
             {/* Add Milestone Form */}
             <Card variant="outlined" sx={{ mb: 2 }}>
               <CardContent>
-                <Typography variant="subtitle2" gutterBottom>Add Milestone</Typography>
+                <Typography variant="subtitle2" gutterBottom>Add Peak</Typography>
                 <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                   <Box sx={{ display: 'flex', gap: 2 }}>
                     <TextField
@@ -745,7 +848,7 @@ const ParentCampaignDialog: React.FC<ParentCampaignDialogProps> = ({
                       size="small"
                       disabled={goalTypes.length === 0}
                     >
-                      Add Milestone
+                      Add Peak
                     </Button>
                     {goalTypes.length === 0 && (
                       <Typography variant="caption" color="text.secondary" sx={{ ml: 1 }}>

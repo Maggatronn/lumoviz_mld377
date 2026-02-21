@@ -1,4 +1,4 @@
-import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import * as d3 from 'd3';
 import { Box, Typography, Paper, Chip, Button, LinearProgress, FormControl, InputLabel, Select, MenuItem, Collapse, IconButton, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Tooltip, ToggleButton, ToggleButtonGroup } from '@mui/material';
 import { Star as StarIcon, Person as PersonIcon, Business as BusinessIcon, Public as PublicIcon, Groups as GroupsIcon, KeyboardArrowRight, KeyboardArrowDown } from '@mui/icons-material';
@@ -87,6 +87,8 @@ const CampaignLineGraph: React.FC<CampaignLineGraphProps> = ({
   const containerRef = useRef<HTMLDivElement>(null);
   const [hoveredAction, setHoveredAction] = useState<string | null>(null);
   const [zoomExtent, setZoomExtent] = useState<{dateRange: [Date, Date], goalRange: [number, number]} | null>(null);
+  const zoomBehaviorRef = useRef<d3.ZoomBehavior<SVGSVGElement, unknown> | null>(null);
+  const baseScalesRef = useRef<{ xScale: d3.ScaleTime<number, number>; yScale: d3.ScaleLinear<number, number> } | null>(null);
   const [selectedGoalTypes, setSelectedGoalTypes] = useState<string[]>([]);
   
   // Use external barometer view if provided (for URL routing), otherwise internal state
@@ -247,7 +249,7 @@ const CampaignLineGraph: React.FC<CampaignLineGraphProps> = ({
     };
     
     // Get data based on selected goal type filter
-    if (barometerGoalTypeFilter === 'meetings_membership') {
+    if (barometerGoalTypeFilter === 'constituent_1on1s' || barometerGoalTypeFilter === 'meetings_membership') {
       (meetingsData || []).forEach(m => {
         const t = (m.meeting_type || '').toLowerCase();
         if (t.includes('membership') && t.includes('one-on-one') && m.chapter) {
@@ -259,7 +261,7 @@ const CampaignLineGraph: React.FC<CampaignLineGraphProps> = ({
           });
         }
       });
-    } else if (barometerGoalTypeFilter === 'meetings_leadership') {
+    } else if (barometerGoalTypeFilter === 'team_1on1s' || barometerGoalTypeFilter === 'meetings_leadership') {
       (meetingsData || []).forEach(m => {
         const t = (m.meeting_type || '').toLowerCase();
         if (t.includes('leadership') && t.includes('one-on-one') && m.chapter) {
@@ -326,7 +328,7 @@ const CampaignLineGraph: React.FC<CampaignLineGraphProps> = ({
     const personMap = new Map<string, { name: string; count: number; chapter?: string }>();
     
     // Get data based on selected goal type filter
-    if (barometerGoalTypeFilter === 'meetings_membership') {
+    if (barometerGoalTypeFilter === 'constituent_1on1s' || barometerGoalTypeFilter === 'meetings_membership') {
       (meetingsData || []).forEach(m => {
         const t = (m.meeting_type || '').toLowerCase();
         if (t.includes('membership') && t.includes('one-on-one')) {
@@ -348,7 +350,7 @@ const CampaignLineGraph: React.FC<CampaignLineGraphProps> = ({
           }
         }
       });
-    } else if (barometerGoalTypeFilter === 'meetings_leadership') {
+    } else if (barometerGoalTypeFilter === 'team_1on1s' || barometerGoalTypeFilter === 'meetings_leadership') {
       (meetingsData || []).forEach(m => {
         const t = (m.meeting_type || '').toLowerCase();
         if (t.includes('leadership') && t.includes('one-on-one')) {
@@ -375,6 +377,13 @@ const CampaignLineGraph: React.FC<CampaignLineGraphProps> = ({
     return Array.from(personMap.values())
       .sort((a, b) => b.count - a.count);
   }, [meetingsData, barometerGoalTypeFilter, userMap]);
+
+  // Check if a list entry meets the goal for a given field key
+  const entryMeetsGoal = (entry: any, goalFieldKey: string | null): boolean => {
+    if (!goalFieldKey) return true;
+    const val = entry.progress?.[goalFieldKey] ?? entry.fields?.[goalFieldKey];
+    return val === true || val === 'true' || val === 1 || val === '1' || !!entry.is_completed;
+  };
 
   // Build LeaderProgress data for LeaderMetricsTable (used in "By Person" and "By Leadership" views)
   const leadersForTable = React.useMemo(() => {
@@ -417,7 +426,7 @@ const CampaignLineGraph: React.FC<CampaignLineGraphProps> = ({
       let metricCounts = new Map<string, number>();
       
       // Calculate counts based on metric type
-      if (metricValue === 'meetings_membership') {
+      if (metricValue === 'constituent_1on1s' || metricValue === 'meetings_membership') {
         (meetingsData || []).forEach(m => {
           const t = (m.meeting_type || '').toLowerCase();
           if (t.includes('membership') && t.includes('one-on-one')) {
@@ -425,7 +434,7 @@ const CampaignLineGraph: React.FC<CampaignLineGraphProps> = ({
             metricCounts.set(vanId, (metricCounts.get(vanId) || 0) + 1);
           }
         });
-      } else if (metricValue === 'meetings_leadership') {
+      } else if (metricValue === 'team_1on1s' || metricValue === 'meetings_leadership') {
         (meetingsData || []).forEach(m => {
           const t = (m.meeting_type || '').toLowerCase();
           if (t.includes('leadership') && t.includes('one-on-one')) {
@@ -455,10 +464,7 @@ const CampaignLineGraph: React.FC<CampaignLineGraphProps> = ({
             const namedSet = (metricCounts as any)[`${vanId}_named`] as Set<string>;
             namedSet.add(personVanId);
 
-            // If a goal field is set, only count people who have completed that field
-            const meetsGoal = goalFieldKey
-              ? (entry.progress?.[goalFieldKey] === true || entry.fields?.[goalFieldKey] === true)
-              : true; // no goal field → count everyone (Named = goal count)
+            const meetsGoal = entryMeetsGoal(entry, goalFieldKey);
 
             if (meetsGoal) {
               const peopleSet = (metricCounts as any)[`${vanId}_people`] as Set<string>;
@@ -828,12 +834,12 @@ const CampaignLineGraph: React.FC<CampaignLineGraphProps> = ({
   }, [barometerGoalTypeFilters, meetingsData, listsData, userMap, leaderHierarchy, organizerGoalsMap, effectiveActionsDB]);
 
   // Which data-source line a goal type drives (for filter: only show line when its goal type is selected)
-  const goalTypeDataSource = (gt: CampaignGoalType): 'pledges' | 'meetings_membership' | 'meetings_leadership' | null => {
-    const ds = gt.dataSource;
-    if (ds === 'pledges' || ds === 'meetings_membership' || ds === 'meetings_leadership') return ds;
-    if (gt.id === 'pledges') return 'pledges';
-    if (gt.id === 'membership_1on1s') return 'meetings_membership';
-    if (gt.id === 'leadership_1on1s') return 'meetings_leadership';
+  const goalTypeDataSource = (gt: CampaignGoalType): 'constituent_1on1s' | 'team_1on1s' | null => {
+    const ds = gt.dataSource as string | undefined;
+    if (ds === 'constituent_1on1s' || ds === 'meetings_membership') return 'constituent_1on1s';
+    if (ds === 'team_1on1s' || ds === 'meetings_leadership') return 'team_1on1s';
+    if (gt.id === 'membership_1on1s') return 'constituent_1on1s';
+    if (gt.id === 'leadership_1on1s') return 'team_1on1s';
     return null;
   };
 
@@ -902,12 +908,18 @@ const CampaignLineGraph: React.FC<CampaignLineGraphProps> = ({
   };
 
   // Comprehensive reset function
-  const handleResetZoom = () => {
+  const handleResetZoom = useCallback(() => {
     setZoomExtent(null);
-    if (onResetZoom) {
-      onResetZoom(); // This will clear selectedCampaign in parent
+    // Reset D3 zoom transform back to identity so user can zoom again from scratch
+    if (svgRef.current && zoomBehaviorRef.current) {
+      d3.select(svgRef.current)
+        .transition().duration(300)
+        .call(zoomBehaviorRef.current.transform, d3.zoomIdentity);
     }
-  };
+    if (onResetZoom) {
+      onResetZoom();
+    }
+  }, [onResetZoom]);
 
   // Initialize selected goal types when parent campaigns change
   useEffect(() => {
@@ -963,18 +975,15 @@ const CampaignLineGraph: React.FC<CampaignLineGraphProps> = ({
     const innerWidth = width - margin.left - margin.right;
     const innerHeight = timelineHeight - margin.top - margin.bottom;
 
-    // Add background rectangle for click-to-reset functionality
-    svg.append('rect')
+    // Add background rectangle for click-to-reset and zoom
+    const bgRect = svg.append('rect')
       .attr('width', width)
       .attr('height', timelineHeight)
       .attr('fill', 'transparent')
       .style('cursor', (zoomExtent || selectedCampaign) ? 'pointer' : 'default')
-      .on('click', function(event) {
-        // Only reset if we're currently zoomed
-        if (zoomExtent || selectedCampaign) {
-          event.stopPropagation();
-          handleResetZoom();
-        }
+      .on('dblclick', function(event) {
+        event.stopPropagation();
+        handleResetZoom();
       });
 
     // Group filtered actions by campaign
@@ -1061,19 +1070,25 @@ const CampaignLineGraph: React.FC<CampaignLineGraphProps> = ({
       }
     }
 
-    // Apply custom zoom extent if set
-    if (zoomExtent) {
-      dateExtent = zoomExtent.dateRange;
-      goalExtent = zoomExtent.goalRange;
-    }
-
-    const xScale = d3.scaleTime()
+    // Build base scales from the full data extent (ignoring any zoom)
+    const baseXScale = d3.scaleTime()
       .domain(dateExtent)
       .range([0, innerWidth]);
 
-    const yScale = d3.scaleLinear()
+    const baseYScale = d3.scaleLinear()
       .domain(goalExtent)
       .range([innerHeight, 0]);
+
+    baseScalesRef.current = { xScale: baseXScale, yScale: baseYScale };
+
+    // Apply zoom transform if we have one (for rendering only; scales stay at full extent)
+    const xScale = zoomExtent
+      ? d3.scaleTime().domain(zoomExtent.dateRange).range([0, innerWidth])
+      : baseXScale.copy();
+
+    const yScale = zoomExtent
+      ? d3.scaleLinear().domain(zoomExtent.goalRange).range([innerHeight, 0])
+      : baseYScale.copy();
 
     // Color scale for different campaigns
     const colorScale = d3.scaleOrdinal(d3.schemeCategory10)
@@ -1082,6 +1097,28 @@ const CampaignLineGraph: React.FC<CampaignLineGraphProps> = ({
     // Create main group
     const g = svg.append('g')
       .attr('transform', `translate(${margin.left},${margin.top})`);
+
+    // Scroll/pinch = zoom, click-and-drag = pan
+    const zoomBehavior = d3.zoom<SVGSVGElement, unknown>()
+      .scaleExtent([1, 20])
+      .translateExtent([[0, 0], [width, timelineHeight]])
+      .on('zoom', (event) => {
+        // Always rescale from the BASE (full-extent) scales, not the current view
+        const transform = event.transform;
+        const bx = baseScalesRef.current!.xScale;
+        const by = baseScalesRef.current!.yScale;
+        const newXDomain = transform.rescaleX(bx).domain() as [Date, Date];
+        const newYDomain = transform.rescaleY(by).domain() as [number, number];
+        setZoomExtent({
+          dateRange: newXDomain,
+          goalRange: [Math.max(0, newYDomain[0]), newYDomain[1]]
+        });
+      });
+
+    zoomBehaviorRef.current = zoomBehavior;
+    svg.call(zoomBehavior);
+    // Disable double-click zoom — dblclick resets the view instead
+    svg.on('dblclick.zoom', null);
 
     // Add axes
     const timeFormatter = d3.timeFormat('%b %Y');
@@ -1538,10 +1575,10 @@ const CampaignLineGraph: React.FC<CampaignLineGraphProps> = ({
     const selectedCampaignObjsForFilter = parentCampaigns.filter(pc => selectedParentCampaigns.includes(pc.id));
     const showPledgeLine = false; // Pledges removed from campaign progress view
     const showMembershipLine = selectedGoalTypes.length > 0 && selectedCampaignObjsForFilter.some(pc =>
-      pc.goalTypes.some(gt => selectedGoalTypes.includes(gt.id) && goalTypeDataSource(gt) === 'meetings_membership')
+      pc.goalTypes.some(gt => selectedGoalTypes.includes(gt.id) && goalTypeDataSource(gt) === 'constituent_1on1s')
     );
     const showLeadershipLine = selectedGoalTypes.length > 0 && selectedCampaignObjsForFilter.some(pc =>
-      pc.goalTypes.some(gt => selectedGoalTypes.includes(gt.id) && goalTypeDataSource(gt) === 'meetings_leadership')
+      pc.goalTypes.some(gt => selectedGoalTypes.includes(gt.id) && goalTypeDataSource(gt) === 'team_1on1s')
     );
 
     // Add "Membership One-on-One" line from meetings data (only when that goal type is selected)
@@ -1777,7 +1814,122 @@ const CampaignLineGraph: React.FC<CampaignLineGraphProps> = ({
       }
     }
 
-  }, [actions, width, containerWidth, selectedChapter, selectedCampaign, zoomExtent, hoveredAction, parentCampaigns, selectedParentCampaigns, selectedGoalTypes, pledgeSubmissions, meetingsData, showOnlyBarometer]);
+    // Add cumulative action completion lines from listsData
+    if (listsData && listsData.length > 0 && hasSelectedCampaigns) {
+      const actionColors = ['#2e7d32', '#e65100', '#0277bd', '#ad1457', '#4527a0', '#00695c'];
+      
+      // Find which actions are linked to selected campaigns via goal types
+      const campaignActionIds = new Set<string>();
+      selectedCampaignObjsForFilter.forEach(pc => {
+        pc.goalTypes.forEach(gt => {
+          if (selectedGoalTypes.length === 0 || selectedGoalTypes.includes(gt.id)) {
+            // Find actions that feed this goal type
+            effectiveActionsDB.forEach((action: any) => {
+              if (action.status === 'live' && action.parent_campaign_id) {
+                const matchesCampaign = selectedParentCampaigns.includes(action.parent_campaign_id);
+                if (matchesCampaign) {
+                  campaignActionIds.add(action.action_id);
+                }
+              }
+            });
+          }
+        });
+      });
+      
+      // If no specific campaign actions found, show all live actions that have list entries
+      if (campaignActionIds.size === 0) {
+        effectiveActionsDB
+          .filter((a: any) => a.status === 'live')
+          .forEach((a: any) => campaignActionIds.add(a.action_id));
+      }
+      
+      let colorIdx = 0;
+      campaignActionIds.forEach(actionId => {
+        const actionDef = effectiveActionsDB.find((a: any) => a.action_id === actionId);
+        if (!actionDef) return;
+        
+        const goalFieldKey: string | null = actionDef.goal_field_key || null;
+        
+        // Get list entries for this action, filtered to completions
+        const actionEntries = listsData
+          .filter((entry: any) => {
+            if (entry.action_id !== actionId) return false;
+            if (goalFieldKey) {
+              return entryMeetsGoal(entry, goalFieldKey);
+            }
+            return true;
+          })
+          .map((entry: any) => {
+            const dateStr = entry.date_pledged || entry.date_added || entry.last_updated;
+            return { date: dateStr ? new Date(dateStr) : null };
+          })
+          .filter((e: any) => e.date && !isNaN(e.date.getTime()))
+          .sort((a: any, b: any) => a.date.getTime() - b.date.getTime());
+        
+        if (actionEntries.length === 0) return;
+        
+        // Filter to campaign date range
+        const filteredEntries = actionEntries.filter((e: any) => 
+          e.date >= dateExtent[0] && e.date <= dateExtent[1]
+        );
+        
+        if (filteredEntries.length === 0) return;
+        
+        // Build cumulative data
+        let cumulative = 0;
+        const dailyMap = new Map<string, { date: Date; value: number }>();
+        filteredEntries.forEach((e: any) => {
+          cumulative += 1;
+          const key = e.date.toISOString().split('T')[0];
+          dailyMap.set(key, { date: e.date, value: cumulative });
+        });
+        const cumulativeData = Array.from(dailyMap.values());
+        
+        if (cumulativeData.length === 0) return;
+        
+        const lineColor = actionColors[colorIdx % actionColors.length];
+        colorIdx++;
+        
+        // Draw the line
+        if (cumulativeData.length > 1) {
+          const actionLine = d3.line<typeof cumulativeData[0]>()
+            .x(d => xScale(d.date))
+            .y(d => yScale(d.value))
+            .curve(d3.curveMonotoneX);
+
+          g.append('path')
+            .datum(cumulativeData)
+            .attr('fill', 'none')
+            .attr('stroke', lineColor)
+            .attr('stroke-width', 2.5)
+            .attr('d', actionLine)
+            .style('opacity', 0.85);
+        }
+        
+        // Draw endpoint with label
+        const lastPoint = cumulativeData[cumulativeData.length - 1];
+        g.append('circle')
+          .attr('cx', xScale(lastPoint.date))
+          .attr('cy', yScale(lastPoint.value))
+          .attr('r', 5)
+          .attr('fill', lineColor)
+          .attr('stroke', '#fff')
+          .attr('stroke-width', 1.5)
+          .append('title')
+          .text(`${actionDef.action_name}\nTotal: ${lastPoint.value}\nDate: ${lastPoint.date.toLocaleDateString()}`);
+        
+        // Label at end of line
+        g.append('text')
+          .attr('x', xScale(lastPoint.date) + 8)
+          .attr('y', yScale(lastPoint.value) + 4)
+          .style('font-size', '9px')
+          .style('fill', lineColor)
+          .style('font-weight', '600')
+          .text(`${actionDef.action_name}: ${lastPoint.value}`);
+      });
+    }
+
+  }, [actions, width, containerWidth, selectedChapter, selectedCampaign, zoomExtent, hoveredAction, parentCampaigns, selectedParentCampaigns, selectedGoalTypes, pledgeSubmissions, meetingsData, showOnlyBarometer, listsData, effectiveActionsDB]);
 
   // Add keyboard support for Escape key to reset zoom
   useEffect(() => {
@@ -1844,16 +1996,16 @@ const CampaignLineGraph: React.FC<CampaignLineGraphProps> = ({
     : uniqueGoalTypes;
   const getCurrentForGoalType = (gt: CampaignGoalType): number => {
     const ds = goalTypeDataSource(gt);
-    if (ds === 'meetings_membership') {
+    if (ds === 'constituent_1on1s') {
       return (meetingsData || []).filter(m => {
         const t = (m.meeting_type || '').toLowerCase();
-        return t.includes('membership') && t.includes('one-on-one');
+        return t.includes('one-on-one') && !t.includes('leadership') && !t.includes('two-on-one');
       }).length;
     }
-    if (ds === 'meetings_leadership') {
+    if (ds === 'team_1on1s') {
       return (meetingsData || []).filter(m => {
         const t = (m.meeting_type || '').toLowerCase();
-        return t.includes('leadership') && t.includes('one-on-one');
+        return t.includes('leadership') || t.includes('two-on-one');
       }).length;
     }
     const filteredActionsForBarometer = selectedChapter === 'All Chapters' ? actions : actions.filter(a => a.chapter === selectedChapter);
@@ -2140,8 +2292,8 @@ const CampaignLineGraph: React.FC<CampaignLineGraphProps> = ({
                   const isCustomMetric = currentMetricFilter.startsWith('action_');
                   const customActionId = isCustomMetric ? currentMetricFilter.replace('action_', '') : null;
                   const metricLabel = (() => {
-                    if (currentMetricFilter === 'meetings_membership') return 'Member 1:1s';
-                    if (currentMetricFilter === 'meetings_leadership') return 'Leader 1:1s';
+                    if (currentMetricFilter === 'constituent_1on1s' || currentMetricFilter === 'meetings_membership') return 'Constituent 1:1s';
+                    if (currentMetricFilter === 'team_1on1s' || currentMetricFilter === 'meetings_leadership') return 'Team 1:1s';
                     const m = availableMetrics.find(m => m.value === currentMetricFilter);
                     return m?.label || currentMetricFilter;
                   })();
@@ -2175,10 +2327,7 @@ const CampaignLineGraph: React.FC<CampaignLineGraphProps> = ({
                             const personVanId = entry.vanid?.toString();
                             if (!personVanId) return;
                             namedPeople.add(personVanId);
-                            const meetsGoal = goalFieldKey
-                              ? (entry.progress?.[goalFieldKey] === true || entry.fields?.[goalFieldKey] === true)
-                              : true;
-                            if (meetsGoal) goalPeople.add(personVanId);
+                            if (entryMeetsGoal(entry, goalFieldKey)) goalPeople.add(personVanId);
                             actionFields.forEach((f: any) => {
                               if (entry.progress?.[f.key] === true || entry.fields?.[f.key] === true) fieldPeople[f.key].add(personVanId);
                             });
@@ -2186,21 +2335,32 @@ const CampaignLineGraph: React.FC<CampaignLineGraphProps> = ({
                         count = goalPeople.size;
                         namedCount = namedPeople.size;
                         actionFields.forEach((f: any) => { fieldCounts[f.key] = fieldPeople[f.key].size; });
-                      } else if (currentMetricFilter === 'meetings_membership') {
+                      } else if (currentMetricFilter === 'constituent_1on1s' || currentMetricFilter === 'meetings_membership') {
                         count = (meetingsData || []).filter((m: any) => {
                           const t = (m.meeting_type || '').toLowerCase();
-                          return t.includes('membership') && t.includes('one-on-one') && memberVanIds.has(m.organizer_vanid?.toString());
+                          return t.includes('one-on-one') && !t.includes('leadership') && !t.includes('two-on-one') && memberVanIds.has(m.organizer_vanid?.toString());
                         }).length;
                         namedCount = count;
                       } else {
                         count = (meetingsData || []).filter((m: any) => {
                           const t = (m.meeting_type || '').toLowerCase();
-                          return t.includes('leadership') && t.includes('one-on-one') && memberVanIds.has(m.organizer_vanid?.toString());
+                          return (t.includes('leadership') || t.includes('two-on-one')) && memberVanIds.has(m.organizer_vanid?.toString());
                         }).length;
                         namedCount = count;
                       }
 
-                      return { teamId: team.id, teamName: team.teamName, chapter: team.chapter, count, namedCount, fieldCounts, memberCount: memberVanIds.size };
+                      // Compute team goal as sum of each member's individual goal
+                      let teamGoal = 0;
+                      if (isCustomMetric && customActionId) {
+                        const actionDefForGoal = effectiveActionsDB.find((a: any) => a.action_id === customActionId);
+                        const defaultGoal = Number(actionDefForGoal?.default_individual_goal) || 5;
+                        memberVanIds.forEach(vid => {
+                          const memberGoals = organizerGoalsMap.get(vid);
+                          teamGoal += memberGoals?.get(customActionId!) || defaultGoal;
+                        });
+                      }
+
+                      return { teamId: team.id, teamName: team.teamName, chapter: team.chapter, count, namedCount, fieldCounts, memberCount: memberVanIds.size, goal: teamGoal };
                     })
                     .filter(t => t.memberCount > 0)
                     .sort((a, b) => b.count - a.count);
@@ -2280,7 +2440,7 @@ const CampaignLineGraph: React.FC<CampaignLineGraphProps> = ({
                           <TableCell align="center" sx={{ fontWeight: 600, py: 1, minWidth: 70 }}>Members</TableCell>
                           {metricDefs.map(md => (
                             <React.Fragment key={md.metricFilter}>
-                              <TableCell align="center" sx={{ fontWeight: 600, py: 1, minWidth: 80 }}>{md.metricLabel}</TableCell>
+                              <TableCell align="center" sx={{ fontWeight: 600, py: 1, minWidth: 140 }}>{md.metricLabel}</TableCell>
                               {renderExtraHeaders(md.actionFields)}
                             </React.Fragment>
                           ))}
@@ -2297,15 +2457,24 @@ const CampaignLineGraph: React.FC<CampaignLineGraphProps> = ({
                           </TableCell>
                           {metricDefs.map(md => {
                             const totalCount = md.teamLeaderboard.reduce((s, t) => s + t.count, 0);
+                            const totalGoal = md.teamLeaderboard.reduce((s, t) => s + (t.goal || 0), 0);
                             const totalNamed = md.teamLeaderboard.reduce((s, t) => s + t.namedCount, 0);
                             const totalFieldCounts: Record<string, number> = {};
                             md.actionFields.forEach(f => {
                               totalFieldCounts[f.key] = md.teamLeaderboard.reduce((s, t) => s + (t.fieldCounts[f.key] ?? 0), 0);
                             });
+                            const totalPct = totalGoal > 0 ? Math.min((totalCount / totalGoal) * 100, 100) : 0;
                             return (
                               <React.Fragment key={md.metricFilter}>
-                                <TableCell align="center" sx={{ py: 1 }}>
-                                  <Typography variant="body2" sx={{ fontWeight: 700, color: 'primary.main' }}>{totalCount}</Typography>
+                                <TableCell sx={{ py: 1 }}>
+                                  {totalGoal > 0 ? (
+                                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                                      <LinearProgress variant="determinate" value={totalPct} sx={{ flex: 1, height: 6, borderRadius: 1, bgcolor: '#e0e0e0', '& .MuiLinearProgress-bar': { bgcolor: totalCount >= totalGoal ? '#4caf50' : '#1976d2' } }} />
+                                      <Typography variant="body2" sx={{ fontWeight: 700, fontSize: '0.8rem', color: 'primary.main', minWidth: 50, whiteSpace: 'nowrap' }}>{totalCount}/{totalGoal}</Typography>
+                                    </Box>
+                                  ) : (
+                                    <Typography variant="body2" sx={{ fontWeight: 700, color: 'primary.main', textAlign: 'center' }}>{totalCount}</Typography>
+                                  )}
                                 </TableCell>
                                 {md.actionFields.length >= 2 && renderExtraCells(md.actionFields, totalNamed, totalFieldCounts)}
                               </React.Fragment>
@@ -2332,12 +2501,21 @@ const CampaignLineGraph: React.FC<CampaignLineGraphProps> = ({
                               {metricDefs.map(md => {
                                 const teamData = teamInfo[md.metricFilter];
                                 const count = teamData?.count ?? 0;
+                                const goal = teamData?.goal ?? 0;
                                 const namedCount = teamData?.namedCount ?? 0;
                                 const fieldCounts = teamData?.fieldCounts ?? {};
+                                const pct = goal > 0 ? Math.min((count / goal) * 100, 100) : 0;
                                 return (
                                   <React.Fragment key={md.metricFilter}>
-                                    <TableCell align="center">
-                                      <Typography variant="body2" sx={{ fontWeight: 600, fontSize: '0.8rem' }}>{count}</Typography>
+                                    <TableCell>
+                                      {goal > 0 ? (
+                                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                                          <LinearProgress variant="determinate" value={pct} sx={{ flex: 1, height: 6, borderRadius: 1, bgcolor: '#e0e0e0', '& .MuiLinearProgress-bar': { bgcolor: count >= goal ? '#4caf50' : '#1976d2' } }} />
+                                          <Typography variant="body2" sx={{ fontWeight: 600, fontSize: '0.75rem', minWidth: 40, whiteSpace: 'nowrap' }}>{count}/{goal}</Typography>
+                                        </Box>
+                                      ) : (
+                                        <Typography variant="body2" sx={{ fontWeight: 600, fontSize: '0.8rem', textAlign: 'center' }}>{count}</Typography>
+                                      )}
                                     </TableCell>
                                     {md.actionFields.length >= 2 && renderExtraCells(md.actionFields, namedCount, fieldCounts)}
                                   </React.Fragment>
@@ -2358,8 +2536,8 @@ const CampaignLineGraph: React.FC<CampaignLineGraphProps> = ({
                   const isCustomMetric = currentMetricFilter.startsWith('action_');
                   const customActionId = isCustomMetric ? currentMetricFilter.replace('action_', '') : null;
                   const metricLabel = (() => {
-                    if (currentMetricFilter === 'meetings_membership') return 'Member 1:1s';
-                    if (currentMetricFilter === 'meetings_leadership') return 'Leader 1:1s';
+                    if (currentMetricFilter === 'constituent_1on1s' || currentMetricFilter === 'meetings_membership') return 'Constituent 1:1s';
+                    if (currentMetricFilter === 'team_1on1s' || currentMetricFilter === 'meetings_leadership') return 'Team 1:1s';
                     const m = availableMetrics.find(m => m.value === currentMetricFilter);
                     return m?.label || currentMetricFilter;
                   })();
@@ -2372,21 +2550,33 @@ const CampaignLineGraph: React.FC<CampaignLineGraphProps> = ({
                   let chapterRows: ChapterRowData[] = [];
 
                   if (isCustomMetric && customActionId) {
-                    type ChData = { count: number; goal: number; namedPeople: Set<string>; goalPeople: Set<string>; fieldPeople: Map<string, Set<string>> };
+                    type ChData = { count: number; goal: number; namedPeople: Set<string>; goalPeople: Set<string>; fieldPeople: Map<string, Set<string>>; memberVanIds: Set<string> };
                     const chapterMap = new Map<string, ChData>();
+                    const hasExplicitGoals = new Set<string>();
                     const mkCh = (goal = 0): ChData => ({
                       count: 0, goal, namedPeople: new Set(), goalPeople: new Set(),
                       fieldPeople: new Map(actionFields.map(f => [f.key, new Set<string>()])),
+                      memberVanIds: new Set(),
                     });
 
                     if (actionDef?.goal_type) {
                       selectedCampaignObjs.forEach(campaign => {
                         const mg = campaign.goalTypes.find(gt => gt.id === actionDef.goal_type);
                         if (mg?.chapterGoals) {
-                          Object.entries(mg.chapterGoals).forEach(([ch, g]) => chapterMap.set(ch, mkCh(g as number)));
+                          Object.entries(mg.chapterGoals).forEach(([ch, g]) => {
+                            chapterMap.set(ch, mkCh(g as number));
+                            hasExplicitGoals.add(ch);
+                          });
                         }
                       });
                     }
+
+                    // Track which organizers belong to each section (for goal inference)
+                    userMap.forEach((info, vid) => {
+                      const chapter = info.chapter || 'Unknown';
+                      if (!chapterMap.has(chapter)) chapterMap.set(chapter, mkCh());
+                      chapterMap.get(chapter)!.memberVanIds.add(vid);
+                    });
 
                     (listsData || [])
                       .filter((entry: any) => entry.action_id === customActionId)
@@ -2399,17 +2589,32 @@ const CampaignLineGraph: React.FC<CampaignLineGraphProps> = ({
                         if (!chapterMap.has(chapter)) chapterMap.set(chapter, mkCh());
                         const ch = chapterMap.get(chapter)!;
                         ch.namedPeople.add(pid);
-                        const meetsGoal = goalFieldKey
-                          ? (entry.progress?.[goalFieldKey] === true || entry.fields?.[goalFieldKey] === true)
-                          : true;
-                        if (meetsGoal) ch.goalPeople.add(pid);
+                        // Track organizer for goal inference
+                        const orgVid = entry.organizer_vanid?.toString();
+                        if (orgVid) ch.memberVanIds.add(orgVid);
+                        if (entryMeetsGoal(entry, goalFieldKey)) ch.goalPeople.add(pid);
                         actionFields.forEach(f => {
-                          if (entry.progress?.[f.key] === true || entry.fields?.[f.key] === true) ch.fieldPeople.get(f.key)?.add(pid);
+                          const fv = entry.progress?.[f.key] ?? entry.fields?.[f.key];
+                          if (fv === true || fv === 'true' || fv === 1 || fv === '1') ch.fieldPeople.get(f.key)?.add(pid);
                         });
                         ch.count = ch.goalPeople.size;
                       });
 
+                    // Infer goals for sections without explicit chapter goals
+                    const defaultGoal = Number(actionDef?.default_individual_goal) || 5;
+                    chapterMap.forEach((data, chapter) => {
+                      if (!hasExplicitGoals.has(chapter) && data.memberVanIds.size > 0) {
+                        let inferred = 0;
+                        data.memberVanIds.forEach(vid => {
+                          const memberGoals = organizerGoalsMap.get(vid);
+                          inferred += memberGoals?.get(customActionId!) || defaultGoal;
+                        });
+                        data.goal = inferred;
+                      }
+                    });
+
                     chapterRows = Array.from(chapterMap.entries())
+                      .filter(([_, data]) => data.namedPeople.size > 0 || data.goal > 0)
                       .map(([chapter, data]) => ({
                         chapter, count: data.count, goal: data.goal,
                         namedCount: data.namedPeople.size,
@@ -2477,8 +2682,7 @@ const CampaignLineGraph: React.FC<CampaignLineGraphProps> = ({
                           <TableCell sx={{ fontWeight: 600, py: 1, minWidth: 150 }}>Section</TableCell>
                           {metricDefs.map(md => (
                             <React.Fragment key={md.metricFilter}>
-                              <TableCell align="center" sx={{ fontWeight: 600, py: 1, minWidth: 80 }}>{md.metricLabel}</TableCell>
-                              <TableCell align="center" sx={{ fontWeight: 600, py: 1, minWidth: 60, fontSize: '0.65rem' }}>Goal</TableCell>
+                              <TableCell colSpan={2} align="center" sx={{ fontWeight: 600, py: 1, minWidth: 140 }}>{md.metricLabel}</TableCell>
                               {renderExtraHeaders(md.actionFields)}
                             </React.Fragment>
                           ))}
@@ -2496,13 +2700,18 @@ const CampaignLineGraph: React.FC<CampaignLineGraphProps> = ({
                             md.actionFields.forEach(f => {
                               totalFieldCounts[f.key] = md.chapterRows.reduce((s, r) => s + (r.fieldCounts[f.key] ?? 0), 0);
                             });
+                            const totalPct = totalGoal > 0 ? Math.min((totalCount / totalGoal) * 100, 100) : 0;
                             return (
                               <React.Fragment key={md.metricFilter}>
-                                <TableCell align="center" sx={{ py: 1 }}>
-                                  <Typography variant="body2" sx={{ fontWeight: 700, color: 'primary.main' }}>{totalCount}</Typography>
-                                </TableCell>
-                                <TableCell align="center" sx={{ py: 1 }}>
-                                  <Typography variant="body2" sx={{ fontWeight: 700, color: 'primary.main' }}>{totalGoal > 0 ? totalGoal : '—'}</Typography>
+                                <TableCell colSpan={2} sx={{ py: 1 }}>
+                                  {totalGoal > 0 ? (
+                                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                                      <LinearProgress variant="determinate" value={totalPct} sx={{ flex: 1, height: 6, borderRadius: 1, bgcolor: '#e0e0e0', '& .MuiLinearProgress-bar': { bgcolor: totalCount >= totalGoal ? '#4caf50' : '#1976d2' } }} />
+                                      <Typography variant="body2" sx={{ fontWeight: 700, fontSize: '0.8rem', color: 'primary.main', minWidth: 50, whiteSpace: 'nowrap' }}>{totalCount}/{totalGoal}</Typography>
+                                    </Box>
+                                  ) : (
+                                    <Typography variant="body2" sx={{ fontWeight: 700, color: 'primary.main', textAlign: 'center' }}>{totalCount}</Typography>
+                                  )}
                                 </TableCell>
                                 {md.actionFields.length >= 2 && renderExtraCells(md.actionFields, totalNamed, totalFieldCounts)}
                               </React.Fragment>
@@ -2524,13 +2733,18 @@ const CampaignLineGraph: React.FC<CampaignLineGraphProps> = ({
                                 const goal = row?.goal ?? 0;
                                 const namedCount = row?.namedCount ?? 0;
                                 const fieldCounts = row?.fieldCounts ?? {};
+                                const pct = goal > 0 ? Math.min((count / goal) * 100, 100) : 0;
                                 return (
                                   <React.Fragment key={md.metricFilter}>
-                                    <TableCell align="center">
-                                      <Typography variant="body2" sx={{ fontWeight: 600, fontSize: '0.8rem' }}>{count}</Typography>
-                                    </TableCell>
-                                    <TableCell align="center">
-                                      <Typography variant="body2" sx={{ fontSize: '0.75rem', color: 'text.secondary' }}>{goal > 0 ? goal : '—'}</Typography>
+                                    <TableCell colSpan={2}>
+                                      {goal > 0 ? (
+                                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                                          <LinearProgress variant="determinate" value={pct} sx={{ flex: 1, height: 6, borderRadius: 1, bgcolor: '#e0e0e0', '& .MuiLinearProgress-bar': { bgcolor: count >= goal ? '#4caf50' : '#1976d2' } }} />
+                                          <Typography variant="body2" sx={{ fontWeight: 600, fontSize: '0.75rem', minWidth: 40, whiteSpace: 'nowrap' }}>{count}/{goal}</Typography>
+                                        </Box>
+                                      ) : (
+                                        <Typography variant="body2" sx={{ fontWeight: 600, fontSize: '0.8rem', textAlign: 'center' }}>{count}</Typography>
+                                      )}
                                     </TableCell>
                                     {md.actionFields.length >= 2 && renderExtraCells(md.actionFields, namedCount, fieldCounts)}
                                   </React.Fragment>
@@ -2549,8 +2763,8 @@ const CampaignLineGraph: React.FC<CampaignLineGraphProps> = ({
               <Box sx={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
               {barometerGoalTypeFilters.map((currentMetricFilter, metricIndex) => {
               const getMetricLabel = (metric: string) => {
-                if (metric === 'meetings_membership') return 'Member 1:1s';
-                if (metric === 'meetings_leadership') return 'Leader 1:1s';
+                if (metric === 'constituent_1on1s' || metric === 'meetings_membership') return 'Constituent 1:1s';
+                if (metric === 'team_1on1s' || metric === 'meetings_leadership') return 'Team 1:1s';
                 const customMetric = availableMetrics.find(m => m.value === metric);
                 return customMetric?.label || metric;
               };
@@ -2605,27 +2819,25 @@ const CampaignLineGraph: React.FC<CampaignLineGraphProps> = ({
                       const personVanId = entry.vanid?.toString();
                       if (!personVanId) return;
                       namedPeople.add(personVanId);
-                      const meetsGoal = goalFieldKey
-                        ? (entry.progress?.[goalFieldKey] === true || entry.fields?.[goalFieldKey] === true)
-                        : true;
-                      if (meetsGoal) goalPeople.add(personVanId);
+                      if (entryMeetsGoal(entry, goalFieldKey)) goalPeople.add(personVanId);
                       actionFields.forEach(f => {
-                        if (entry.progress?.[f.key] === true || entry.fields?.[f.key] === true) fieldPeople[f.key].add(personVanId);
+                        const fv = entry.progress?.[f.key] ?? entry.fields?.[f.key];
+                        if (fv === true || fv === 'true' || fv === 1 || fv === '1') fieldPeople[f.key].add(personVanId);
                       });
                     });
                   totalCount = goalPeople.size;
                   totalNamed = namedPeople.size;
                   actionFields.forEach(f => { fieldCounts[f.key] = fieldPeople[f.key].size; });
-                } else if (currentMetricFilter === 'meetings_membership') {
+                } else if (currentMetricFilter === 'constituent_1on1s' || currentMetricFilter === 'meetings_membership') {
                   totalCount = (meetingsData || []).filter(m => {
                     const t = (m.meeting_type || '').toLowerCase();
-                    return t.includes('membership') && t.includes('one-on-one');
+                    return t.includes('one-on-one') && !t.includes('leadership') && !t.includes('two-on-one');
                   }).length;
                   totalNamed = totalCount;
                 } else {
                   totalCount = (meetingsData || []).filter(m => {
                     const t = (m.meeting_type || '').toLowerCase();
-                    return t.includes('leadership') && t.includes('one-on-one');
+                    return t.includes('leadership') || t.includes('two-on-one');
                   }).length;
                   totalNamed = totalCount;
                 }

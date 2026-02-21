@@ -12,6 +12,7 @@ CREATE TABLE IF NOT EXISTS `people-power-change.lumoviz.lumoviz_campaigns` (
   end_date DATE NOT NULL,
   parent_campaign_id STRING,
   chapters ARRAY<STRING>,
+  teams ARRAY<STRING>,
   status STRING DEFAULT 'active',
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP(),
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP(),
