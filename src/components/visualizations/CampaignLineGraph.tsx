@@ -378,11 +378,12 @@ const CampaignLineGraph: React.FC<CampaignLineGraphProps> = ({
       .sort((a, b) => b.count - a.count);
   }, [meetingsData, barometerGoalTypeFilter, userMap]);
 
-  // Check if a list entry meets the goal for a given field key
   const entryMeetsGoal = (entry: any, goalFieldKey: string | null): boolean => {
     if (!goalFieldKey) return true;
     const val = entry.progress?.[goalFieldKey] ?? entry.fields?.[goalFieldKey];
-    return val === true || val === 'true' || val === 1 || val === '1' || !!entry.is_completed;
+    if (val === true || val === 'true' || val === 1 || val === '1') return true;
+    if (typeof val === 'string' && val.trim().length > 0) return true;
+    return !!entry.is_completed;
   };
 
   // Build LeaderProgress data for LeaderMetricsTable (used in "By Person" and "By Leadership" views)

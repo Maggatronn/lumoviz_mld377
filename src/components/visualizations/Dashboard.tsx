@@ -1980,7 +1980,7 @@ const Dashboard: React.FC<DashboardProps> = ({
     try {
       // Add each selected person to the list
       const addPromises = selectedPeopleForAdd.map(async (personId) => {
-        const person = filteredTurfPeople.find(p => p.id === personId);
+        const person = conversationPeopleForTurf.find(p => p.id === personId);
         if (!person) return false;
         
         return await addToList({
@@ -2084,8 +2084,9 @@ const Dashboard: React.FC<DashboardProps> = ({
     
     const newValue = !person.fields[fieldKey];
     
-    // Celebration penguin on task completion
-    if (newValue) {
+    // Celebration penguin only when completing the goal-tracked field
+    const actionObj = availableActions.find((a: any) => a.action_name === action || a.action_id === action);
+    if (newValue && actionObj?.goal_field_key && fieldKey === actionObj.goal_field_key) {
       if (celebrationTimerRef.current) clearTimeout(celebrationTimerRef.current);
       setShowCelebrationPenguin(true);
       celebrationTimerRef.current = setTimeout(() => setShowCelebrationPenguin(false), 2200);
@@ -2224,7 +2225,7 @@ const Dashboard: React.FC<DashboardProps> = ({
       
       // If this was linked to an action, mark the field as complete
       if (selectedActionForConversation) {
-        const { listId, fieldKey } = selectedActionForConversation;
+        const { actionId, listId, fieldKey } = selectedActionForConversation;
         await updateListItem(listId, {
           progress: { [fieldKey]: true }
         });
@@ -2235,6 +2236,14 @@ const Dashboard: React.FC<DashboardProps> = ({
             ? { ...p, fields: { ...p.fields, [fieldKey]: true } }
             : p
         ));
+
+        // Celebration penguin if this conversation field is the goal field
+        const actionObj = availableActions.find((a: any) => a.action_id === actionId);
+        if (actionObj?.goal_field_key && fieldKey === actionObj.goal_field_key) {
+          if (celebrationTimerRef.current) clearTimeout(celebrationTimerRef.current);
+          setShowCelebrationPenguin(true);
+          celebrationTimerRef.current = setTimeout(() => setShowCelebrationPenguin(false), 2200);
+        }
       }
       
       // Trigger a reload of meetings if needed
@@ -2981,7 +2990,8 @@ const Dashboard: React.FC<DashboardProps> = ({
           completedCount = turfList.filter((entry: any) => {
             if (entry.action !== 'sign_pledge' || !isFromCurrentPeriod(entry)) return false;
             const v = entry.fields?.[goalFieldKey] ?? entry.progress?.[goalFieldKey];
-            return v === true || v === 'true' || v === 1 || v === '1';
+            if (v === true || v === 'true' || v === 1 || v === '1') return true;
+            return typeof v === 'string' && v.trim().length > 0;
           }).length;
         } else {
           // Default: use last field or userPledgeCount
@@ -3008,7 +3018,8 @@ const Dashboard: React.FC<DashboardProps> = ({
         if (goalFieldKey) {
           completedCount = actionEntries.filter((entry: any) => {
             const v = entry.fields?.[goalFieldKey] ?? entry.progress?.[goalFieldKey];
-            return v === true || v === 'true' || v === 1 || v === '1';
+            if (v === true || v === 'true' || v === 1 || v === '1') return true;
+            return typeof v === 'string' && v.trim().length > 0;
           }).length;
         } else {
           const lastField = action.fields[action.fields.length - 1];
@@ -3098,7 +3109,7 @@ const Dashboard: React.FC<DashboardProps> = ({
       let actionEntries = teamTurfList.filter((entry: any) => entry.action === action.action_id);
       if (isRateBased) actionEntries = actionEntries.filter(isFromCurrentPeriod);
 
-      const isTruthy = (v: any) => v === true || v === 'true' || v === 1 || v === '1';
+      const isTruthy = (v: any) => v === true || v === 'true' || v === 1 || v === '1' || (typeof v === 'string' && v.trim().length > 0);
       if (goalFieldKey) {
         completedCount = actionEntries.filter((entry: any) => {
           const v = entry.fields?.[goalFieldKey] ?? entry.progress?.[goalFieldKey];
@@ -4398,7 +4409,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                                             if (!entry.list_id) return;
                                             
                                             const newValue = e.target.checked;
-                                            if (newValue) {
+                                            if (newValue && action.goal_field_key && field.key === action.goal_field_key) {
                                               if (celebrationTimerRef.current) clearTimeout(celebrationTimerRef.current);
                                               setShowCelebrationPenguin(true);
                                               celebrationTimerRef.current = setTimeout(() => setShowCelebrationPenguin(false), 2200);
@@ -4429,6 +4440,11 @@ const Dashboard: React.FC<DashboardProps> = ({
                                             if (!entry.list_id) return;
                                             
                                             const newValue = e.target.value;
+                                            if (newValue && action.goal_field_key && field.key === action.goal_field_key && !entry.fields[field.key]) {
+                                              if (celebrationTimerRef.current) clearTimeout(celebrationTimerRef.current);
+                                              setShowCelebrationPenguin(true);
+                                              celebrationTimerRef.current = setTimeout(() => setShowCelebrationPenguin(false), 2200);
+                                            }
                                             const newFields = { ...entry.fields, [field.key]: newValue };
                                             await updateListItem(entry.list_id, {
                                               progress: newFields
@@ -4475,6 +4491,12 @@ const Dashboard: React.FC<DashboardProps> = ({
                                             if (!entry.list_id) return;
                                             
                                             const newValue = e.target.value;
+                                            const oldValue = String(entry.fields[field.key] || '');
+                                            if (newValue.trim() && !oldValue.trim() && action.goal_field_key && field.key === action.goal_field_key) {
+                                              if (celebrationTimerRef.current) clearTimeout(celebrationTimerRef.current);
+                                              setShowCelebrationPenguin(true);
+                                              celebrationTimerRef.current = setTimeout(() => setShowCelebrationPenguin(false), 2200);
+                                            }
                                             const newFields = { ...entry.fields, [field.key]: newValue };
                                             await updateListItem(entry.list_id, {
                                               progress: newFields
