@@ -78,10 +78,6 @@ const AddTeamDialog: React.FC<AddTeamDialogProps> = ({
   const [chapter, setChapter] = useState<string>('');
   const [turf, setTurf] = useState<string>('');
   
-  // Debug logging for chapters prop
-  useEffect(() => {
-    console.log('[AddTeamDialog] Received chapters prop:', chapters);
-  }, [chapters]);
   const [teamName, setTeamName] = useState<string>('');
   const [color, setColor] = useState<string>('#2563eb'); // Default blue color
   const [sharedPurpose, setSharedPurpose] = useState<string>('');
@@ -104,28 +100,21 @@ const AddTeamDialog: React.FC<AddTeamDialogProps> = ({
 
   // Load initial people when dialog opens (no debounce for initial load)
   React.useEffect(() => {
-    console.log('[AddTeamDialog] useEffect triggered:', { hasSearchFn: !!onSearchPeople, open });
-    
     if (!onSearchPeople || !open) {
       setLeadSearchResults([]);
       return;
     }
     
-    // Immediately load all people when dialog opens
-    console.log('[AddTeamDialog] Dialog opened, loading initial people...');
     setLeadSearchLoading(true);
     
     onSearchPeople('')
       .then((results) => {
-        console.log('[AddTeamDialog] Initial load SUCCESS, returned', results.length, 'people:', results);
         setLeadSearchResults(results);
       })
-      .catch((error) => {
-        console.error('[AddTeamDialog] Error loading initial people:', error);
+      .catch(() => {
         setLeadSearchResults([]);
       })
       .finally(() => {
-        console.log('[AddTeamDialog] Initial load complete');
         setLeadSearchLoading(false);
       });
   }, [open, onSearchPeople]);
@@ -151,29 +140,22 @@ const AddTeamDialog: React.FC<AddTeamDialogProps> = ({
 
   // Load initial members when dialog opens (no debounce for initial load)
   React.useEffect(() => {
-    console.log('[AddTeamDialog] Members useEffect triggered:', { hasSearchFn: !!onSearchPeople, open });
-    
     if (!onSearchPeople || !open) {
       setMembersSearchResults([]);
       return;
     }
     
-    // Immediately load all people when dialog opens
-    console.log('[AddTeamDialog] Loading initial members...');
     setMembersSearchLoading(true);
     
     onSearchPeople('')
       .then((results) => {
         const filtered = results.filter((p) => p.id !== teamLead?.id);
-        console.log('[AddTeamDialog] Initial members load SUCCESS, returned', filtered.length, 'people (after filtering lead)');
         setMembersSearchResults(filtered);
       })
-      .catch((error) => {
-        console.error('[AddTeamDialog] Error loading initial members:', error);
+      .catch(() => {
         setMembersSearchResults([]);
       })
       .finally(() => {
-        console.log('[AddTeamDialog] Members load complete');
         setMembersSearchLoading(false);
       });
   }, [open, onSearchPeople, teamLead?.id]);
@@ -236,7 +218,7 @@ const AddTeamDialog: React.FC<AddTeamDialogProps> = ({
       return;
     }
     if (!chapter.trim()) {
-      setSaveError('Chapter is required');
+      setSaveError('Section is required');
       return;
     }
 
@@ -534,11 +516,11 @@ const AddTeamDialog: React.FC<AddTeamDialogProps> = ({
 
           {/* Chapter Dropdown */}
           <FormControl fullWidth>
-            <InputLabel>Chapter *</InputLabel>
+            <InputLabel>Section *</InputLabel>
             <Select
               value={chapter}
               onChange={(e) => handleChapterChange(e.target.value as string)}
-              label="Chapter *"
+              label="Section *"
             >
               {chapters.map((chapterName) => (
                 <MenuItem key={chapterName} value={chapterName}>
@@ -563,7 +545,7 @@ const AddTeamDialog: React.FC<AddTeamDialogProps> = ({
           {chapter && (
             <Box>
               <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 'bold' }}>
-                Chapter Color
+                Section Color
               </Typography>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
                 <Box
@@ -615,7 +597,7 @@ const AddTeamDialog: React.FC<AddTeamDialogProps> = ({
                 </Box>
               </Box>
               <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
-                This color will be used for the chapter throughout the application
+                This color will be used for the section throughout the application
               </Typography>
             </Box>
           )}
@@ -728,7 +710,7 @@ const AddTeamDialog: React.FC<AddTeamDialogProps> = ({
                 </Typography>
               )}
               <Typography variant="body2" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                <strong>Chapter:</strong> 
+                <strong>Section:</strong> 
                 {chapter ? (
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                     <Box

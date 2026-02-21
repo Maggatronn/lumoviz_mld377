@@ -468,15 +468,12 @@ const MainAppContent: React.FC<{ authUser?: import('../services/auth').AuthUser;
   
   // Load shared contacts and meetings data once (for PeoplePanel)
   const reloadSharedContacts = useCallback(async (includeMeetings = false) => {
-    console.log('[MainApp] Reloading shared contacts...');
     try {
       const contactsResponse = await fetchContacts({
         chapter: undefined,
         limit: 5000,
         offset: 0
       });
-      
-      console.log('[MainApp] Reloaded contacts:', contactsResponse.data.length);
       
       const contacts = (contactsResponse.data || []).map(contact => ({
         ...contact,
@@ -531,16 +528,13 @@ const MainAppContent: React.FC<{ authUser?: import('../services/auth').AuthUser;
   useEffect(() => {
     const loadSharedData = async () => {
       if (sharedDataLoadedRef.current) {
-        console.log('[MainApp] Skipping - already loaded shared data');
         return;
       }
       
       if (!mappingsReady) {
-        console.log('[MainApp] Skipping - mappings not ready');
         return;
       }
       
-      console.log('[MainApp] Loading shared contacts and meetings...');
       sharedDataLoadedRef.current = true;
       
       await reloadSharedContacts(true);
@@ -691,7 +685,6 @@ const MainAppContent: React.FC<{ authUser?: import('../services/auth').AuthUser;
             });
           });
         });
-        console.log('[MainApp] Updated userMap with', mappings.length, 'mappings');
         return updated;
       });
       
@@ -828,10 +821,15 @@ const MainAppContent: React.FC<{ authUser?: import('../services/auth').AuthUser;
 
     const organizers = Array.from(organizerSet).sort();
 
+    const teamNames = (teamsData || [])
+      .map((t: any) => t.teamName)
+      .filter(Boolean)
+      .sort();
+
     return {
       chapters,
       organizers,
-      teamTypes: ['Lead Team', 'Chapter Team', 'Working Group', 'Committee'],
+      teamTypes: teamNames,
       goalTypes: ['Pledges', 'Leadership', 'Membership', 'Events']
     };
   }, [chapters, meetingsData, orgIds, teamsData]);
@@ -1274,11 +1272,8 @@ const MainAppContent: React.FC<{ authUser?: import('../services/auth').AuthUser;
         
         // Fetch chapters
         const chaptersResponse = await fetchChapters();
-        console.log('[MainApp] fetchChapters response:', chaptersResponse);
         const chaptersData = Array.isArray(chaptersResponse) ? chaptersResponse : [];
-        console.log('[MainApp] chaptersData:', chaptersData);
         const finalChapters = [`All ${TERMS.chapters}`, ...chaptersData];
-        console.log('[MainApp] Setting chapters to:', finalChapters);
         setChapters(finalChapters);
         // Note: unifiedFilters already initialized with chapter: '' in useState, no need to set again
         
@@ -1570,6 +1565,7 @@ const MainAppContent: React.FC<{ authUser?: import('../services/auth').AuthUser;
     if (!response.ok) {
       throw new Error('Failed to update person');
     }
+    reloadSharedContacts(false);
   };
 
   const handleDeleteConversationFromDialog = async (meetingId: string) => {
@@ -1579,6 +1575,7 @@ const MainAppContent: React.FC<{ authUser?: import('../services/auth').AuthUser;
     if (!response.ok) {
       throw new Error('Failed to delete conversation');
     }
+    reloadSharedContacts(true);
   };
 
   const handleDeletePersonFromDialog = async (personId: string) => {
@@ -2522,6 +2519,14 @@ const MainAppContent: React.FC<{ authUser?: import('../services/auth').AuthUser;
         return networkLOEFilter.includes(nodeLOECategory);
       });
     }
+
+    // Filter by team name
+    if (unifiedFilters.teamType) {
+      const selectedTeam = unifiedFilters.teamType;
+      filteredNodes = filteredNodes.filter(node => {
+        return node.teams?.includes(selectedTeam) || node.type === 'section_leader';
+      });
+    }
     
     const filteredNodeIds = new Set(filteredNodes.map(n => n.id));
     
@@ -2668,7 +2673,7 @@ const MainAppContent: React.FC<{ authUser?: import('../services/auth').AuthUser;
     // );
     
     return { networkNodes: filteredNodes, networkLinks: allLinks };
-  }, [allNetworkNodes, allNetworkLinks, selectedChapter, networkLOEFilter, leaderHierarchy, getNodeLOECategory, teamsData, orgIds]);
+  }, [allNetworkNodes, allNetworkLinks, selectedChapter, networkLOEFilter, leaderHierarchy, getNodeLOECategory, teamsData, orgIds, unifiedFilters.teamType]);
 
 
   const selectedNodeName = React.useMemo(() => {
@@ -3046,6 +3051,7 @@ const MainAppContent: React.FC<{ authUser?: import('../services/auth').AuthUser;
                   onSavePerson={handleSavePersonFromDialog}
                   onDeleteConversation={handleDeleteConversationFromDialog}
                   onDeletePerson={handleDeletePersonFromDialog}
+                  onDataChange={() => reloadSharedContacts(true)}
                   availableOrganizers={allOrganizerOptions.map(o => ({
                     id: (o.vanid || '').toString(),
                     name: `${o.firstname || ''} ${o.lastname || ''}`.trim()
@@ -3101,6 +3107,7 @@ const MainAppContent: React.FC<{ authUser?: import('../services/auth').AuthUser;
                   onNavigateToGoal={() => {}}
                   hoveredOrganizer={null}
                   onOrganizerHover={() => {}}
+                  teamsData={teamsData}
                 />
               </Box>
             </Box>
@@ -3188,6 +3195,7 @@ const MainAppContent: React.FC<{ authUser?: import('../services/auth').AuthUser;
                   color: '#1976d2'
                 }))}
                 peopleRecords={peopleRecords}
+                onRefreshTeams={handleRefreshTeams}
                 existingTeamsData={teamsData}
                 compact={true}
                 chapters={chapters}

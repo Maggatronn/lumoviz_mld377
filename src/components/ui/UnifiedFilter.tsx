@@ -101,7 +101,6 @@ const UnifiedFilter: React.FC<UnifiedFilterProps> = ({
     if (filters.chapter) count++;
     if (filters.organizer) count++;
     if (filters.loeStatus.length > 0) count++;
-    if (filters.memberStatus.length > 0) count++;
     if (filters.lastContactFilter !== 'all') count++;
     if (filters.meetingCountFilter !== 'all') count++;
     if (filters.actionStatus !== 'all') count++;
@@ -211,19 +210,19 @@ const UnifiedFilter: React.FC<UnifiedFilterProps> = ({
               </Select>
             </FormControl>
 
-            {/* Team Type Filter */}
-            {availableOptions.teamTypes && (
+            {/* Team Filter */}
+            {availableOptions.teamTypes && availableOptions.teamTypes.length > 0 && (
               <FormControl fullWidth size="small" sx={{ mb: 2 }}>
-                <InputLabel>Team Type</InputLabel>
+                <InputLabel>Team</InputLabel>
                 <Select
                   value={filters.teamType}
                   onChange={(e) => onFiltersChange({ teamType: e.target.value })}
-                  label="Team Type"
+                  label="Team"
                 >
-                  <MenuItem value="">All Types</MenuItem>
-                  {availableOptions.teamTypes.map((type) => (
-                    <MenuItem key={type} value={type}>
-                      {type}
+                  <MenuItem value="">All Teams</MenuItem>
+                  {availableOptions.teamTypes.map((name) => (
+                    <MenuItem key={name} value={name}>
+                      {name}
                     </MenuItem>
                   ))}
                 </Select>
@@ -390,25 +389,6 @@ const UnifiedFilter: React.FC<UnifiedFilterProps> = ({
             onClick={removeFilter}
             onDelete={removeFilter}
             deleteIcon={<CloseIcon />}
-          />
-        );
-      });
-    }
-
-    if (filters.memberStatus.length > 0) {
-      filters.memberStatus.forEach((status) => {
-        const removeFilter = () => onFiltersChange({ 
-          memberStatus: filters.memberStatus.filter(s => s !== status) 
-        });
-        chips.push(
-          <Chip
-            key={`member-${status}`}
-            label={`Member: ${status}`}
-            size="small"
-            onClick={removeFilter}
-            onDelete={removeFilter}
-            deleteIcon={<CloseIcon />}
-            color={status === 'Active' ? 'success' : status === 'Lapsed' ? 'warning' : 'default'}
           />
         );
       });

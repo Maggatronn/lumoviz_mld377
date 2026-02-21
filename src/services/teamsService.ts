@@ -538,7 +538,6 @@ class TeamsService {
         throw new Error(result.error || 'Failed to update chapter color');
       }
 
-      console.log(`🎨 Chapter color updated successfully: ${chapterName} -> ${color}`);
       return { 
         success: true, 
         updatedCount: result.updatedCount,

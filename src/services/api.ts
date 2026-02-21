@@ -113,13 +113,11 @@ const mapLink = (data: any): Link => {
 
 export const fetchChapters = async (): Promise<string[]> => {
   try {
-    console.log('[fetchChapters] Fetching from:', `${API_URL}/chapters`);
     const response = await fetch(`${API_URL}/chapters`);
     if (!response.ok) {
       throw new Error(`Failed to fetch chapters: ${response.statusText}`);
     }
     const data = await response.json();
-    console.log('[fetchChapters] Received chapters:', data);
     return data;
   } catch (error) {
     console.error('Error fetching chapters:', error);
@@ -598,7 +596,9 @@ export interface OrganizerGoal {
 // Fetch organizer's turf lists
 export const fetchLists = async (organizer_vanid: string): Promise<ListItem[]> => {
   try {
-    const response = await fetch(`${API_URL}/lists?organizer_vanid=${organizer_vanid}`);
+    const response = await fetch(`${API_URL}/lists?organizer_vanid=${organizer_vanid}&_t=${Date.now()}`, {
+      cache: 'no-store'
+    });
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`);
     }
@@ -613,7 +613,9 @@ export const fetchLists = async (organizer_vanid: string): Promise<ListItem[]> =
 // Fetch ALL lists across all organizers (for barometer rollups)
 export const fetchAllLists = async (): Promise<ListItem[]> => {
   try {
-    const response = await fetch(`${API_URL}/lists/all`);
+    const response = await fetch(`${API_URL}/lists/all?_t=${Date.now()}`, {
+      cache: 'no-store'
+    });
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`);
     }
@@ -753,8 +755,7 @@ export const saveOrganizerGoal = async (data: {
       return false;
     }
     
-    const result = await response.json();
-    console.log('[saveOrganizerGoal] Goal saved successfully:', result);
+    await response.json();
     return true;
   } catch (error) {
     console.error('Error saving organizer goal:', error);

@@ -35,11 +35,12 @@ interface ConversationsVisualizationProps {
   userMap: Map<string, any>;
   orgIds: any[];
   selectedChapter?: string;
-  organizerFilter?: string; // NEW: Filter meetings by organizer
+  organizerFilter?: string;
   goals?: ConversationGoal[];
   onNavigateToGoal?: (goalId: string) => void;
   hoveredOrganizer?: string | null;
   onOrganizerHover?: (organizer: string | null) => void;
+  teamsData?: any[];
 }
 
 type OrganizationalView = 'federation' | 'chapters' | 'teams' | 'organizers';
@@ -148,7 +149,8 @@ const ConversationSummaryView: React.FC<{
   onOrganizerHover?: (organizer: string | null) => void;
   containerWidth?: number;
   containerHeight?: number;
-}> = ({ meetings, contacts, currentDateRange, organizationalView, userMap, orgIds, selectedChapter, organizerFilter, goals, onNavigateToGoal, hoveredOrganizer: externalHoveredOrganizer, onOrganizerHover, containerWidth = 800, containerHeight = 600 }) => {
+  teamsData?: any[];
+}> = ({ meetings, contacts, currentDateRange, organizationalView, userMap, orgIds, selectedChapter, organizerFilter, goals, onNavigateToGoal, hoveredOrganizer: externalHoveredOrganizer, onOrganizerHover, containerWidth = 800, containerHeight = 600, teamsData = [] }) => {
   const { customColors } = useChapterColors();
   const [internalHoveredOrganizer, setInternalHoveredOrganizer] = useState<string | null>(null);
   
@@ -214,10 +216,27 @@ const ConversationSummaryView: React.FC<{
   };
   
   
+  // Available teams for "By Person" team filter
+  const availableTeams = useMemo(() => {
+    return teamsData
+      .filter((t: any) => t.teamName && t.organizers?.length > 0)
+      .map((t: any) => ({
+        id: t.id,
+        name: t.teamName,
+        memberNames: (t.organizers || []).map((m: any) => {
+          const name = m.name?.trim();
+          if (name) return name;
+          const info = userMap.get(m.id?.toString() || m.vanId?.toString());
+          return info ? (info.fullName || `${info.firstname || ''} ${info.lastname || ''}`.trim()) : '';
+        }).filter(Boolean)
+      }))
+      .sort((a: any, b: any) => a.name.localeCompare(b.name));
+  }, [teamsData, userMap]);
+
   // Histogram state
   const [histogramTimeGranularity, setHistogramTimeGranularity] = useState<'day' | 'week' | 'month'>('week');
   const [histogramScope, setHistogramScope] = useState<'person' | 'chapter' | 'federation' | 'conversation_type'>('federation');
-  const [selectedChapterForPersonView, setSelectedChapterForPersonView] = useState<string>('');
+  const [selectedTeamForPersonView, setSelectedTeamForPersonView] = useState<string>('');
   const [isLoadingHistogram, setIsLoadingHistogram] = useState(false);
 
   // Date range for histogram - default to 1 year
@@ -535,12 +554,29 @@ const ConversationSummaryView: React.FC<{
       bucket.scopeData[scopeLabel] = count;
     });
     
+    // Filter person-level data by selected team
+    if (histogramScope === 'person' && selectedTeamForPersonView) {
+      const selectedTeam = availableTeams.find((t: any) => t.id === selectedTeamForPersonView);
+      if (selectedTeam) {
+        const teamMemberNamesLower = new Set(selectedTeam.memberNames.map((n: string) => n.toLowerCase()));
+        bucketMap.forEach((bucket) => {
+          const filteredScopeData: { [key: string]: number } = {};
+          Object.entries(bucket.scopeData).forEach(([name, count]) => {
+            if (teamMemberNamesLower.has(name.toLowerCase())) {
+              filteredScopeData[name] = count;
+            }
+          });
+          bucket.scopeData = filteredScopeData;
+        });
+      }
+    }
+
     // Convert to array and add total counts
     return Array.from(bucketMap.values()).map(bucket => ({
       ...bucket,
       count: Object.values(bucket.scopeData).reduce((sum, val) => sum + val, 0)
     })).sort((a, b) => a.start.getTime() - b.start.getTime());
-  }, [allHistogramData, histogramTimeGranularity, histogramScope]);
+  }, [allHistogramData, histogramTimeGranularity, histogramScope, selectedTeamForPersonView, availableTeams]);
 
   // Auto-scroll histogram to most recent date (rightmost position)
   useEffect(() => {
@@ -647,35 +683,36 @@ const ConversationSummaryView: React.FC<{
                   const newScope = e.target.value as 'person' | 'chapter' | 'federation' | 'conversation_type';
                   setHistogramScope(newScope);
                   if (newScope !== 'person') {
-                    setSelectedChapterForPersonView('');
+                    setSelectedTeamForPersonView('');
                   }
                 }}
                 sx={{ fontSize: '0.8rem', '& .MuiSelect-select': { py: 0.75 } }}
               >
                 <MenuItem value="federation" sx={{ fontSize: '0.8rem' }}>Full Class</MenuItem>
-                <MenuItem value="chapter" sx={{ fontSize: '0.8rem' }}>By Chapter</MenuItem>
+                <MenuItem value="chapter" sx={{ fontSize: '0.8rem' }}>By Section</MenuItem>
                 <MenuItem value="person" sx={{ fontSize: '0.8rem' }}>By Person</MenuItem>
                 <MenuItem value="conversation_type" sx={{ fontSize: '0.8rem' }}>By Type</MenuItem>
               </Select>
             </FormControl>
           </Box>
 
-          {/* Chapter Filter - Only show when "By Person" is selected */}
+          {/* Team Filter - Only show when "By Person" is selected */}
           {histogramScope === 'person' && (
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
               <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.75rem', fontWeight: 600 }}>
-                CHAPTER:
+                TEAM:
               </Typography>
-              <FormControl size="small" sx={{ minWidth: 120 }}>
+              <FormControl size="small" sx={{ minWidth: 140 }}>
                 <Select
-                  value={selectedChapterForPersonView}
-                  onChange={(e) => setSelectedChapterForPersonView(e.target.value as string)}
+                  value={selectedTeamForPersonView}
+                  onChange={(e) => setSelectedTeamForPersonView(e.target.value as string)}
+                  displayEmpty
                   sx={{ fontSize: '0.8rem', '& .MuiSelect-select': { py: 0.75 } }}
                 >
                   <MenuItem value="" sx={{ fontSize: '0.8rem' }}>All</MenuItem>
-                  {availableChapters.map((chapter) => (
-                    <MenuItem key={chapter} value={chapter} sx={{ fontSize: '0.8rem' }}>
-                      {chapter}
+                  {availableTeams.map((team: any) => (
+                    <MenuItem key={team.id} value={team.id} sx={{ fontSize: '0.8rem' }}>
+                      {team.name}
                     </MenuItem>
                   ))}
                 </Select>
@@ -853,9 +890,10 @@ const ConversationSummaryView: React.FC<{
                   const chapterColor = getCustomChapterColor(chapterName, customColors);
                   colorMap.set(chapterName, chapterColor);
                 });
-              } else if (histogramScope === 'person' && selectedChapterForPersonView) {
-                // Use the same chapter color for all people (shapes will distinguish them)
-                const baseColor = getCustomChapterColor(selectedChapterForPersonView, customColors);
+              } else if (histogramScope === 'person' && selectedTeamForPersonView) {
+                const selectedTeam = availableTeams.find((t: any) => t.id === selectedTeamForPersonView);
+                const teamSection = teamsData.find((t: any) => t.id === selectedTeamForPersonView)?.chapter || '';
+                const baseColor = teamSection ? getCustomChapterColor(teamSection, customColors) : '#1976d2';
                 sortedScopeKeys.forEach((personName) => {
                   colorMap.set(personName, baseColor);
                 });
@@ -962,7 +1000,7 @@ const ConversationSummaryView: React.FC<{
                               const barColor = colorMap.get(scopeKey) || '#999999';
                               
                               // Get consistent pattern index for individual people
-                              const patternIndex = histogramScope === 'person' && selectedChapterForPersonView 
+                              const patternIndex = histogramScope === 'person' && selectedTeamForPersonView 
                                 ? getPersonPatternIndex(scopeKey, sortedScopeKeys, histogramData)
                                 : segmentIndex;
                               
@@ -985,7 +1023,7 @@ const ConversationSummaryView: React.FC<{
                                       zIndex: 10
                                     },
                                     // Add patterns for individual people within a chapter
-                                    ...(histogramScope === 'person' && selectedChapterForPersonView 
+                                    ...(histogramScope === 'person' && selectedTeamForPersonView 
                                       ? getPersonPattern(patternIndex) 
                                       : {})
                                   }}
@@ -1051,9 +1089,9 @@ const ConversationSummaryView: React.FC<{
                 const chapterColor = getCustomChapterColor(chapterName, customColors);
                 colorMap.set(chapterName, chapterColor);
               });
-            } else if (histogramScope === 'person' && selectedChapterForPersonView) {
-              // Use the same chapter color for all people (shapes will distinguish them)
-              const baseColor = getCustomChapterColor(selectedChapterForPersonView, customColors);
+            } else if (histogramScope === 'person' && selectedTeamForPersonView) {
+              const teamSection2 = teamsData.find((t: any) => t.id === selectedTeamForPersonView)?.chapter || '';
+              const baseColor = teamSection2 ? getCustomChapterColor(teamSection2, customColors) : '#1976d2';
               sortedScopeKeys.forEach((personName) => {
                 colorMap.set(personName, baseColor);
               });
@@ -1242,9 +1280,11 @@ const ConversationSummaryView: React.FC<{
         {(histogramScope === 'chapter' || histogramScope === 'person' || histogramScope === 'conversation_type') && histogramData.length > 0 && (
           <Box sx={{ mt: 2, mb: 2 }}>
             <Typography variant="caption" sx={{ fontWeight: 'bold', mb: 1, display: 'block' }}>
-              {histogramScope === 'chapter' ? 'Chapter' : 
+              {histogramScope === 'chapter' ? 'Section' : 
                histogramScope === 'person' ? 
-                 (selectedChapterForPersonView ? `${selectedChapterForPersonView} Organizers` : 'Organizer') 
+                 (selectedTeamForPersonView 
+                   ? `${availableTeams.find((t: any) => t.id === selectedTeamForPersonView)?.name || 'Team'} Members` 
+                   : 'Organizer') 
                  : histogramScope === 'conversation_type' ? 'Conversation Type'
                  : 'Scope'} Legend:
             </Typography>
@@ -1282,9 +1322,9 @@ const ConversationSummaryView: React.FC<{
                     const chapterColor = getCustomChapterColor(chapterName, customColors);
                     colorMap.set(chapterName, chapterColor);
                   });
-                } else if (histogramScope === 'person' && selectedChapterForPersonView) {
-                  // Use the same chapter color for all people (shapes will distinguish them)
-                  const baseColor = getCustomChapterColor(selectedChapterForPersonView, customColors);
+                } else if (histogramScope === 'person' && selectedTeamForPersonView) {
+                  const teamSection3 = teamsData.find((t: any) => t.id === selectedTeamForPersonView)?.chapter || '';
+                  const baseColor = teamSection3 ? getCustomChapterColor(teamSection3, customColors) : '#1976d2';
                   sortedScopeKeys.forEach((personName) => {
                     colorMap.set(personName, baseColor);
                   });
@@ -1331,7 +1371,7 @@ const ConversationSummaryView: React.FC<{
                 
                 return sortedScopeKeys.slice(0, 8).map((scopeKey, index) => {
                   // Get consistent pattern index for individual people
-                  const patternIndex = histogramScope === 'person' && selectedChapterForPersonView 
+                  const patternIndex = histogramScope === 'person' && selectedTeamForPersonView 
                     ? getPersonPatternIndex(scopeKey, sortedScopeKeys, histogramData)
                     : index;
                     
@@ -1358,7 +1398,7 @@ const ConversationSummaryView: React.FC<{
                         bgcolor: colorMap.get(scopeKey) || '#999999',
                         borderRadius: '2px',
                         // Add patterns for individual people within a chapter
-                        ...(histogramScope === 'person' && selectedChapterForPersonView 
+                        ...(histogramScope === 'person' && selectedTeamForPersonView 
                           ? getPersonPattern(patternIndex) 
                           : {})
                       }} />
@@ -1412,7 +1452,8 @@ const ConversationsVisualization: React.FC<ConversationsVisualizationProps> = ({
   goals = [],
   onNavigateToGoal,
   hoveredOrganizer,
-  onOrganizerHover
+  onOrganizerHover,
+  teamsData = []
 }) => {
   // Use a ref to measure the container and provide dynamic sizing
   const containerRef = React.useRef<HTMLDivElement>(null);
@@ -1459,7 +1500,7 @@ const ConversationsVisualization: React.FC<ConversationsVisualizationProps> = ({
           meetings={meetings}
           contacts={contacts}
           currentDateRange={currentDateRange}
-          organizationalView="organizers" // Fixed to organizers view since that's where goals work
+          organizationalView="organizers"
           userMap={userMap}
           orgIds={orgIds}
           selectedChapter={selectedChapter}
@@ -1470,6 +1511,7 @@ const ConversationsVisualization: React.FC<ConversationsVisualizationProps> = ({
           onOrganizerHover={onOrganizerHover}
           containerWidth={containerSize.width}
           containerHeight={containerSize.height}
+          teamsData={teamsData}
         />
       </Box>
     </Box>

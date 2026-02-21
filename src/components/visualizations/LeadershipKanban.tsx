@@ -626,7 +626,7 @@ const LeadershipKanban: React.FC<LeadershipKanbanProps> = ({
                       </Typography>
                     </Box>
 
-                    {/* Chapter & Member Status */}
+                    {/* Chapter */}
                     <Stack direction="row" spacing={0.5} sx={{ mb: 1, flexWrap: 'wrap', gap: 0.75 }}>
                       <Chip
                         label={person.chapter}
@@ -646,28 +646,6 @@ const LeadershipKanban: React.FC<LeadershipKanbanProps> = ({
                             bgcolor: column.color + '10',
                             borderColor: column.color
                           }
-                        }}
-                      />
-                      <Chip
-                        label={person.memberStatus || 'Unknown'}
-                        size="small"
-                        variant="filled"
-                        onClick={(e) => e.stopPropagation()}
-                        sx={{
-                          fontSize: '0.6rem',
-                          height: 18,
-                          bgcolor: (() => {
-                            const status = (person.memberStatus || '').toLowerCase();
-                            if (status.includes('active')) return '#4caf5020';
-                            if (status.includes('lapsed') || status.includes('former')) return '#ff980020';
-                            return '#9e9e9e20'; // Gray for unknown/null
-                          })(),
-                          color: (() => {
-                            const status = (person.memberStatus || '').toLowerCase();
-                            if (status.includes('active')) return '#4caf50';
-                            if (status.includes('lapsed') || status.includes('former')) return '#ff9800';
-                            return '#757575'; // Dark gray for unknown/null
-                          })()
                         }}
                       />
                     </Stack>

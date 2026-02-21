@@ -206,6 +206,7 @@ interface PeoplePanelProps {
   hideActionButtons?: boolean;
   onEditConversation?: (meeting: any) => void;
   onDeleteConversation?: (meetingId: string) => Promise<void>;
+  onDataChange?: () => void;
   organizerVanIds?: string[];
   onDeletePerson?: (personId: string) => Promise<void>;
 }
@@ -291,6 +292,7 @@ const PeoplePanel: React.FC<PeoplePanelProps> = ({
   hideActionButtons = false,
   onEditConversation,
   onDeleteConversation,
+  onDataChange,
   onDeletePerson,
   organizerVanIds: propOrganizerVanIds,
 }) => {
@@ -531,7 +533,6 @@ const PeoplePanel: React.FC<PeoplePanelProps> = ({
     if (filters.chapter) count++;
     if (filters.searchText) count++;
     if (filters.loeStatus.length > 0) count++;
-    if (filters.memberStatus.length > 0) count++;
     if (filters.lastContactFilter !== 'all') count++;
     if (filters.meetingCountFilter !== 'all') count++;
     if (filters.actionStatus !== 'all') count++;
@@ -617,10 +618,17 @@ const PeoplePanel: React.FC<PeoplePanelProps> = ({
     
     // console.log('[PeoplePanel] After chapter filter:', result.length, 'contacts');
     
+    // Build a set of VAN IDs from turfLists so people on lists always appear
+    const turfVanIds = new Set(
+      (turfLists || []).map((item: any) => (item.vanid ?? item.contact_vanid)?.toString()).filter(Boolean)
+    );
+
     // Filter by organizer: use explicit VAN ID list if provided, otherwise derive from name
     if (propOrganizerVanIds && propOrganizerVanIds.length > 0) {
       const vanIdSet = new Set(propOrganizerVanIds.map(id => id.toString()));
       result = result.filter(c => {
+        const cVanId = c.vanid?.toString();
+        if (cVanId && turfVanIds.has(cVanId)) return true;
         if (c.primary_organizer_vanid && vanIdSet.has(c.primary_organizer_vanid.toString())) return true;
         const organizers = c.organizers || [];
         return organizers.some((org: string) => vanIdSet.has(org.toString()));
@@ -669,8 +677,6 @@ const PeoplePanel: React.FC<PeoplePanelProps> = ({
       
       const { vanIds, names } = getAllVariations();
       
-      console.log('[PeoplePanel] Filtering by organizer:', organizerLower, 'vanIds:', vanIds, 'names:', names);
-      
       result = result.filter(c => {
         // Check primary_organizer_vanid first (from contacts table)
         if (c.primary_organizer_vanid) {
@@ -688,14 +694,6 @@ const PeoplePanel: React.FC<PeoplePanelProps> = ({
           return vanIds.some(id => orgLower === id.toLowerCase()) ||
                  names.some(name => orgLower.includes(name.toLowerCase()));
         });
-      });
-    }
-    
-    // Filter by member status
-    if (filters.memberStatus.length > 0) {
-      result = result.filter(c => {
-        const status = c.member_status || 'null';
-        return filters.memberStatus.includes(status);
       });
     }
     
@@ -754,7 +752,7 @@ const PeoplePanel: React.FC<PeoplePanelProps> = ({
     });
     
     return result;
-  }, [allContacts, filters.chapter, filters.organizer, filters.memberStatus, filters.loeStatus, selectedChapter, sortColumn, sortDirection, propOrganizerVanIds]);
+  }, [allContacts, filters.chapter, filters.organizer, filters.loeStatus, selectedChapter, sortColumn, sortDirection, propOrganizerVanIds, turfLists]);
   
   // Paginated display of filtered contacts - show all loaded so far (0 to displayLimit)
   const [displayLimit, setDisplayLimit] = useState(DISPLAY_LIMIT);
@@ -869,7 +867,7 @@ const PeoplePanel: React.FC<PeoplePanelProps> = ({
   // Reset display offset when any filters change (all client-side now)
   useEffect(() => {
     setDisplayLimit(DISPLAY_LIMIT); // Reset to show first 100 when filters change
-  }, [filters.chapter, filters.organizer, filters.memberStatus, filters.loeStatus, filters.searchText, filters.lastContactFilter, filters.meetingCountFilter, filters.actionStatus, sortColumn, sortDirection]);
+  }, [filters.chapter, filters.organizer, filters.loeStatus, filters.searchText, filters.lastContactFilter, filters.meetingCountFilter, filters.actionStatus, sortColumn, sortDirection]);
   
   // Load more contacts (client-side pagination) - append more to visible list
   const handleLoadMore = () => {
@@ -1272,14 +1270,13 @@ const PeoplePanel: React.FC<PeoplePanelProps> = ({
         action: actionId // Use action_id for the action field as well
       });
       
-      // Refresh lists after adding
       const lists = await fetchLists(currentUserId);
       setListsData(lists);
       
-      // Close dialog
       setActionDialogOpen(false);
       setPersonForActionMenu(null);
       setSelectedActionId('');
+      if (onDataChange) onDataChange();
     } catch (error) {
       console.error('[PeoplePanel] Error adding to list:', error);
     }
@@ -1320,6 +1317,7 @@ const PeoplePanel: React.FC<PeoplePanelProps> = ({
         setActionDialogOpen(false);
         setPersonForActionMenu(null);
         setSelectedActionId('');
+        if (onDataChange) onDataChange();
       } catch (error) {
         console.error('[PeoplePanel] Error adding to list:', error);
       }
@@ -1583,11 +1581,11 @@ const PeoplePanel: React.FC<PeoplePanelProps> = ({
             person.organizers.push(leaderName);
           }
         } else {
-          // Person not in contacts - only add them if no LOE/membership filters are active
-          // (since we don't have LOE/membership data for pledge-only people)
-          const hasLOEOrMemberFilter = filters.loeStatus.length > 0 || filters.memberStatus.length > 0;
+          // Person not in contacts - only add them if no LOE filter is active
+          // (since we don't have LOE data for pledge-only people)
+          const hasLOEFilter = filters.loeStatus.length > 0;
           
-          if (!hasLOEOrMemberFilter) {
+          if (!hasLOEFilter) {
             const name = `${submission.first_name || ''} ${submission.last_name || ''}`.trim() || `Contact ${pledgeVanid}`;
             
             const personRecord: PersonRecord = {
@@ -2018,7 +2016,7 @@ const PeoplePanel: React.FC<PeoplePanelProps> = ({
         headerCells.push('Organizers');
       }
       
-      headerCells.push('LOE', 'Status', 'Last Contact', 'One-on-Ones', 'Latest Notes');
+      headerCells.push('LOE', 'Last Contact', 'One-on-Ones', 'Latest Notes');
       
       rows.push(headerCells.join('\t'));
       
@@ -2043,9 +2041,6 @@ const PeoplePanel: React.FC<PeoplePanelProps> = ({
         cells.push(person.loeStatus && person.loeStatus !== 'Unknown' 
           ? person.loeStatus.replace(/^\d+[_.]/, '') 
           : '-');
-        
-        // Member Status
-        cells.push(person.memberStatus || '-');
         
         // Last Contact
         cells.push(person.mostRecentContactAllTime || person.mostRecentContact
@@ -2094,6 +2089,7 @@ const PeoplePanel: React.FC<PeoplePanelProps> = ({
       body: JSON.stringify(conversation),
     });
     if (!res.ok) throw new Error('Failed to log conversation');
+    if (onDataChange) onDataChange();
   };
 
   // Build organizer list from orgIds for dialogs
@@ -3496,41 +3492,6 @@ const PeoplePanel: React.FC<PeoplePanelProps> = ({
               </Select>
             </FormControl>
 
-            {/* Membership Status Filter (Multi-Select) */}
-            <FormControl fullWidth size="small">
-              <InputLabel>Membership Status</InputLabel>
-              <Select
-                multiple
-                value={filters.memberStatus}
-                onChange={(e) => handleFilterChange('memberStatus', e.target.value as string[])}
-                input={<OutlinedInput label="Membership Status" />}
-                renderValue={(selected) => {
-                  const selectedArr = selected as string[];
-                  return selectedArr.map(val => {
-                    if (val === 'null') return 'No Status';
-                    const option = membershipStatusOptions.find(o => o.value === val);
-                    return option?.label || val;
-                  }).join(', ');
-                }}
-              >
-                {membershipStatusOptions.map((option) => (
-                  <MenuItem key={option.value} value={option.value}>
-                    <Checkbox checked={filters.memberStatus.includes(option.value)} />
-                    <Box
-                      sx={{
-                        width: 12,
-                        height: 12,
-                        borderRadius: '50%',
-                        backgroundColor: option.color,
-                        mr: 1
-                      }}
-                    />
-                    <ListItemText primary={option.label} />
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-
             {/* One-on-One Meeting Count Filter */}
             <FormControl fullWidth size="small">
               <InputLabel>One-on-One Meetings</InputLabel>
@@ -3627,14 +3588,6 @@ const PeoplePanel: React.FC<PeoplePanelProps> = ({
                       label={`LOE: ${status}`} 
                       size="small" 
                       onDelete={() => handleFilterChange('loeStatus', filters.loeStatus.filter(s => s !== status))}
-                    />
-                  ))}
-                  {filters.memberStatus.map(status => (
-                    <Chip 
-                      key={`member-${status}`}
-                      label={`Membership: ${status === 'null' ? 'No Status' : status}`} 
-                      size="small" 
-                      onDelete={() => handleFilterChange('memberStatus', filters.memberStatus.filter(s => s !== status))}
                     />
                   ))}
                   {filters.lastContactFilter !== 'all' && (

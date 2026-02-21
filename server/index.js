@@ -2763,7 +2763,18 @@ app.get('/api/meetings/histogram', checkDataAccess, async (req, res) => {
         SELECT
           ${timeBucket.replace(/date_contacted/g, 'meeting_date')} AS time_bucket,
           ${timeLabel.replace(/date_contacted/g, 'meeting_date')}  AS time_label,
-          'One-on-One'                                             AS scope_key
+          ${(() => {
+            switch (scope) {
+              case 'chapter':
+                return "COALESCE(cont2.chapter, 'Unknown')";
+              case 'person':
+                return "COALESCE(NULLIF(TRIM(CONCAT(COALESCE(cont2.first_name,''),' ',COALESCE(cont2.last_name,''))),''), 'Unknown')";
+              case 'type':
+                return "COALESCE(m.meeting_type, 'One-on-One')";
+              default:
+                return "'Carolina Federation'";
+            }
+          })()}                                                    AS scope_key
         FROM lumoviz_meetings m
         LEFT JOIN contacts cont2 ON m.organizer_vanid::TEXT = cont2.vanid::TEXT
         WHERE ${mtgWhereParts.join(' AND ')}
