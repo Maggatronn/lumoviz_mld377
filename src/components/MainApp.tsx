@@ -1542,9 +1542,28 @@ const MainAppContent: React.FC<{ authUser?: import('../services/auth').AuthUser;
 
   // Handler for opening person details dialog from Kanban
   const handlePersonDetailsOpen = (personId: string) => {
-    // Find the person in peopleRecords or allTimePeopleRecords
-    const person = peopleRecords.find(p => p.id === personId) || allTimePeopleRecords.find(p => p.id === personId);
+    let person = peopleRecords.find(p => p.id === personId) || allTimePeopleRecords.find(p => p.id === personId);
     
+    if (!person && sharedAllContacts) {
+      const contact = sharedAllContacts.find((c: any) => c.vanid?.toString() === personId);
+      if (contact) {
+        person = {
+          id: contact.vanid?.toString() || personId,
+          name: `${contact.firstname || ''} ${contact.lastname || ''}`.trim() || `Contact ${personId}`,
+          type: contact.type || 'contact',
+          chapter: contact.chapter || '',
+          mostRecentContact: null,
+          totalMeetings: 0,
+          latestNotes: '',
+          organizers: contact.organizers || [],
+          loeStatus: contact.loe_status || 'Unknown',
+          allMeetings: [],
+          email: contact.email,
+          phone: contact.phone
+        };
+      }
+    }
+
     if (person) {
       setSelectedPersonForDialog(person);
       setPersonDialogOpen(true);
