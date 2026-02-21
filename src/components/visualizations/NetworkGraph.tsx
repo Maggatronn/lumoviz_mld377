@@ -941,7 +941,7 @@ const NetworkGraph: React.FC<NetworkGraphProps> = ({
         sx={{
           position: 'absolute',
           bottom: 16,
-          right: 16,
+          left: 16,
           width: 56,
           height: 56,
           borderRadius: '50%',
