@@ -547,10 +547,67 @@ const NetworkGraph: React.FC<NetworkGraphProps> = ({
       ctx.globalAlpha = 1.0;
     });
 
-    // Team labels removed - no longer rendering team bubbles
+    // Team name labels at the centroid of each team's nodes
+    if (dataSource === 'teams') {
+      const teamPositions = new Map<string, { sumX: number; sumY: number; count: number; color: string }>();
+      
+      nodes.forEach(node => {
+        if (!node.x || !node.y || !node.teams) return;
+        node.teams.forEach(teamName => {
+          if (!teamPositions.has(teamName)) {
+            teamPositions.set(teamName, { sumX: 0, sumY: 0, count: 0, color: getCustomChapterColor(node.chapter, customColors) });
+          }
+          const pos = teamPositions.get(teamName)!;
+          pos.sumX += node.x;
+          pos.sumY += node.y;
+          pos.count++;
+        });
+      });
+
+      teamPositions.forEach((pos, teamName) => {
+        if (pos.count < 2) return;
+        const cx = pos.sumX / pos.count;
+        const cy = pos.sumY / pos.count;
+
+        const fontSize = 14;
+        ctx.font = `bold ${fontSize}px Arial`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        const textWidth = ctx.measureText(teamName).width;
+
+        // Semi-transparent background pill
+        const padX = 8, padY = 4;
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
+        const rx = cx - textWidth / 2 - padX;
+        const ry = cy - fontSize / 2 - padY;
+        const rw = textWidth + padX * 2;
+        const rh = fontSize + padY * 2;
+        const radius = rh / 2;
+        ctx.beginPath();
+        ctx.moveTo(rx + radius, ry);
+        ctx.lineTo(rx + rw - radius, ry);
+        ctx.arcTo(rx + rw, ry, rx + rw, ry + radius, radius);
+        ctx.lineTo(rx + rw, ry + rh - radius);
+        ctx.arcTo(rx + rw, ry + rh, rx + rw - radius, ry + rh, radius);
+        ctx.lineTo(rx + radius, ry + rh);
+        ctx.arcTo(rx, ry + rh, rx, ry + rh - radius, radius);
+        ctx.lineTo(rx, ry + radius);
+        ctx.arcTo(rx, ry, rx + radius, ry, radius);
+        ctx.closePath();
+        ctx.fill();
+        ctx.strokeStyle = pos.color;
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+
+        ctx.fillStyle = pos.color;
+        ctx.globalAlpha = 0.9;
+        ctx.fillText(teamName, cx, cy);
+        ctx.globalAlpha = 1.0;
+      });
+    }
 
     ctx.restore();
-  }, [nodes, allLinks, selectedNodeId, hoveredMeetingId, teamCenters, customColors, searchText]);
+  }, [nodes, allLinks, selectedNodeId, hoveredMeetingId, teamCenters, customColors, searchText, dataSource]);
 
   // Setup D3 force simulation
   // Resize observer to handle container size changes

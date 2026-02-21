@@ -109,9 +109,6 @@ export const EditOrganizerMappingDialog: React.FC<EditOrganizerMappingDialogProp
         setLastName('');
       }
       
-      // Auto-refresh when existing mapping detected
-      // This ensures userMap has the latest mapping data
-      console.log('[EditOrganizerMappingDialog] Existing mapping detected, triggering refresh');
       onMappingSaved();
     }
   }, [open, existingMapping, organizerOptions, onMappingSaved]);
@@ -140,7 +137,6 @@ export const EditOrganizerMappingDialog: React.FC<EditOrganizerMappingDialogProp
           email: email || undefined
         };
 
-        console.log('[EditOrganizerMappingDialog] Saving new mapping:', newMapping);
         await saveOrganizerMapping(newMapping);
       } else if (editPersonInfo) {
         // Update person details for existing mapping
@@ -164,7 +160,6 @@ export const EditOrganizerMappingDialog: React.FC<EditOrganizerMappingDialogProp
             notes: notes || `Contact info added on ${new Date().toLocaleDateString()}`
           };
           
-          console.log('[EditOrganizerMappingDialog] Creating mapping with person info:', newMapping);
           await saveOrganizerMapping(newMapping);
         } else {
           // Update existing
@@ -180,7 +175,6 @@ export const EditOrganizerMappingDialog: React.FC<EditOrganizerMappingDialogProp
               `Contact info updated on ${new Date().toLocaleDateString()}`
           };
           
-          console.log('[EditOrganizerMappingDialog] Updating person info:', updatedMapping);
           await saveOrganizerMapping(updatedMapping);
         }
       } else {
@@ -208,13 +202,6 @@ export const EditOrganizerMappingDialog: React.FC<EditOrganizerMappingDialogProp
           }
         }
 
-        console.log('[EditOrganizerMappingDialog] Adding variation:', {
-          selectedOrganizer,
-          nameOrId,
-          vanId,
-          isVanId: !!(vanId && vanId !== selectedOrganizer.vanid)
-        });
-
         // Determine if we're adding a VAN ID or name variation
         const isVanId = vanId && vanId !== selectedOrganizer.vanid;
         await addOrganizerVariation(
@@ -226,7 +213,6 @@ export const EditOrganizerMappingDialog: React.FC<EditOrganizerMappingDialogProp
         );
       }
 
-      console.log('[EditOrganizerMappingDialog] Mapping saved successfully');
       onMappingSaved();
       onClose();
     } catch (err: any) {

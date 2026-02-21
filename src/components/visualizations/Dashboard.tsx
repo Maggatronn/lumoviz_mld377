@@ -36,6 +36,8 @@ import {
   Tab,
   useTheme,
   useMediaQuery,
+  Snackbar,
+  Alert,
 } from '@mui/material';
 import { 
   addToList, 
@@ -328,6 +330,7 @@ const Dashboard: React.FC<DashboardProps> = ({
   const [teamScope, setTeamScope] = React.useState<string>('me');
   const [showCelebrationPenguin, setShowCelebrationPenguin] = React.useState(false);
   const celebrationTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [snackbar, setSnackbar] = React.useState<{ open: boolean; message: string; severity: 'success' | 'error' | 'info' }>({ open: false, message: '', severity: 'success' });
   const [editingConversation, setEditingConversation] = React.useState<EditableConversation | null>(null);
   const [selectedPersonForEdit, setSelectedPersonForEdit] = React.useState<any>(null);
   const [selectedPersonForConversation, setSelectedPersonForConversation] = React.useState<any>(null);
@@ -574,11 +577,7 @@ const Dashboard: React.FC<DashboardProps> = ({
         params.delete('loeStatus');
       }
       
-      if (dashboardPeopleFilters.memberStatus?.length > 0) {
-        params.set('memberStatus', dashboardPeopleFilters.memberStatus.join(','));
-      } else {
-        params.delete('memberStatus');
-      }
+      params.delete('memberStatus');
       
       if (dashboardPeopleFilters.lastContactFilter && dashboardPeopleFilters.lastContactFilter !== 'all') {
         params.set('lastContact', dashboardPeopleFilters.lastContactFilter);
@@ -754,13 +753,6 @@ const Dashboard: React.FC<DashboardProps> = ({
           }
         }
         
-        // Apply member status filter (only if array has items)
-        if (dashboardPeopleFilters.memberStatus?.length > 0) {
-          const personMemberStatus = person.memberStatus || person.member_status;
-          if (!personMemberStatus || !dashboardPeopleFilters.memberStatus.includes(personMemberStatus)) {
-            return;
-          }
-        }
         
         // Apply last contact filter (only if not 'all')
         if (dashboardPeopleFilters.lastContactFilter && dashboardPeopleFilters.lastContactFilter !== 'all') {
@@ -831,7 +823,6 @@ const Dashboard: React.FC<DashboardProps> = ({
       if (dashboardPeopleFilters.chapter) output += `  Chapter: ${dashboardPeopleFilters.chapter}\n`;
       if (dashboardPeopleFilters.searchText) output += `  Search: ${dashboardPeopleFilters.searchText}\n`;
       if (dashboardPeopleFilters.loeStatus?.length > 0) output += `  LOE Status: ${dashboardPeopleFilters.loeStatus.join(', ')}\n`;
-      if (dashboardPeopleFilters.memberStatus?.length > 0) output += `  Member Status: ${dashboardPeopleFilters.memberStatus.join(', ')}\n`;
       if (dashboardPeopleFilters.lastContactFilter && dashboardPeopleFilters.lastContactFilter !== 'all') {
         output += `  Last Contact: ${dashboardPeopleFilters.lastContactFilter}\n`;
       }
@@ -846,7 +837,6 @@ const Dashboard: React.FC<DashboardProps> = ({
         output += `${firstName} ${lastName}\n`;
         output += `  Chapter: ${person.chapter || 'N/A'}\n`;
         output += `  LOE: ${person.loeStatus || person.loe_status || 'Unknown'}\n`;
-        output += `  Member Status: ${person.memberStatus || person.member_status || 'Unknown'}\n`;
         
         // Get meetings for this person from sharedCachedMeetings
         const personVanid = person.vanid || person.van_id;
@@ -1205,6 +1195,51 @@ const Dashboard: React.FC<DashboardProps> = ({
     
     loadListsForSelectedOrganizer();
   }, [selectedOrganizerId]); // Reload whenever the selected organizer changes
+
+  // Refs for team data used inside refreshAfterListChange (defined later via useMemo)
+  const teamScopeRef = React.useRef(teamScope);
+  teamScopeRef.current = teamScope;
+  const teamMemberVanIdsRef = React.useRef<string[]>([]);
+
+  // Centralized refresh after any list mutation (add/remove/update)
+  const refreshAfterListChange = React.useCallback(async () => {
+    const mapToTurfPerson = (item: any): TurfPerson => ({
+      vanid: parseInt(item.vanid),
+      firstName: item.contact_name?.split(' ')[0] || '',
+      lastName: item.contact_name?.split(' ').slice(1).join(' ') || '',
+      desiredChange: item.desired_change || '',
+      action: item.action_id,
+      fields: item.progress || {},
+      datePledged: item.date_pledged,
+      list_id: item.list_id
+    });
+
+    if (selectedOrganizerId) {
+      try {
+        const lists = await fetchLists(selectedOrganizerId);
+        setTurfList(lists.map(mapToTurfPerson));
+      } catch (error) {
+        console.error('Error refreshing lists:', error);
+      }
+    }
+
+    // Also refresh team lists when viewing team scope
+    const currentTeamVanIds = teamMemberVanIdsRef.current;
+    if (teamScopeRef.current !== 'me' && currentTeamVanIds.length > 0) {
+      try {
+        const results = await Promise.all(
+          currentTeamVanIds.map(vid => fetchLists(vid))
+        );
+        setTeamTurfList(results.flat().map(mapToTurfPerson));
+      } catch (error) {
+        console.error('Error refreshing team lists:', error);
+      }
+    }
+
+    setReloadTrigger(prev => prev + 1);
+    if (onListsDataChange) onListsDataChange();
+    if (onPersonAdd) onPersonAdd();
+  }, [selectedOrganizerId, onListsDataChange, onPersonAdd]);
 
   // Load available actions for the selected organizer
   const actionsLoadingRef = React.useRef(false);
@@ -1572,6 +1607,9 @@ const Dashboard: React.FC<DashboardProps> = ({
     return [];
   }, [teamScope, myTeamsData, sectionTeams, selectedOrganizerId]);
 
+  // Keep ref in sync for use inside refreshAfterListChange
+  teamMemberVanIdsRef.current = teamMemberVanIds;
+
   const showTeamScope = teamScope !== 'me';
   const scopeLabel = useMemo(() => {
     if (teamScope === 'me') return 'My';
@@ -1777,8 +1815,42 @@ const Dashboard: React.FC<DashboardProps> = ({
         return new Date(bDate).getTime() - new Date(aDate).getTime();
       });
     
+    // Also include people from turfList who aren't already in filtered results
+    const allTurf = showTeamScope && teamTurfList.length > 0
+      ? [...turfList, ...teamTurfList]
+      : turfList;
+    
+    const filteredVanIds = new Set(filtered.map((p: any) => (p.vanid || p.van_id || p.id)?.toString()));
+    
+    allTurf.forEach(turfPerson => {
+      const vanidStr = turfPerson.vanid.toString();
+      if (!filteredVanIds.has(vanidStr)) {
+        filteredVanIds.add(vanidStr);
+        // Look up full contact info from sharedAllContacts
+        const fullContact = allContactsList.find((c: any) => 
+          (c.vanid || c.van_id)?.toString() === vanidStr
+        );
+        if (fullContact) {
+          filtered.push(fullContact);
+        } else {
+          // Fallback: create a minimal record from turfList data
+          filtered.push({
+            id: vanidStr,
+            vanid: vanidStr,
+            name: `${turfPerson.firstName} ${turfPerson.lastName}`.trim(),
+            fullName: `${turfPerson.firstName} ${turfPerson.lastName}`.trim(),
+            firstname: turfPerson.firstName,
+            lastname: turfPerson.lastName,
+            chapter: '',
+            totalMeetings: 0,
+            mostRecentContact: turfPerson.datePledged || null
+          });
+        }
+      }
+    });
+    
     return filtered;
-  }, [sharedAllContacts, peopleRecords, selectedOrganizerId, getAllOrganizerVanIds, getAllOrganizerNames, showTeamScope, teamMemberVanIds]);
+  }, [sharedAllContacts, peopleRecords, selectedOrganizerId, getAllOrganizerVanIds, getAllOrganizerNames, showTeamScope, teamMemberVanIds, turfList, teamTurfList]);
 
   // Auto-add Team Leaders from myPeople to leadersList
   // DISABLED: This was auto-adding all Team Leaders, preventing manual addition
@@ -1998,30 +2070,15 @@ const Dashboard: React.FC<DashboardProps> = ({
       const successCount = results.filter(r => r).length;
       
       if (successCount > 0) {
-        // Reload list from database
-        const lists = await fetchLists(selectedOrganizerId);
-        const turfPeople: TurfPerson[] = lists.map(item => ({
-          vanid: parseInt(item.vanid),
-          firstName: item.contact_name.split(' ')[0] || '',
-          lastName: item.contact_name.split(' ').slice(1).join(' ') || '',
-          desiredChange: item.desired_change || '',
-          action: item.action_id,
-          fields: item.progress || {},
-          datePledged: item.date_pledged,
-          list_id: item.list_id
-        }));
-        setTurfList(turfPeople);
-        
-        alert(`✓ ${successCount} ${successCount === 1 ? 'person' : 'people'} added to list!`);
-        
-        // Clear selections and close dialog
         setSelectedPeopleForAdd([]);
         setShowAddTurfDialog(false);
         setTurfSearchText('');
+        setSnackbar({ open: true, message: `✓ ${successCount} ${successCount === 1 ? 'person' : 'people'} added to list!`, severity: 'success' });
+        await refreshAfterListChange();
       }
     } catch (error) {
       console.error('Error adding to turf:', error);
-      alert('Failed to add people to list. Please try again.');
+      setSnackbar({ open: true, message: 'Failed to add people to list. Please try again.', severity: 'error' });
     }
   };
   
@@ -2063,17 +2120,13 @@ const Dashboard: React.FC<DashboardProps> = ({
       });
       
       if (success) {
-        // Close dialog
         setShowAddLeaderToMyListDialog(false);
-        
-        // Refresh lists data
-        if (onListsDataChange) {
-          onListsDataChange();
-        }
+        setSnackbar({ open: true, message: '✓ Leader added to list!', severity: 'success' });
+        await refreshAfterListChange();
       }
     } catch (error) {
       console.error('Error adding leader to my list:', error);
-      alert('Failed to add leader to list. Please try again.');
+      setSnackbar({ open: true, message: 'Failed to add leader to list. Please try again.', severity: 'error' });
     }
   };
 
@@ -2124,25 +2177,23 @@ const Dashboard: React.FC<DashboardProps> = ({
   };
 
   const handleRemoveTurfPerson = async (vanid: number) => {
-    // Find all list entries for this person
     const personsToRemove = turfList.filter(person => person.vanid === vanid);
     
     // Optimistic update
     setTurfList(prev => prev.filter(person => person.vanid !== vanid));
     
-    // Remove from database
     try {
       for (const person of personsToRemove) {
         if (person.list_id) {
           await removeFromList(person.list_id);
         }
       }
+      // Refresh global lists data
+      if (onListsDataChange) onListsDataChange();
+      setReloadTrigger(prev => prev + 1);
     } catch (error) {
       console.error('Error removing from list:', error);
-      // Trigger list reload in MainApp
-      if (onListsDataChange) {
-        onListsDataChange();
-      }
+      await refreshAfterListChange();
     }
   };
 
@@ -2178,28 +2229,15 @@ const Dashboard: React.FC<DashboardProps> = ({
       });
       
       if (success) {
-        // Reload lists for the selected organizer
-        const lists = await fetchLists(selectedOrganizerId);
-        const turfPeople: TurfPerson[] = lists.map(item => ({
-          vanid: parseInt(item.vanid),
-          firstName: item.contact_name.split(' ')[0] || '',
-          lastName: item.contact_name.split(' ').slice(1).join(' ') || '',
-          desiredChange: item.desired_change || '',
-          action: item.action_id,
-          fields: item.progress || {},
-          datePledged: item.date_pledged,
-          list_id: item.list_id
-        }));
-        setTurfList(turfPeople);
-        
-        // Close dialog and switch to lists tab
         setShowQuickAddDialog(false);
         setPersonToQuickAdd(null);
         setTurfTab('lists');
+        setSnackbar({ open: true, message: `✓ ${personToQuickAdd.name} added to list!`, severity: 'success' });
+        await refreshAfterListChange();
       }
     } catch (error) {
       console.error('Error adding person to list:', error);
-      alert('Failed to add person to list. Please try again.');
+      setSnackbar({ open: true, message: 'Failed to add person to list. Please try again.', severity: 'error' });
     }
   };
 
@@ -2221,7 +2259,7 @@ const Dashboard: React.FC<DashboardProps> = ({
         throw new Error('Failed to log conversation');
       }
 
-      alert(`✓ Conversation logged successfully!`);
+      setSnackbar({ open: true, message: '✓ Conversation logged successfully!', severity: 'success' });
       
       // If this was linked to an action, mark the field as complete
       if (selectedActionForConversation) {
@@ -2268,7 +2306,7 @@ const Dashboard: React.FC<DashboardProps> = ({
         throw new Error('Failed to update conversation');
       }
 
-      alert('✓ Conversation updated successfully!');
+      setSnackbar({ open: true, message: '✓ Conversation updated successfully!', severity: 'success' });
       setEditingConversation(null);
       
       if (onConversationLog) {
@@ -2351,7 +2389,7 @@ const Dashboard: React.FC<DashboardProps> = ({
         throw new Error('Failed to update person');
       }
 
-      alert(`✓ Person updated successfully!`);
+      setSnackbar({ open: true, message: '✓ Person updated successfully!', severity: 'success' });
       
       // Trigger a reload of contacts
       if (onPersonAdd) {
@@ -2421,12 +2459,12 @@ const Dashboard: React.FC<DashboardProps> = ({
         throw new Error('Failed to add person to action');
       }
 
-      alert(`✓ ${targetPerson.name} added to action!`);
+      setSnackbar({ open: true, message: `✓ ${targetPerson.name} added to action!`, severity: 'success' });
       handleCloseAddTurfDialog();
-      setReloadTrigger(prev => prev + 1);
+      await refreshAfterListChange();
     } catch (error) {
       console.error('Error adding person to action:', error);
-      alert('Failed to add person to action. Please try again.');
+      setSnackbar({ open: true, message: 'Failed to add person to action. Please try again.', severity: 'error' });
     }
   };
 
@@ -3810,7 +3848,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                   >
                     <Tab 
                       label={
-                        (dashboardPeopleFilters.loeStatus.length > 0 || dashboardPeopleFilters.memberStatus.length > 0 || dashboardPeopleFilters.chapter || dashboardPeopleFilters.searchText || dashboardPeopleFilters.lastContactFilter !== 'all' || dashboardPeopleFilters.meetingCountFilter !== 'all' || dashboardPeopleFilters.actionStatus !== 'all')
+                        (dashboardPeopleFilters.loeStatus.length > 0 || dashboardPeopleFilters.chapter || dashboardPeopleFilters.searchText || dashboardPeopleFilters.lastContactFilter !== 'all' || dashboardPeopleFilters.meetingCountFilter !== 'all' || dashboardPeopleFilters.actionStatus !== 'all')
                           ? `People (filtered)`
                           : `People`
                       } 
@@ -3826,7 +3864,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                       }).length})`}
                       value="conversations" 
                     />
-                    <Tab label={`Toodledoos`} value="actions" />
+                    <Tab label={`Toodoodles`} value="actions" />
                     <Tab label={`Leaders (${myLeaders.length})`} value="leaders" />
                   </Tabs>
 
@@ -3870,7 +3908,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                       size="small"
                       onClick={() => setShowMyPeopleFilters(!showMyPeopleFilters)}
                       sx={{ 
-                        color: showMyPeopleFilters || dashboardPeopleFilters.loeStatus.length > 0 || dashboardPeopleFilters.memberStatus.length > 0 || dashboardPeopleFilters.chapter || dashboardPeopleFilters.lastContactFilter !== 'all' || dashboardPeopleFilters.meetingCountFilter !== 'all' || dashboardPeopleFilters.actionStatus !== 'all'
+                        color: showMyPeopleFilters || dashboardPeopleFilters.loeStatus.length > 0 || dashboardPeopleFilters.chapter || dashboardPeopleFilters.lastContactFilter !== 'all' || dashboardPeopleFilters.meetingCountFilter !== 'all' || dashboardPeopleFilters.actionStatus !== 'all'
                           ? 'primary.main' 
                           : 'text.secondary',
                         position: 'relative',
@@ -3878,7 +3916,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                       }}
                     >
                       <FilterListIcon fontSize="small" />
-                      {(dashboardPeopleFilters.loeStatus.length > 0 || dashboardPeopleFilters.memberStatus.length > 0 || dashboardPeopleFilters.chapter || dashboardPeopleFilters.lastContactFilter !== 'all' || dashboardPeopleFilters.meetingCountFilter !== 'all' || dashboardPeopleFilters.actionStatus !== 'all') && (
+                      {(dashboardPeopleFilters.loeStatus.length > 0 || dashboardPeopleFilters.chapter || dashboardPeopleFilters.lastContactFilter !== 'all' || dashboardPeopleFilters.meetingCountFilter !== 'all' || dashboardPeopleFilters.actionStatus !== 'all') && (
                         <Box sx={{
                           position: 'absolute', top: -4, right: -4,
                           backgroundColor: 'primary.main', color: 'white',
@@ -3889,7 +3927,6 @@ const Dashboard: React.FC<DashboardProps> = ({
                           {[
                             dashboardPeopleFilters.chapter,
                             dashboardPeopleFilters.loeStatus.length > 0,
-                            dashboardPeopleFilters.memberStatus.length > 0,
                             dashboardPeopleFilters.lastContactFilter !== 'all',
                             dashboardPeopleFilters.meetingCountFilter !== 'all',
                             dashboardPeopleFilters.actionStatus !== 'all'
@@ -3935,9 +3972,6 @@ const Dashboard: React.FC<DashboardProps> = ({
                     )}
                     {dashboardPeopleFilters.loeStatus.map((status: string) => (
                       <Chip key={`loe-${status}`} label={`LOE: ${status.replace(/^\d+[_.]/, '')}`} size="small" onDelete={() => setDashboardPeopleFilters((prev: any) => ({ ...prev, loeStatus: prev.loeStatus.filter((s: string) => s !== status) }))} sx={{ height: 24, fontSize: '0.7rem' }} />
-                    ))}
-                    {dashboardPeopleFilters.memberStatus.map((status: string) => (
-                      <Chip key={`member-${status}`} label={`Member: ${status}`} size="small" onDelete={() => setDashboardPeopleFilters((prev: any) => ({ ...prev, memberStatus: prev.memberStatus.filter((s: string) => s !== status) }))} color={status === 'Active' ? 'success' : status === 'Lapsed' ? 'warning' : 'default'} sx={{ height: 24, fontSize: '0.7rem' }} />
                     ))}
                     {dashboardPeopleFilters.lastContactFilter !== 'all' && (
                       <Chip label={`Last Contact: ${dashboardPeopleFilters.lastContactFilter}`} size="small" onDelete={() => setDashboardPeopleFilters((prev: any) => ({ ...prev, lastContactFilter: 'all' }))} sx={{ height: 24, fontSize: '0.7rem' }} />
@@ -4191,22 +4225,6 @@ const Dashboard: React.FC<DashboardProps> = ({
                                       }}
                                     />
                                   )}
-                                  {/* Membership Chip */}
-                                  {firstEntry.memberStatus && (
-                                    <Chip
-                                      label={firstEntry.memberStatus}
-                                      size="small"
-                                      sx={{
-                                        height: 18,
-                                        fontSize: '0.65rem',
-                                        bgcolor: firstEntry.memberStatus === 'Active' ? '#4caf50' : 
-                                                firstEntry.memberStatus === 'Lapsed' ? '#ff9800' : '#757575',
-                                        color: 'white',
-                                        fontWeight: 500,
-                                        '& .MuiChip-label': { px: 0.5 }
-                                      }}
-                                    />
-                                  )}
                                 </Box>
                               </TableCell>
                               
@@ -4353,23 +4371,12 @@ const Dashboard: React.FC<DashboardProps> = ({
                                               });
                                               
                                               if (success) {
-                                                // Reload list from database
-                                                const lists = await fetchLists(selectedOrganizerId);
-                                                const turfPeople: TurfPerson[] = lists.map(item => ({
-                                                  vanid: parseInt(item.vanid),
-                                                  firstName: item.contact_name.split(' ')[0] || '',
-                                                  lastName: item.contact_name.split(' ').slice(1).join(' ') || '',
-                                                  desiredChange: item.desired_change || '',
-                                                  action: item.action_id,
-                                                  fields: item.progress || {},
-                                                  datePledged: item.date_pledged,
-                                                  list_id: item.list_id
-                                                }));
-                                                setTurfList(turfPeople);
+                                                setSnackbar({ open: true, message: `✓ Added to ${action.action_name}!`, severity: 'success' });
+                                                await refreshAfterListChange();
                                               }
                                             } catch (error) {
                                               console.error('Error adding to list:', error);
-                                              alert('Failed to add person to list. Please try again.');
+                                              setSnackbar({ open: true, message: 'Failed to add person to list.', severity: 'error' });
                                             }
                                           }}
                                           sx={{
@@ -5081,7 +5088,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                   <Box sx={{ p: 2, flex: 1, overflow: 'auto', display: 'flex', flexDirection: 'column' }}>
                     <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
                       <Typography variant="h6">
-                        {scopeLabel} Toodledoos
+                        {scopeLabel} Toodoodles
                       </Typography>
 
                       <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
@@ -5654,22 +5661,10 @@ const Dashboard: React.FC<DashboardProps> = ({
         allPeople={allPeople}
         chapters={chapters}
         onSearchPeople={async (query: string) => {
-          // Use sharedAllContacts (same data source as People Panel)
-          console.log('[Dashboard.onSearchPeople] Called with query:', query);
-          console.log('[Dashboard.onSearchPeople] sharedAllContacts:', sharedAllContacts);
-          console.log('[Dashboard.onSearchPeople] sharedAllContacts length:', sharedAllContacts?.length);
-          
           if (!sharedAllContacts || sharedAllContacts.length === 0) {
-            console.warn('[Dashboard.onSearchPeople] No contacts available');
             return [];
           }
           
-          // Sample first contact to see structure
-          if (sharedAllContacts.length > 0) {
-            console.log('[Dashboard.onSearchPeople] Sample contact:', sharedAllContacts[0]);
-          }
-          
-          // Filter contacts by search query
           const queryLower = query.toLowerCase().trim();
           let filtered = sharedAllContacts;
           
@@ -5681,8 +5676,7 @@ const Dashboard: React.FC<DashboardProps> = ({
             });
           }
           
-          // Map to expected format
-          const results = filtered.slice(0, 100).map((contact: any) => ({
+          return filtered.slice(0, 100).map((contact: any) => ({
             id: contact.vanid?.toString() || contact.id,
             name: `${contact.firstname || ''} ${contact.lastname || ''}`.trim(),
             type: contact.type || 'contact',
@@ -5690,11 +5684,6 @@ const Dashboard: React.FC<DashboardProps> = ({
             email: contact.email,
             phone: contact.phone
           }));
-          
-          console.log('[Dashboard.onSearchPeople] Filtered contacts:', filtered.length);
-          console.log('[Dashboard.onSearchPeople] Mapped results:', results);
-          console.log('[Dashboard.onSearchPeople] Returning', results.length, 'people');
-          return results;
         }}
       />
 
@@ -5711,22 +5700,10 @@ const Dashboard: React.FC<DashboardProps> = ({
         chapters={chapters}
         teamToEdit={teamToEdit}
         onSearchPeople={async (query: string) => {
-          // Use sharedAllContacts (same data source as People Panel)
-          console.log('[Dashboard.onSearchPeople] Called with query:', query);
-          console.log('[Dashboard.onSearchPeople] sharedAllContacts:', sharedAllContacts);
-          console.log('[Dashboard.onSearchPeople] sharedAllContacts length:', sharedAllContacts?.length);
-          
           if (!sharedAllContacts || sharedAllContacts.length === 0) {
-            console.warn('[Dashboard.onSearchPeople] No contacts available');
             return [];
           }
           
-          // Sample first contact to see structure
-          if (sharedAllContacts.length > 0) {
-            console.log('[Dashboard.onSearchPeople] Sample contact:', sharedAllContacts[0]);
-          }
-          
-          // Filter contacts by search query
           const queryLower = query.toLowerCase().trim();
           let filtered = sharedAllContacts;
           
@@ -5738,8 +5715,7 @@ const Dashboard: React.FC<DashboardProps> = ({
             });
           }
           
-          // Map to expected format
-          const results = filtered.slice(0, 100).map((contact: any) => ({
+          return filtered.slice(0, 100).map((contact: any) => ({
             id: contact.vanid?.toString() || contact.id,
             name: `${contact.firstname || ''} ${contact.lastname || ''}`.trim(),
             type: contact.type || 'contact',
@@ -5747,11 +5723,6 @@ const Dashboard: React.FC<DashboardProps> = ({
             email: contact.email,
             phone: contact.phone
           }));
-          
-          console.log('[Dashboard.onSearchPeople] Filtered contacts:', filtered.length);
-          console.log('[Dashboard.onSearchPeople] Mapped results:', results);
-          console.log('[Dashboard.onSearchPeople] Returning', results.length, 'people');
-          return results;
         }}
       />
 
@@ -5985,9 +5956,11 @@ const Dashboard: React.FC<DashboardProps> = ({
         key={`batch-add-${selectedOrganizerId}`}
         open={showBatchAddDialog}
         onClose={() => setShowBatchAddDialog(false)}
-        onSaved={(_count) => {
+        onSaved={async (_count) => {
           setShowBatchAddDialog(false);
           if (onPersonAdd) onPersonAdd();
+          setSnackbar({ open: true, message: `✓ ${_count} ${_count === 1 ? 'person' : 'people'} added!`, severity: 'success' });
+          await refreshAfterListChange();
         }}
         availableSections={chapters}
         availableOrganizers={dashboardOrganizers.map(org => {
@@ -6095,6 +6068,22 @@ const Dashboard: React.FC<DashboardProps> = ({
           </Typography>
         </Box>
       )}
+
+      <Snackbar
+        open={snackbar.open}
+        autoHideDuration={3000}
+        onClose={() => setSnackbar(prev => ({ ...prev, open: false }))}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      >
+        <Alert
+          onClose={() => setSnackbar(prev => ({ ...prev, open: false }))}
+          severity={snackbar.severity}
+          variant="filled"
+          sx={{ width: '100%' }}
+        >
+          {snackbar.message}
+        </Alert>
+      </Snackbar>
     </Box>
   );
 };

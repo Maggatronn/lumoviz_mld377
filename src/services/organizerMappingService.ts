@@ -127,60 +127,40 @@ export async function addOrganizerVariation(
   mappings: OrganizerMapping[],
   preferredName?: string
 ): Promise<void> {
-  console.log('[addOrganizerVariation] Called with:', { primaryVanid, newNameOrId, isVanId, preferredName, mappingsCount: mappings.length });
-  
   let existingMapping = mappings.find(m => m.primary_vanid === primaryVanid);
   
-  // If organizer doesn't exist in mappings yet, create them
   if (!existingMapping) {
-    console.log('[addOrganizerVariation] Organizer not found in mappings, creating new entry');
-    
     const newMapping: OrganizerMapping = {
-      primary_vanid: String(primaryVanid), // Ensure string
+      primary_vanid: String(primaryVanid),
       preferred_name: preferredName || String(primaryVanid),
       alternate_vanids: isVanId ? [String(newNameOrId)] : [],
       name_variations: isVanId ? [] : [String(newNameOrId)],
       notes: `Automatically created when mapping ${newNameOrId}`
     };
     
-    console.log('[addOrganizerVariation] Saving new mapping:', newMapping);
     await saveOrganizerMapping(newMapping);
-    console.log('[addOrganizerVariation] New mapping created successfully');
     return;
   }
-  
-  // Otherwise update existing mapping
-  console.log('[addOrganizerVariation] Found existing mapping, updating:', existingMapping.preferred_name);
   
   const updatedMapping = { ...existingMapping };
   
   if (isVanId) {
-    // Add to alternate_vanids if not already there
     if (!updatedMapping.alternate_vanids?.includes(String(newNameOrId))) {
       updatedMapping.alternate_vanids = [
         ...(updatedMapping.alternate_vanids || []),
         String(newNameOrId)
       ];
-      console.log('[addOrganizerVariation] Added VAN ID variation:', newNameOrId);
-    } else {
-      console.log('[addOrganizerVariation] VAN ID already exists, skipping');
     }
   } else {
-    // Add to name_variations if not already there
     if (!updatedMapping.name_variations?.includes(String(newNameOrId))) {
       updatedMapping.name_variations = [
         ...(updatedMapping.name_variations || []),
         String(newNameOrId)
       ];
-      console.log('[addOrganizerVariation] Added name variation:', newNameOrId);
-    } else {
-      console.log('[addOrganizerVariation] Name already exists, skipping');
     }
   }
   
-  console.log('[addOrganizerVariation] Saving updated mapping:', updatedMapping);
   await saveOrganizerMapping(updatedMapping);
-  console.log('[addOrganizerVariation] Mapping updated successfully');
 }
 
 /**
@@ -192,8 +172,6 @@ export async function mergePeople(
   mergeVanid: string,
   allMappings: OrganizerMapping[]
 ): Promise<void> {
-  console.log('[mergePeople] Merging', mergeVanid, 'into', primaryVanid);
-  
   const primary = allMappings.find(m => m.primary_vanid === primaryVanid);
   const toMerge = allMappings.find(m => m.primary_vanid === mergeVanid);
   
@@ -231,8 +209,6 @@ export async function mergePeople(
   
   await saveOrganizerMapping(updatedPrimary);
   await deleteOrganizerMapping(mergeVanid);
-  
-  console.log('[mergePeople] Merge completed successfully');
 }
 
 /**
@@ -264,6 +240,5 @@ export async function createPendingPerson(data: {
   };
   
   await saveOrganizerMapping(mapping);
-  console.log('[createPendingPerson] Created pending person:', tempId);
   return tempId;
 }

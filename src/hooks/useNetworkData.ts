@@ -199,7 +199,7 @@ export const useNetworkData = ({
           if (!personToTeams.has(personId)) {
             personToTeams.set(personId, new Set());
           }
-          personToTeams.get(personId)!.add(`team-${teamIndex}`);
+          personToTeams.get(personId)!.add(team.teamName || `team-${teamIndex}`);
           
           if (!globalNodeMap.has(personId)) {
             const node: GraphNode = {
@@ -285,11 +285,12 @@ export const useNetworkData = ({
         }
       });
 
-      // Handle multi-team members
+      // Write teams array to every node and handle multi-team members
       personToTeams.forEach((teams, personId) => {
-        if (teams.size > 1) {
-          const person = globalNodeMap.get(personId);
-          if (person) {
+        const person = globalNodeMap.get(personId);
+        if (person) {
+          person.teams = Array.from(teams);
+          if (teams.size > 1) {
             person.type = 'multi_team_member';
             person.color = '#ff9800';
           }

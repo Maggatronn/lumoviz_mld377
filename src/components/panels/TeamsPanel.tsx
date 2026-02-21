@@ -123,6 +123,7 @@ interface TeamsPanelProps {
   nodes: NodeData[];
   peopleRecords: PersonRecord[];
   onTeamsDataChange?: (teams: TeamData[]) => void;
+  onRefreshTeams?: () => Promise<void>;
   existingTeamsData?: any[]; // Teams data already loaded by parent
   compact?: boolean; // Compact mode for floating overlay
   chapters?: string[]; // Available chapters/sections from API
@@ -140,6 +141,7 @@ const TeamsPanel: React.FC<TeamsPanelProps> = ({
   nodes = [],
   peopleRecords,
   onTeamsDataChange,
+  onRefreshTeams: parentRefreshTeams,
   existingTeamsData = [],
   compact = false,
   chapters = []
@@ -249,13 +251,9 @@ const TeamsPanel: React.FC<TeamsPanelProps> = ({
   const filteredTeamsData = useMemo(() => {
     let teams = teamsData;
     
-    console.log('[TeamsPanel] Filtering teams - selectedChapter:', selectedChapter, 'teamsData:', teams.length);
-    
     // Filter by chapter
     if (selectedChapter && selectedChapter !== 'All Chapters' && selectedChapter !== 'All Sections') {
-      console.log('[TeamsPanel] Applying chapter filter:', selectedChapter);
       teams = teams.filter(team => team.chapter === selectedChapter);
-      console.log('[TeamsPanel] After chapter filter:', teams.length);
     }
     
     if (teamsSearchText) {
@@ -284,11 +282,6 @@ const TeamsPanel: React.FC<TeamsPanelProps> = ({
       if (!aIsRoot && bIsRoot) return 1;
       return a.chapter.localeCompare(b.chapter);
     });
-    
-    console.log('[TeamsPanel] Final filteredTeamsData:', sortedTeams.length, 'teams');
-    if (sortedTeams.length > 0) {
-      console.log('[TeamsPanel] Sample team:', sortedTeams[0]);
-    }
     
     return sortedTeams;
   }, [teamsData, teamsSearchText, bigQueryTeams, selectedChapter]);
@@ -400,7 +393,6 @@ const TeamsPanel: React.FC<TeamsPanelProps> = ({
   useEffect(() => {
     // If parent provided teams data, use it (only once)
     if (existingTeamsData && existingTeamsData.length > 0 && !teamsLoadedFromParentRef.current) {
-      console.log('[TeamsPanel] Using existing teams data from parent:', existingTeamsData.length, 'teams');
       teamsLoadedFromParentRef.current = true;
       
       setBigQueryTeams(existingTeamsData);
@@ -606,14 +598,10 @@ const TeamsPanel: React.FC<TeamsPanelProps> = ({
   const availableChapters = useMemo(() => {
     // Use chapters from API if provided (preferred), otherwise compute from existing data
     if (chapters && chapters.length > 0) {
-      console.log('[TeamsPanel] Using chapters prop from API:', chapters);
-      // Filter out "All Sections" / "All Chapters" from the passed chapters
       const filtered = chapters.filter(ch => !ch.startsWith('All '));
-      console.log('[TeamsPanel] Filtered availableChapters:', filtered);
       return filtered;
     }
     
-    console.log('[TeamsPanel] Computing chapters from existing data (fallback)');
     // Fallback: Get chapters from multiple sources to ensure we have options
     const chaptersFromNodes = nodes.map(node => node.chapter).filter(Boolean);
     const chaptersFromOrgIds = orgIds.map((person: any) => person.chapter).filter(Boolean);
@@ -626,8 +614,6 @@ const TeamsPanel: React.FC<TeamsPanelProps> = ({
     ];
     
     const uniqueChapters = Array.from(new Set(allChapters));
-    console.log('[TeamsPanel] Computed chapters from data:', uniqueChapters);
-    
     return uniqueChapters;
   }, [chapters, nodes, orgIds, meetings]);
 
@@ -811,16 +797,19 @@ const TeamsPanel: React.FC<TeamsPanelProps> = ({
       );
       setBigQueryTeams(enhancedTeams);
       
-      // Load colors from teams data into ChapterColorContext
       if (enhancedTeams.length > 0) {
         const teamsWithColors = enhancedTeams.map(team => ({
           chapter: team.chapter,
           color: team.bigQueryData?.color
-        })).filter(team => team.color); // Only include teams with colors
+        })).filter(team => team.color);
         
         if (teamsWithColors.length > 0) {
           loadColorsFromTeams(teamsWithColors);
         }
+      }
+
+      if (parentRefreshTeams) {
+        await parentRefreshTeams();
       }
     } catch (error) {
       console.error('❌ Error refreshing teams:', error);

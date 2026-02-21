@@ -252,38 +252,9 @@ const PersonDetailsDialog: React.FC<PersonDetailsDialogProps> = ({
     // Filter cached meetings for this person
     const personVanid = person.id?.toString();
     
-    // Debug: Check organizer name resolution
-    if (cachedMeetings.length > 0 && cachedMeetings[0].organizer_vanid) {
-      const sampleOrganizerVanid = cachedMeetings[0].organizer_vanid;
-      const resolvedName = userMap.get(Number(sampleOrganizerVanid));
-      console.log('[PersonDetailsDialog] Organizer name check:', {
-        organizer_vanid: sampleOrganizerVanid,
-        api_organizer_name: cachedMeetings[0].organizer,
-        userMap_exists: !!resolvedName,
-        userMap_name: resolvedName?.name || `${resolvedName?.firstname || ''} ${resolvedName?.lastname || ''}`.trim()
-      });
-    }
-    
-    console.log('[PersonDetailsDialog] Filtering meetings for person:', {
-      personId: person.id,
-      personName: person.name,
-      cachedMeetingsCount: cachedMeetings.length,
-      sampleCachedMeeting: cachedMeetings[0] ? {
-        participant_vanid: cachedMeetings[0].participant_vanid,
-        organizer: cachedMeetings[0].organizer,
-        organizer_vanid: cachedMeetings[0].organizer_vanid,
-        has_purpose: !!(cachedMeetings[0].purpose || cachedMeetings[0].notes_purpose)
-      } : null
-    });
-    
     const filteredMeetings = cachedMeetings.filter(meeting => {
       const meetingVanid = meeting.participant_vanid?.toString() || meeting.vanid?.toString();
       return meetingVanid === personVanid;
-    });
-    
-    console.log('[PersonDetailsDialog] Filtered result:', {
-      matchCount: filteredMeetings.length,
-      sampleMatch: filteredMeetings[0]
     });
     
     // Sort by date (most recent first) - handle both date_contacted and datestamp
@@ -340,14 +311,10 @@ const PersonDetailsDialog: React.FC<PersonDetailsDialogProps> = ({
 
   // Helper function for consistent name resolution
   const getConsistentName = (vanId: number | undefined, apiBuiltName: string | undefined, role: 'organizer' | 'contact'): string => {
-    // Debug log for troubleshooting
-    const debugInfo = { vanId, apiBuiltName, role };
-    
     // Priority 1: Check userMap first (most reliable)
     if (vanId) {
       const userInfo = userMap.get(Number(vanId));
       if (userInfo) {
-        console.log('[getConsistentName] Found in userMap:', { vanId, userInfo });
         if (userInfo.name && userInfo.name.trim() && userInfo.name !== 'null null') {
           return userInfo.name.trim();
         }
@@ -362,8 +329,6 @@ const PersonDetailsDialog: React.FC<PersonDetailsDialogProps> = ({
             return fullName;
           }
         }
-      } else {
-        console.log('[getConsistentName] NOT found in userMap:', { vanId, userMapSize: userMap.size, sampleKeys: Array.from(userMap.keys()).slice(0, 5) });
       }
     }
     
@@ -372,7 +337,6 @@ const PersonDetailsDialog: React.FC<PersonDetailsDialogProps> = ({
       const vanIdNum = Number(vanId);
       const orgInfo = orgIds.find(p => Number(p.vanid) === vanIdNum);
       if (orgInfo) {
-        console.log('[getConsistentName] Found in orgIds:', { vanId, orgInfo });
         if ((orgInfo.firstname && orgInfo.firstname !== 'null') || (orgInfo.lastname && orgInfo.lastname !== 'null')) {
           const firstName = orgInfo.firstname && orgInfo.firstname !== 'null' ? orgInfo.firstname.trim() : '';
           const lastName = orgInfo.lastname && orgInfo.lastname !== 'null' ? orgInfo.lastname.trim() : '';
@@ -392,7 +356,6 @@ const PersonDetailsDialog: React.FC<PersonDetailsDialogProps> = ({
       const vanIdNum = Number(vanId);
       const contact = allContacts.find(c => Number(c.vanid) === vanIdNum);
       if (contact) {
-        console.log('[getConsistentName] Found in allContacts:', { vanId, contact });
         if ((contact.firstname && contact.firstname !== 'null') || (contact.lastname && contact.lastname !== 'null')) {
           const firstName = contact.firstname && contact.firstname !== 'null' ? contact.firstname.trim() : '';
           const lastName = contact.lastname && contact.lastname !== 'null' ? contact.lastname.trim() : '';
@@ -409,12 +372,10 @@ const PersonDetailsDialog: React.FC<PersonDetailsDialogProps> = ({
 
     // Priority 4: Use API-provided name
     if (apiBuiltName && apiBuiltName.trim() && apiBuiltName !== 'null null') {
-      console.log('[getConsistentName] Using API name:', { vanId, apiBuiltName });
       return apiBuiltName.trim();
     }
 
     // Fallback
-    console.log('[getConsistentName] Using fallback:', debugInfo);
     if (!vanId) {
       return `Unknown ${role === 'organizer' ? 'Organizer' : 'Contact'}`;
     }

@@ -98,8 +98,6 @@ const EditTeamDialog: React.FC<EditTeamDialogProps> = ({
   // Populate form when teamToEdit changes
   useEffect(() => {
     if (open && teamToEdit) {
-      console.log('📝 EditTeamDialog: Populating form with team data:', teamToEdit);
-      
       setTeamName(teamToEdit.teamName || '');
       setChapter(teamToEdit.chapter || '');
       setTurf(teamToEdit.turf || '');
@@ -271,9 +269,6 @@ const EditTeamDialog: React.FC<EditTeamDialogProps> = ({
         dateCreated: teamToEdit?.dateCreated
       };
 
-      console.log('💾 EditTeamDialog: Saving updated team:', updatedTeam);
-      console.log('📋 Current teamToEdit:', teamToEdit);
-      
       await onSave(updatedTeam);
       handleClose();
       
