@@ -22,6 +22,11 @@ import {
 import CampaignActionDialog, { CampaignAction } from '../dialogs/CampaignActionDialog';
 import ParentCampaignDialog, { ParentCampaign } from '../dialogs/ParentCampaignDialog';
 
+interface TeamOption {
+  id: string;
+  name: string;
+}
+
 interface CampaignPanelProps {
   actions: CampaignAction[];
   onAddAction: (action: Omit<CampaignAction, 'id'>) => void;
@@ -37,7 +42,14 @@ interface CampaignPanelProps {
   onDeleteParentCampaign: (campaignId: string) => void;
   selectedParentCampaigns: string[];
   onParentCampaignClick?: (campaignId: string | null) => void;
-  currentUserId?: string; // Current user's VAN ID (no longer needed for template usage)
+  currentUserId?: string;
+  currentUserName?: string;
+  selectedOrganizerId?: string;
+  selectedOrganizerName?: string;
+  availableOrganizers?: Array<{ vanid: string; name: string }>;
+  availableTeams?: TeamOption[];
+  organizerCount?: number;
+  roleCounts?: { student: number; teacher: number; constituent: number };
 }
 
 const CampaignPanel: React.FC<CampaignPanelProps> = ({
@@ -55,7 +67,14 @@ const CampaignPanel: React.FC<CampaignPanelProps> = ({
   onDeleteParentCampaign,
   selectedParentCampaigns,
   onParentCampaignClick,
-  currentUserId
+  currentUserId,
+  currentUserName,
+  selectedOrganizerId,
+  selectedOrganizerName,
+  availableOrganizers = [],
+  availableTeams = [],
+  organizerCount = 0,
+  roleCounts = { student: 0, teacher: 0, constituent: 0 }
 }) => {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingAction, setEditingAction] = useState<CampaignAction | null>(null);
@@ -260,6 +279,31 @@ const CampaignPanel: React.FC<CampaignPanelProps> = ({
                           })}
         </Box>
       )}
+
+                      {/* Team badges */}
+                      {parentCampaign.teams && parentCampaign.teams.length > 0 && (
+                        <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap', mt: 0.5 }}>
+                          {parentCampaign.teams.map((teamId) => {
+                            const team = availableTeams.find(t => t.id === teamId);
+                            return (
+                              <Chip
+                                key={teamId}
+                                label={teamId === 'All Teams' ? 'All Teams' : (team ? team.name : teamId)}
+                                size="small"
+                                variant="outlined"
+                                onClick={(e) => e.stopPropagation()}
+                                sx={{ 
+                                  fontSize: '0.6rem', 
+                                  height: '18px',
+                                  borderColor: '#d0d0d0',
+                                  color: 'text.secondary',
+                                  cursor: 'default'
+                                }}
+                              />
+                            );
+                          })}
+                        </Box>
+                      )}
 
                       {/* Actions Section */}
                       <Box sx={{ mt: 1, pt: 1, borderTop: '1px solid #f0f0f0' }}>
@@ -491,27 +535,29 @@ const CampaignPanel: React.FC<CampaignPanelProps> = ({
                                 </Box>
                               </Box>
 
-                              {/* Chapter badges and goals */}
-                              {childCampaign.chapters && childCampaign.chapters.length > 0 && (
+                              {/* Team badges and goals */}
+                              {childCampaign.teams && childCampaign.teams.length > 0 && (
                                 <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.75, mb: 1 }}>
-                                  {/* Chapter badges */}
                                   <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
-                                    {childCampaign.chapters.map((chapter) => (
-                    <Chip
-                                        key={chapter}
-                                        label={chapter}
-                      size="small"
-                      variant="outlined"
-                                        onClick={(e) => e.stopPropagation()}
-                                        sx={{ 
-                                          fontSize: '0.6rem', 
-                                          height: '20px',
-                                          borderColor: '#d0d0d0',
-                                          color: 'text.secondary',
-                                          cursor: 'default'
-                                        }}
-                                      />
-                                    ))}
+                                    {childCampaign.teams.map((teamId) => {
+                                      const team = availableTeams.find(t => t.id === teamId);
+                                      return (
+                                        <Chip
+                                          key={teamId}
+                                          label={teamId === 'All Teams' ? 'All Teams' : (team ? team.name : teamId)}
+                                          size="small"
+                                          variant="outlined"
+                                          onClick={(e) => e.stopPropagation()}
+                                          sx={{ 
+                                            fontSize: '0.6rem', 
+                                            height: '20px',
+                                            borderColor: '#d0d0d0',
+                                            color: 'text.secondary',
+                                            cursor: 'default'
+                                          }}
+                                        />
+                                      );
+                                    })}
                   </Box>
                   
                                   {/* Chapter Goals */}
@@ -694,6 +740,9 @@ const CampaignPanel: React.FC<CampaignPanelProps> = ({
         parentCampaigns={parentCampaigns}
         parentCampaignId={selectedParentCampaignForAction || editingAction?.parentCampaignId}
         editingAction={editingAction || undefined}
+        currentUserId={selectedOrganizerId || currentUserId}
+        currentUserName={selectedOrganizerName || currentUserName}
+        availableOrganizers={availableOrganizers}
       />
 
       {/* Parent Campaign Dialog */}
@@ -714,6 +763,9 @@ const CampaignPanel: React.FC<CampaignPanelProps> = ({
         editingCampaign={editingParentCampaign}
         allCampaigns={parentCampaigns}
         availableChapters={chapters}
+        availableTeams={availableTeams}
+        organizerCount={organizerCount}
+        roleCounts={roleCounts}
       />
     </Box>
   );

@@ -610,6 +610,21 @@ export const fetchLists = async (organizer_vanid: string): Promise<ListItem[]> =
   }
 };
 
+// Fetch ALL lists across all organizers (for barometer rollups)
+export const fetchAllLists = async (): Promise<ListItem[]> => {
+  try {
+    const response = await fetch(`${API_URL}/lists/all`);
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    const result = await response.json();
+    return result.data || [];
+  } catch (error) {
+    console.error('Error fetching all lists:', error);
+    return [];
+  }
+};
+
 // Fetch active actions (optionally filtered by organizer visibility and chapter)
 export const fetchActions = async (organizer_vanid?: string, organizer_chapter?: string): Promise<ActionDefinition[]> => {
   try {
@@ -1023,8 +1038,7 @@ export const updateOrganizerDetails = async (vanid: string, details: { turf?: st
 };
 
 // Campaigns
-export type GoalDataSource = 'manual' | 'pledges' | 'meetings_membership' | 'meetings_leadership' | 'team_conversations';
-export type GoalLevel = 'individual' | 'team' | 'organization';
+export type GoalDataSource = 'manual' | 'constituent_1on1s' | 'team_1on1s' | 'team_conversations';
 
 export interface CampaignFromAPI {
   id: string;
@@ -1033,6 +1047,7 @@ export interface CampaignFromAPI {
   startDate: string;
   endDate: string;
   chapters: string[];
+  teams: string[];
   parentCampaignId?: string;
   campaignType?: string;
   createdDate: string;
@@ -1043,7 +1058,6 @@ export interface CampaignFromAPI {
     totalTarget: number;
     unit: string;
     dataSource?: GoalDataSource;
-    level?: GoalLevel;
   }>;
   milestones: Array<{
     id: string;

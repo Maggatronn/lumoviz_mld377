@@ -133,6 +133,7 @@ interface DashboardProps {
   onEditOrganizerMapping?: (name: string, vanId?: string) => void;
   // Section lead data
   sectionLeads?: Array<{ chapter_name: string; lead_vanid: string | null; lead_firstname?: string | null; lead_lastname?: string | null }>;
+  onSelectedOrganizerChange?: (organizerId: string, organizerName: string) => void;
 }
 
 // Action definitions interface
@@ -240,7 +241,8 @@ const Dashboard: React.FC<DashboardProps> = ({
   organizerMappings = [],
   onFilterByOrganizer,
   onEditOrganizerMapping,
-  sectionLeads = []
+  sectionLeads = [],
+  onSelectedOrganizerChange
 }) => {
   const { updateChapterColor } = useChapterColors();
   
@@ -393,10 +395,10 @@ const Dashboard: React.FC<DashboardProps> = ({
   const urlOrganizerNameRef = React.useRef(getOrganizerFromURL());
 
   const [selectedOrganizerId, setSelectedOrganizerId] = React.useState<string>(() => {
-    // If URL has an organizer, start empty so we don't flash Maggie
+    // If URL has an organizer, start empty so we resolve it from the URL
     if (urlOrganizerNameRef.current) return '';
-    // Otherwise try localStorage, then fall back to Maggie
-    return localStorage.getItem('dashboard_selected_organizer') || '100001';
+    // Default to the logged-in user
+    return currentUserId || '';
   });
   const [selectedOrganizerInfo, setSelectedOrganizerInfo] = React.useState<any>(currentUserInfo);
   const urlOrganizerResolved = React.useRef(false);
@@ -433,12 +435,11 @@ const Dashboard: React.FC<DashboardProps> = ({
       return;
     }
 
-    // If organizer list has loaded (more than just the Maggie fallback)
-    // but we still can't find the person, fall back to Maggie
+    // If organizer list has loaded but we can't find the URL organizer, fall back to logged-in user
     if (dashboardOrganizers.length > 1) {
       console.warn(`[Dashboard] Could not find organizer "${urlName}" in list of ${dashboardOrganizers.length} organizers`);
       urlOrganizerResolved.current = true;
-      setSelectedOrganizerId('100001');
+      setSelectedOrganizerId(currentUserId || '');
     }
   }, [dashboardOrganizers]);
 
@@ -462,6 +463,8 @@ const Dashboard: React.FC<DashboardProps> = ({
         };
         selectedOrganizerInfoRef.current = info;
         setSelectedOrganizerInfo(info);
+        
+        onSelectedOrganizerChange?.(selectedOrg.vanid, info.fullName || selectedOrg.name);
         
         setDashboardPeopleFilters((prev: any) => ({ 
           ...prev, 
@@ -1466,9 +1469,21 @@ const Dashboard: React.FC<DashboardProps> = ({
     return sectionLeads.filter(s => s.lead_vanid === selectedOrganizerId);
   }, [selectedOrganizerId, sectionLeads]);
 
-  // All teams in any section this organizer leads, or in their own chapter
+  // Whether the selected organizer is on the Teaching Team or leads a section
+  const isTeachingTeamOrSectionLead = useMemo(() => {
+    if (ledSections.length > 0) return true;
+    const ch = (userChapter || '').toLowerCase();
+    if (ch === 'teaching' || ch === 'teaching team') return true;
+    // Also check if any of the user's teams is called "Teaching Team"
+    return myTeamsData.some(t => {
+      const name = (t.teamName || t.bigQueryData?.teamName || '').toLowerCase();
+      return name.includes('teaching');
+    });
+  }, [ledSections, userChapter, myTeamsData]);
+
+  // Section-level teams: only populated for section leads or Teaching Team members
   const sectionTeams = useMemo(() => {
-    if (!teamsData) return [];
+    if (!teamsData || !isTeachingTeamOrSectionLead) return [];
     const sectionNames = new Set<string>();
     for (const s of ledSections) {
       if (s.chapter_name) sectionNames.add(s.chapter_name.toLowerCase());
@@ -1481,7 +1496,7 @@ const Dashboard: React.FC<DashboardProps> = ({
       const ch = (team.chapter || team.bigQueryData?.chapter || '').toLowerCase();
       return sectionNames.has(ch);
     });
-  }, [teamsData, ledSections, userChapter]);
+  }, [teamsData, ledSections, userChapter, isTeachingTeamOrSectionLead]);
 
   // Build the list of scope options for the dropdown
   const scopeOptions = useMemo(() => {
@@ -1667,6 +1682,12 @@ const Dashboard: React.FC<DashboardProps> = ({
     return names;
   }, [selectedOrganizerId, selectedOrganizerInfo, currentUserInfo]); // Removed organizerMappings to prevent infinite loop
 
+  // Effective organizer VAN IDs for People tab (includes team members when scope is active)
+  const effectivePeopleOrganizerVanIds = useMemo(() => {
+    if (!showTeamScope || teamMemberVanIds.length === 0) return undefined;
+    return Array.from(new Set([...getAllOrganizerVanIds, ...teamMemberVanIds]));
+  }, [showTeamScope, teamMemberVanIds, getAllOrganizerVanIds]);
+
   // MY TURF: People organized by the selected organizer (pledges + manual additions)
   const myTurf = useMemo(() => {
     if (!selectedOrganizerId) return [];
@@ -1690,7 +1711,11 @@ const Dashboard: React.FC<DashboardProps> = ({
     
     
     // Merge with manual turf list (people added but not yet pledged/completed action)
-    turfList.forEach(turfPerson => {
+    const allTurf = showTeamScope && teamTurfList.length > 0
+      ? [...turfList, ...teamTurfList]
+      : turfList;
+
+    allTurf.forEach(turfPerson => {
       if (!turfPeople.find(p => p.vanid === turfPerson.vanid && p.action === turfPerson.action)) {
         const contactInfo = getContactInfo(turfPerson.vanid);
         turfPeople.push({
@@ -1701,17 +1726,8 @@ const Dashboard: React.FC<DashboardProps> = ({
       }
     });
     
-    // Debug logging - commented out for production
-    // console.log('[Dashboard] myTurf computed:', {
-    //   totalPeople: turfPeople.length,
-    //   actions: Array.from(new Set(turfPeople.map(p => p.action))),
-    //   turfListLength: turfList.length,
-    //   pledgeSubmissionsLength: pledgeSubmissions.length,
-    //   sample: turfPeople.slice(0, 3)
-    // });
-    
     return turfPeople;
-  }, [selectedOrganizerId, turfList, getAllOrganizerVanIds, getAllOrganizerNames, sharedAllContacts]);
+  }, [selectedOrganizerId, turfList, teamTurfList, showTeamScope, getAllOrganizerVanIds, getAllOrganizerNames, sharedAllContacts]);
 
   // MY PEOPLE: People organized by the selected organizer (from peopleRecords/meetings + primary organizer)
   // When showTeamScope is on, also includes people organized by any team member
@@ -2957,12 +2973,11 @@ const Dashboard: React.FC<DashboardProps> = ({
       if (action.action_id === 'sign_pledge') {
         // If goal field is specified, count people with that field = true
         if (goalFieldKey) {
-          completedCount = turfList.filter((entry: any) => 
-            entry.action === 'sign_pledge' && 
-            entry.fields && 
-            entry.fields[goalFieldKey] === true &&
-            isFromCurrentPeriod(entry)
-          ).length;
+          completedCount = turfList.filter((entry: any) => {
+            if (entry.action !== 'sign_pledge' || !isFromCurrentPeriod(entry)) return false;
+            const v = entry.fields?.[goalFieldKey] ?? entry.progress?.[goalFieldKey];
+            return v === true || v === 'true' || v === 1 || v === '1';
+          }).length;
         } else {
           // Default: use last field or userPledgeCount
           // For rate-based recurring, filter pledges from current period
@@ -2986,12 +3001,11 @@ const Dashboard: React.FC<DashboardProps> = ({
         }
         
         if (goalFieldKey) {
-          // Count entries where the goal field is true
-          completedCount = actionEntries.filter((entry: any) => 
-            entry.fields && entry.fields[goalFieldKey] === true
-          ).length;
+          completedCount = actionEntries.filter((entry: any) => {
+            const v = entry.fields?.[goalFieldKey] ?? entry.progress?.[goalFieldKey];
+            return v === true || v === 'true' || v === 1 || v === '1';
+          }).length;
         } else {
-          // Default: use the last field in action.fields
           const lastField = action.fields[action.fields.length - 1];
           if (lastField) {
             completedCount = actionEntries.filter((entry: any) => 
@@ -3079,12 +3093,19 @@ const Dashboard: React.FC<DashboardProps> = ({
       let actionEntries = teamTurfList.filter((entry: any) => entry.action === action.action_id);
       if (isRateBased) actionEntries = actionEntries.filter(isFromCurrentPeriod);
 
+      const isTruthy = (v: any) => v === true || v === 'true' || v === 1 || v === '1';
       if (goalFieldKey) {
-        completedCount = actionEntries.filter((entry: any) => entry.fields && entry.fields[goalFieldKey] === true).length;
+        completedCount = actionEntries.filter((entry: any) => {
+          const v = entry.fields?.[goalFieldKey] ?? entry.progress?.[goalFieldKey];
+          return isTruthy(v);
+        }).length;
       } else {
         const lastField = action.fields?.[action.fields.length - 1];
         if (lastField) {
-          completedCount = actionEntries.filter((entry: any) => entry.fields && entry.fields[lastField.key] === true).length;
+          completedCount = actionEntries.filter((entry: any) => {
+            const v = entry.fields?.[lastField.key] ?? entry.progress?.[lastField.key];
+            return isTruthy(v);
+          }).length;
         }
       }
 
@@ -3159,104 +3180,7 @@ const Dashboard: React.FC<DashboardProps> = ({
   const pledgeProgress = Math.min((userPledgeCount / pledgeGoal) * 100, 100);
   const hasMetGoal = userPledgeCount >= pledgeGoal;
 
-  // Get user's chapter
-  // Find user's campaign(s)
-  const userCampaigns = useMemo(() => {
-    return parentCampaigns.filter(campaign => 
-      campaign.chapters.includes(userChapter) || 
-      campaign.chapters.includes('All Chapters')
-    );
-  }, [parentCampaigns, userChapter]);
-
-  // Calculate action goals for My Campaigns - showing federation and team progress (LIVE ACTIONS ONLY)
-  const actionGoals = useMemo(() => {
-    const goals: Record<string, ActionGoal[]> = {};
-    
-    // Filter to only live, non-personal actions (federation/chapter-wide only)
-    const liveActions = availableActions.filter((a: any) => {
-      if (a.status !== 'live') return false;
-      
-      // Exclude personal actions (actions with organizer_vanid and limited visibility)
-      // Include only federation-wide actions (no organizer_vanid OR visible to everyone)
-      const isFederationWide = !a.organizer_vanid || 
-                               !a.visible_to_organizers || 
-                               a.visible_to_organizers.length === 0;
-      
-      return isFederationWide;
-    });
-    
-    // For each campaign, calculate progress for each action
-    userCampaigns.forEach(campaign => {
-      const campaignGoals: ActionGoal[] = [];
-      
-      liveActions.forEach((action: any) => {
-        // Federation-wide count (from pledgeSubmissions)
-        let federationCount = 0;
-        
-        // No pledge processing needed
-        
-        // No pledge processing needed
-        let teamCount = 0;
-        
-        // Use federation count as the main metric, with team as secondary
-        // Goals are aspirational (e.g., 1000 pledges federation-wide)
-        const goal = action.action_id === 'sign_pledge' ? 1000 : 100;
-        
-        campaignGoals.push({
-          actionId: action.action_id,
-          actionName: action.action_name,
-          current: federationCount,
-          goal: goal,
-          percentage: goal > 0 ? (federationCount / goal) * 100 : 0
-        });
-      });
-      
-      goals[campaign.id] = campaignGoals;
-    });
-    
-    // Also add team-specific goals if user has a team
-    if (myTeam) {
-      const teamGoals: ActionGoal[] = [];
-      
-      liveActions.forEach((action: any) => {
-        let teamCount = 0;
-        
-        // No pledge processing needed
-        
-        // Team goals (smaller than federation-wide)
-        const goal = action.action_id === 'sign_pledge' ? 100 : 20;
-        
-        teamGoals.push({
-          actionId: action.action_id,
-          actionName: action.action_name,
-          current: teamCount,
-          goal: goal,
-          percentage: goal > 0 ? (teamCount / goal) * 100 : 0
-        });
-      });
-      
-      goals[myTeam.id] = teamGoals;
-    }
-    
-    return goals;
-  }, [userCampaigns, myTeam, availableActions]);
-
-  // Calculate overall campaign progress (average of all actions)
-  const campaignProgress = useMemo(() => {
-    const progress: Record<string, number> = {};
-    
-    userCampaigns.forEach(campaign => {
-      const goals = actionGoals[campaign.id] || [];
-      if (goals.length === 0) {
-        progress[campaign.id] = 0;
-      } else {
-        const avgPercentage = goals.reduce((sum, goal) => sum + goal.percentage, 0) / goals.length;
-        progress[campaign.id] = avgPercentage;
-      }
-    });
-    
-    return progress;
-  }, [userCampaigns, actionGoals]);
+  
 
   // Filter network to show organizing relationships
   const userNodes = useMemo(() => {
@@ -3304,6 +3228,13 @@ const Dashboard: React.FC<DashboardProps> = ({
     });
   }, [links, userNodes, currentUserId]);
 
+  // Auto-select current user if no organizer picked yet
+  React.useEffect(() => {
+    if (!selectedOrganizerId && currentUserId) {
+      setSelectedOrganizerId(currentUserId);
+    }
+  }, [selectedOrganizerId, currentUserId]); // eslint-disable-line react-hooks/exhaustive-deps
+
   if (!currentUserId) {
     return (
       <Box sx={{ p: 3, textAlign: 'center' }}>
@@ -3314,7 +3245,7 @@ const Dashboard: React.FC<DashboardProps> = ({
     );
   }
 
-  // Show empty state if no organizer selected
+  // Show empty state if no organizer selected (only for teaching team who can browse)
   if (!selectedOrganizerId) {
     return (
       <Box sx={{ p: 2, height: '100%', overflow: 'auto', bgcolor: '#fafafa' }}>
@@ -3324,7 +3255,7 @@ const Dashboard: React.FC<DashboardProps> = ({
               My Dashboard
             </Typography>
             
-            {/* Organizer Selector */}
+            {/* Organizer Selector - only for teaching team */}
             <FormControl size="small" sx={{ minWidth: 200 }}>
               <Select
                 value={selectedOrganizerId}
@@ -3400,50 +3331,52 @@ const Dashboard: React.FC<DashboardProps> = ({
               : 'Dashboard'}
           </Typography>
           
-          {/* Organizer Selector */}
-          <FormControl size="small" sx={{ minWidth: 200 }}>
-            <Select
-              value={selectedOrganizerId}
-              onChange={(e) => {
-                const newOrganizerId = e.target.value;
-                setSelectedOrganizerId(newOrganizerId);
-                setTeamScope('me');
-                
-                // Find the organizer name for URL
-                const selectedOrg = dashboardOrganizers.find(org => org.vanid === newOrganizerId);
-                
-                // Cache in localStorage
-                if (newOrganizerId) {
-                  localStorage.setItem('dashboard_selected_organizer', newOrganizerId);
-                } else {
-                  localStorage.removeItem('dashboard_selected_organizer');
-                }
-                
-                // Update URL with organizer name only
-                const params = new URLSearchParams(window.location.search);
-                if (newOrganizerId && selectedOrg) {
-                  params.set('organizer', selectedOrg.name);
-                } else {
-                  params.delete('organizer');
-                }
-                window.history.pushState({}, '', `${window.location.pathname}?${params.toString()}`);
-              }}
-              displayEmpty
-              sx={{ 
-                fontSize: '0.875rem',
-                '& .MuiSelect-select': { py: 0.75 }
-              }}
-            >
-              <MenuItem value="" sx={{ fontSize: '0.875rem', fontStyle: 'italic', color: 'text.secondary' }}>
-                Select an organizer to view dashboard
-              </MenuItem>
-              {dashboardOrganizers.length > 0 && dashboardOrganizers.map(org => (
-                <MenuItem key={org.vanid} value={org.vanid} sx={{ fontSize: '0.875rem' }}>
-                  {org.name}
+          {/* Organizer Selector - only visible for teaching team / section leads */}
+          {isTeachingTeamOrSectionLead && (
+            <FormControl size="small" sx={{ minWidth: 200 }}>
+              <Select
+                value={selectedOrganizerId}
+                onChange={(e) => {
+                  const newOrganizerId = e.target.value;
+                  setSelectedOrganizerId(newOrganizerId);
+                  setTeamScope('me');
+                  
+                  // Find the organizer name for URL
+                  const selectedOrg = dashboardOrganizers.find(org => org.vanid === newOrganizerId);
+                  
+                  // Cache in localStorage
+                  if (newOrganizerId) {
+                    localStorage.setItem('dashboard_selected_organizer', newOrganizerId);
+                  } else {
+                    localStorage.removeItem('dashboard_selected_organizer');
+                  }
+                  
+                  // Update URL with organizer name only
+                  const params = new URLSearchParams(window.location.search);
+                  if (newOrganizerId && selectedOrg) {
+                    params.set('organizer', selectedOrg.name);
+                  } else {
+                    params.delete('organizer');
+                  }
+                  window.history.pushState({}, '', `${window.location.pathname}?${params.toString()}`);
+                }}
+                displayEmpty
+                sx={{ 
+                  fontSize: '0.875rem',
+                  '& .MuiSelect-select': { py: 0.75 }
+                }}
+              >
+                <MenuItem value="" sx={{ fontSize: '0.875rem', fontStyle: 'italic', color: 'text.secondary' }}>
+                  Select an organizer to view dashboard
                 </MenuItem>
-              ))}
-            </Select>
-          </FormControl>
+                {dashboardOrganizers.length > 0 && dashboardOrganizers.map(org => (
+                  <MenuItem key={org.vanid} value={org.vanid} sx={{ fontSize: '0.875rem' }}>
+                    {org.name}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          )}
 
           {scopeOptions.length > 1 && (
             <FormControl size="small" sx={{ minWidth: 140 }}>
@@ -3682,14 +3615,26 @@ const Dashboard: React.FC<DashboardProps> = ({
                       
                       return (
                         <Box key={actionId}>
-                          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 0.25 }}>
                             <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.55rem' }}>
                               {action.name}
                             </Typography>
-                            <Typography variant="caption" sx={{ fontSize: '0.55rem', color: 'text.secondary' }}>
+                            <Typography variant="caption" sx={{ fontSize: '0.55rem', fontWeight: 600 }}>
                               {stats.count} / {stats.goal}
                             </Typography>
                           </Box>
+                          <LinearProgress
+                            variant="determinate"
+                            value={Math.min(actionPercentage, 100)}
+                            sx={{
+                              height: 5,
+                              borderRadius: 1,
+                              backgroundColor: '#e0e0e0',
+                              '& .MuiLinearProgress-bar': {
+                                backgroundColor: actionPercentage >= 100 ? '#4caf50' : '#1976d2'
+                              }
+                            }}
+                          />
                         </Box>
                       );
                     })}
@@ -3699,88 +3644,7 @@ const Dashboard: React.FC<DashboardProps> = ({
             );
           })()}
           
-          {/* Card 3: My Team (filtered actions stacked) */}
-          {myTeam && (
-            <Card elevation={1} sx={{ flex: '1 1 250px', minWidth: '200px' }}>
-              <CardContent sx={{ p: 0.75, '&:last-child': { pb: 0.75 } }}>
-                <Typography variant="caption" sx={{ fontWeight: 600, color: '#1976d2', textTransform: 'uppercase', letterSpacing: 0.3, fontSize: '0.7rem', display: 'block', mb: 0.5 }}>
-                  {myTeam.teamName}
-                </Typography>
-                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5, maxHeight: '200px', overflow: 'auto' }}>
-                  {actionGoals[myTeam.id]?.map(goal => (
-                    <Box key={goal.actionId}>
-                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 0.25 }}>
-                        <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.6rem' }}>
-                          {goal.actionName}
-                        </Typography>
-                        <Typography variant="caption" sx={{ fontWeight: 600, fontSize: '0.6rem' }}>
-                          {goal.current.toLocaleString()}
-                        </Typography>
-                      </Box>
-                      <LinearProgress
-                        variant="determinate"
-                        value={Math.min(goal.percentage, 100)}
-                        sx={{
-                          height: 6,
-                          borderRadius: 1,
-                          backgroundColor: '#e0e0e0',
-                          '& .MuiLinearProgress-bar': {
-                            backgroundColor: goal.percentage >= 100 ? '#4caf50' : '#1976d2'
-                          }
-                        }}
-                      />
-                    </Box>
-                  ))}
-                </Box>
-              </CardContent>
-            </Card>
-          )}
-          
-          {/* Card 3: Full Federation (filtered actions stacked) - exclude team campaign */}
-          {userCampaigns.length > 0 && userCampaigns
-            .filter(campaign => campaign.id !== myTeam?.id) // Don't show team campaign here (already shown in Card 2)
-            .slice(0, 1) // Only show the first campaign
-            .map(campaign => {
-              const overallProgress = campaignProgress[campaign.id] || 0;
-              
-              return (
-                <Card key={campaign.id} elevation={1} sx={{ flex: '1 1 250px', minWidth: '200px' }}>
-                  <CardContent sx={{ p: 0.75, '&:last-child': { pb: 0.75 } }}>
-                    <Typography variant="caption" sx={{ fontWeight: 600, color: '#1976d2', textTransform: 'uppercase', letterSpacing: 0.3, fontSize: '0.7rem', display: 'block', mb: 0.5 }}>
-                      {campaign.name} ({Math.round(overallProgress)}%)
-                    </Typography>
-                    
-                    {/* Action Progress Bars - Vertical stacked (filtered by selected actions) */}
-                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5, maxHeight: '200px', overflow: 'auto' }}>
-                      {actionGoals[campaign.id]?.map(goal => (
-                        <Box key={goal.actionId}>
-                          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 0.25 }}>
-                            <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.6rem' }}>
-                              {goal.actionName}
-                            </Typography>
-                            <Typography variant="caption" sx={{ fontWeight: 600, fontSize: '0.6rem' }}>
-                              {goal.current.toLocaleString()}
-                            </Typography>
-                          </Box>
-                          <LinearProgress
-                            variant="determinate"
-                            value={Math.min(goal.percentage, 100)}
-                            sx={{
-                              height: 6,
-                              borderRadius: 1,
-                              backgroundColor: '#e0e0e0',
-                              '& .MuiLinearProgress-bar': {
-                                backgroundColor: goal.percentage >= 100 ? '#4caf50' : '#1976d2'
-                              }
-                            }}
-                          />
-                        </Box>
-                      ))}
-                    </Box>
-                  </CardContent>
-                </Card>
-              );
-            })}
+          {/* Campaign cards removed — "My Goals" and team-scoped goals above already cover these */}
         </Box>
 
         {/* My Teams Section */}
@@ -4079,7 +3943,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                       } 
                       value="people" 
                     />
-                    <Tab label={`${scopeLabel} Leaders (${myLeaders.length})`} value="leaders" />
+                    <Tab label={`${scopeLabel} Lists`} value="lists" />
                     <Tab 
                       label={`${scopeLabel} Conversations (${sharedCachedMeetings.filter((m: any) => {
                         const effectiveIds = showTeamScope && teamMemberVanIds.length > 0
@@ -4089,8 +3953,8 @@ const Dashboard: React.FC<DashboardProps> = ({
                       }).length})`}
                       value="conversations" 
                     />
-                    <Tab label={`${scopeLabel} Lists`} value="lists" />
                     <Tab label={`${scopeLabel} Actions`} value="actions" />
+                    <Tab label={`${scopeLabel} Leaders (${myLeaders.length})`} value="leaders" />
                   </Tabs>
                 </Box>
 
@@ -4803,9 +4667,11 @@ const Dashboard: React.FC<DashboardProps> = ({
                       selectedActions={currentOrganizerLiveActions}
                       currentUserId={currentUserId || undefined}
                       currentUserName={currentUserInfo?.fullName || currentUserInfo?.firstname || ''}
+                      selectedOrganizerId={selectedOrganizerId}
+                      selectedOrganizerName={selectedOrganizerInfo?.fullName || selectedOrganizerInfo?.firstname || ''}
                       actions={actionsProp}
-                      turfLists={turfList}
-                      hideColumns={['chapter', 'organizer']}
+                      turfLists={showTeamScope && teamTurfList.length > 0 ? [...turfList, ...teamTurfList] : turfList}
+                      hideColumns={showTeamScope ? ['chapter'] : ['chapter', 'organizer']}
                       externalFilterOpen={showMyPeopleFilters}
                       onExternalFilterOpenChange={setShowMyPeopleFilters}
                       sharedAllContacts={sharedAllContacts}
@@ -4821,6 +4687,8 @@ const Dashboard: React.FC<DashboardProps> = ({
                       onEditConversation={handleEditConversationFromMeeting}
                       onDeleteConversation={handleDeleteConversation}
                       onDeletePerson={handleDeletePerson}
+                      organizerVanIds={effectivePeopleOrganizerVanIds}
+                      teamsData={teamsData}
                     />
                   </Box>
                 </Box>

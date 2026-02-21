@@ -35,14 +35,15 @@ import {
   Groups as TeamsIcon,
   Dashboard as DashboardIcon,
   BarChart as BarChartIcon,
-  ViewKanban as ViewKanbanIcon
+  ViewKanban as ViewKanbanIcon,
+  Logout as LogoutIcon
 } from '@mui/icons-material';
 
 // Configuration
 import { TERMS, BRANDING } from '../config/appConfig';
 
 // API and services
-import { fetchChapters, fetchOrgIds, fetchMeetings, fetchCurrentUserInfo, fetchContacts, fetchMeetingsByContacts, fetchLOECounts, fetchActions, fetchLeaderHierarchy, fetchLists, fetchOrganizerGoals, fetchCampaigns, createCampaign, updateCampaign, deleteCampaign, ActionDefinition, fetchAllContactOrganizers, addContactOrganizer, removeContactOrganizer, fetchSections, SectionLead } from '../services/api';
+import { fetchChapters, fetchOrgIds, fetchMeetings, fetchCurrentUserInfo, fetchContacts, fetchMeetingsByContacts, fetchLOECounts, fetchActions, fetchLeaderHierarchy, fetchLists, fetchAllLists, fetchOrganizerGoals, fetchCampaigns, createCampaign, updateCampaign, deleteCampaign, ActionDefinition, fetchAllContactOrganizers, addContactOrganizer, removeContactOrganizer, fetchSections, SectionLead } from '../services/api';
 import { teamsService } from '../services/teamsService';
 import { getOrganizerMappings, OrganizerMapping, getCanonicalOrganizerName, mergePeople } from '../services/organizerMappingService';
 import { API_BASE_URL } from '../config';
@@ -62,7 +63,6 @@ import DateRangePicker from './ui/DateRangePicker';
 import PersonDetailsDialog, { PersonUpdate } from './dialogs/PersonDetailsDialog';
 import AssignOrganizerDialog from './dialogs/AssignOrganizerDialog';
 import { EditOrganizerMappingDialog } from './dialogs/EditOrganizerMappingDialog';
-import { PersonMappingDialog } from './dialogs/PersonMappingDialog';
 import UnifiedFilter, { FilterState } from './ui/UnifiedFilter';
 import { useMobile } from '../hooks/useMobile';
 import { useURLRouting, ViewModeType } from '../hooks/useURLRouting';
@@ -103,6 +103,7 @@ const transformCampaignFromAPI = (campaign: any): ParentCampaign => ({
   startDate: campaign.startDate,
   endDate: campaign.endDate,
   chapters: campaign.chapters,
+  teams: campaign.teams || [],
   parentCampaignId: campaign.parentCampaignId,
   campaignType: (campaign.campaignType as 'standalone' | 'parent' | 'child' | 'phase' | undefined) || 'parent',
   createdDate: campaign.createdDate,
@@ -110,7 +111,7 @@ const transformCampaignFromAPI = (campaign: any): ParentCampaign => ({
   milestones: campaign.milestones
 });
 
-const MainAppContent: React.FC = () => {
+const MainAppContent: React.FC<{ authUser?: import('../services/auth').AuthUser; onLogout?: () => void }> = ({ authUser, onLogout }) => {
   const theme = useTheme();
   const { customColors } = useChapterColors();
   const isMobile = useMobile();
@@ -216,6 +217,9 @@ const MainAppContent: React.FC = () => {
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [currentUserInfo, setCurrentUserInfo] = useState<any>(null);
   
+  const [dashboardSelectedOrganizerId, setDashboardSelectedOrganizerId] = useState<string | null>(null);
+  const [dashboardSelectedOrganizerName, setDashboardSelectedOrganizerName] = useState<string>('');
+
   // Dynamic LOE levels extracted from actual data
   const [dynamicLOELevels, setDynamicLOELevels] = useState<DynamicLOELevel[]>([]);
   
@@ -232,6 +236,7 @@ const MainAppContent: React.FC = () => {
   const [teamsData, setTeamsData] = React.useState<any[]>([]);
   const teamsEnhancedRef = useRef(false);
   const [teamsLoading, setTeamsLoading] = React.useState(false);
+  const [roleCounts, setRoleCounts] = React.useState<{ student: number; teacher: number; constituent: number }>({ student: 0, teacher: 0, constituent: 0 });
   
   // Memoize date range as tuple for PeoplePanel to prevent unnecessary re-renders
   
@@ -722,23 +727,21 @@ const MainAppContent: React.FC = () => {
     }
   };
   
-  // Load lists data once when currentUserId is available
+  // Load ALL lists data (across all organizers) for barometer rollups
   const loadListsData = React.useCallback(async () => {
-    if (!currentUserId) return;
-    
     try {
-      const lists = await fetchLists(currentUserId);
+      const lists = await fetchAllLists();
       setListsData(lists);
     } catch (error) {
       console.error('Error loading lists:', error);
     }
-  }, [currentUserId]);
+  }, []);
   
   useEffect(() => {
-    if (!currentUserId || listsLoadedRef.current) return;
+    if (listsLoadedRef.current) return;
     listsLoadedRef.current = true;
     loadListsData();
-  }, [currentUserId, loadListsData]);
+  }, [loadListsData]);
   
   // Load organizer goals once when currentUserId is available
   const loadOrganizerGoalsData = React.useCallback(async () => {
@@ -1131,6 +1134,7 @@ const MainAppContent: React.FC = () => {
         start_date: campaignData.startDate,
         end_date: campaignData.endDate,
         chapters: campaignData.chapters,
+        teams: campaignData.teams,
         parent_campaign_id: campaignData.parentCampaignId,
         goal_types: campaignData.goalTypes,
         milestones: campaignData.milestones
@@ -1157,6 +1161,7 @@ const MainAppContent: React.FC = () => {
         start_date: campaignData.startDate,
         end_date: campaignData.endDate,
         chapters: campaignData.chapters,
+        teams: campaignData.teams,
         parent_campaign_id: campaignData.parentCampaignId,
         status: 'active'
       };
@@ -1252,6 +1257,7 @@ const MainAppContent: React.FC = () => {
           }));
         
         setCampaignActions(campaignActionsFromDB);
+        setActions(dbActions);
       } catch (error) {
         console.error('Error loading template actions:', error);
       }
@@ -1285,6 +1291,17 @@ const MainAppContent: React.FC = () => {
         // Fetch section leads
         const sectionsData = await fetchSections();
         setSectionLeads(sectionsData || []);
+
+        // Fetch role counts for campaign goal calculation
+        try {
+          const rcResponse = await fetch(`${API_BASE_URL}/api/organizer-role-counts`);
+          if (rcResponse.ok) {
+            const rc = await rcResponse.json();
+            setRoleCounts(rc);
+          }
+        } catch (e) {
+          console.warn('Could not fetch role counts:', e);
+        }
         
         // Build userMap from org data (includes all organizers)
         const newUserMap = new Map<string, any>();
@@ -1306,25 +1323,59 @@ const MainAppContent: React.FC = () => {
         }
         setUserMap(newUserMap);
         
-        // Fetch user info for current user
-        // Default to Maggie Hughes for testing
-        const testUserId = "100001"; // Maggie Hughes VAN ID
-        const testUserInfo = newUserMap.get(testUserId) || { 
-          userId: testUserId, 
-          chapter: 'Main Chapter',
-          firstname: 'Maggie',
-          lastname: 'Hughes',
-          email: 'maggie@mld377.org',
-          fullName: 'Maggie Hughes',
-          username: 'maggie',
-          alternateIds: ['100001']
-        };
-        if (!newUserMap.has(testUserId)) {
-          newUserMap.set(testUserId, testUserInfo);
+        // Resolve current user from auth
+        let resolvedUserId = authUser?.vanid || null;
+        let resolvedUserInfo: any = resolvedUserId ? newUserMap.get(resolvedUserId) : null;
+
+        // If vanid didn't match, try finding by email in the user map
+        if (!resolvedUserInfo && authUser?.email) {
+          const entries = Array.from(newUserMap.entries());
+          for (let i = 0; i < entries.length; i++) {
+            const [vid, info] = entries[i];
+            if (info.email && info.email.toLowerCase() === authUser.email.toLowerCase()) {
+              resolvedUserId = vid;
+              resolvedUserInfo = info;
+              break;
+            }
+          }
+        }
+
+        // If still not found, try matching by display name
+        if (!resolvedUserInfo && authUser?.displayName) {
+          const entries = Array.from(newUserMap.entries());
+          const authNameLower = authUser.displayName.toLowerCase();
+          for (let i = 0; i < entries.length; i++) {
+            const [vid, info] = entries[i];
+            const fullName = (info.fullName || `${info.firstname || ''} ${info.lastname || ''}`.trim()).toLowerCase();
+            if (fullName && fullName === authNameLower) {
+              resolvedUserId = vid;
+              resolvedUserInfo = info;
+              break;
+            }
+          }
+        }
+
+        // Last resort: create a stub entry for this user
+        if (!resolvedUserId) {
+          resolvedUserId = `auth_${authUser?.id || 'unknown'}`;
+        }
+        if (!resolvedUserInfo) {
+          resolvedUserInfo = {
+            userId: resolvedUserId,
+            chapter: 'Unknown',
+            firstname: authUser?.displayName?.split(' ')[0] || 'User',
+            lastname: authUser?.displayName?.split(' ').slice(1).join(' ') || '',
+            email: authUser?.email || '',
+            fullName: authUser?.displayName || 'User',
+            username: authUser?.email?.split('@')[0] || 'user',
+            alternateIds: [resolvedUserId]
+          };
+          newUserMap.set(resolvedUserId, resolvedUserInfo);
           setUserMap(new Map(newUserMap));
         }
-        setCurrentUserId(testUserId);
-        setCurrentUserInfo(testUserInfo);
+
+        setCurrentUserId(resolvedUserId);
+        setCurrentUserInfo(resolvedUserInfo);
         
         setFetchRequested(true); // Trigger initial data fetch
         
@@ -2696,6 +2747,10 @@ const MainAppContent: React.FC = () => {
             onFilterByOrganizer={handleFilterByOrganizer}
             onEditOrganizerMapping={handleEditOrganizerMapping}
             sectionLeads={sectionLeads}
+            onSelectedOrganizerChange={(id, name) => {
+              setDashboardSelectedOrganizerId(id);
+              setDashboardSelectedOrganizerName(name);
+            }}
           />
         </Box>
       </Box>
@@ -2835,19 +2890,6 @@ const MainAppContent: React.FC = () => {
               />
             )}
 
-
-            {/* People Management Button */}
-            <Tooltip title="Manage People & Mappings">
-              <IconButton 
-                onClick={() => setPersonMappingDialogOpen(true)} 
-                sx={{ 
-                  bgcolor: 'action.hover',
-                  '&:hover': { bgcolor: 'action.selected' }
-                }}
-              >
-                <PeopleIcon />
-              </IconButton>
-            </Tooltip>
             
             {/* Refresh Button */}
             <IconButton 
@@ -2860,6 +2902,26 @@ const MainAppContent: React.FC = () => {
             >
               {loading ? <CircularProgress size={20} /> : <RefreshIcon />}
             </IconButton>
+
+            {/* User info & Logout */}
+            {authUser && onLogout && (
+              <Tooltip title={`Signed in as ${authUser.displayName || authUser.email}. Click to sign out.`}>
+                <Chip
+                  label={authUser.displayName?.split(' ')[0] || authUser.email.split('@')[0]}
+                  onClick={onLogout}
+                  icon={<LogoutIcon sx={{ fontSize: 14 }} />}
+                  size="small"
+                  variant="outlined"
+                  sx={{ 
+                    ml: 0.5,
+                    fontWeight: 500,
+                    fontSize: '0.75rem',
+                    cursor: 'pointer',
+                    '&:hover': { bgcolor: 'action.hover' }
+                  }}
+                />
+              </Tooltip>
+            )}
           </Box>
         </Toolbar>
       </AppBar>
@@ -3086,33 +3148,6 @@ const MainAppContent: React.FC = () => {
                   sx={{ width: 180 }}
                 />
                 
-                {/* LOE Filter - Dynamic from data */}
-                <FormControl size="small" sx={{ width: 180, mt: 1 }}>
-                  <InputLabel>Filter by LOE</InputLabel>
-                  <Select
-                    multiple
-                    value={networkLOEFilter}
-                    onChange={(e) => setNetworkLOEFilter(typeof e.target.value === 'string' ? e.target.value.split(',') : e.target.value)}
-                    label="Filter by LOE"
-                    renderValue={(selected) => selected.length === 0 ? 'All' : `${selected.length} selected`}
-                  >
-                    {dynamicLOELevels.map((level) => (
-                      <MenuItem key={level.rawValue} value={level.rawValue}>
-                        <Checkbox checked={networkLOEFilter.indexOf(level.rawValue) > -1} />
-                        <ListItemText 
-                          primary={level.label} 
-                          secondary={level.level ? `Level ${level.level}` : undefined}
-                          sx={{
-                            '& .MuiListItemText-primary': {
-                              color: level.color,
-                              fontWeight: 500
-                            }
-                          }}
-                        />
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
               </Box>
             </Box>
             
@@ -3315,6 +3350,16 @@ const MainAppContent: React.FC = () => {
               }
             }}
             currentUserId={currentUserId || undefined}
+            currentUserName={currentUserInfo?.fullName || currentUserInfo?.firstname || ''}
+            selectedOrganizerId={dashboardSelectedOrganizerId || currentUserId || undefined}
+            selectedOrganizerName={dashboardSelectedOrganizerName || currentUserInfo?.fullName || currentUserInfo?.firstname || ''}
+            availableOrganizers={allOrganizerOptions.map(o => ({
+              vanid: (o.vanid || '').toString(),
+              name: `${o.firstname || ''} ${o.lastname || ''}`.trim()
+            })).filter(o => o.vanid && o.name)}
+            availableTeams={teamsData.map((t: any) => ({ id: t.id, name: t.teamName }))}
+            organizerCount={allOrganizerOptions.filter(o => o.vanid).length}
+            roleCounts={roleCounts}
           />
         </Box>
       </Box>
@@ -3380,6 +3425,10 @@ const MainAppContent: React.FC = () => {
           onFilterByOrganizer={handleFilterByOrganizer}
           onEditOrganizerMapping={handleEditOrganizerMapping}
           sectionLeads={sectionLeads}
+          onSelectedOrganizerChange={(id, name) => {
+            setDashboardSelectedOrganizerId(id);
+            setDashboardSelectedOrganizerName(name);
+          }}
         />
       </Box>
 
@@ -3508,25 +3557,7 @@ const MainAppContent: React.FC = () => {
         );
       })()}
       
-      {/* Person Mapping Management Dialog */}
-      <PersonMappingDialog
-        open={personMappingDialogOpen}
-        onClose={() => setPersonMappingDialogOpen(false)}
-        allMappings={organizerMappings}
-        allPeople={Array.from(userMap.entries()).map(([vanid, info]) => ({
-          name: info.fullName || `${info.firstname || ''} ${info.lastname || ''}`.trim(),
-          vanid: vanid
-        }))}
-        onMergePeople={handleMergePeople}
-        onRefresh={async () => {
-          const updated = await getOrganizerMappings();
-          setOrganizerMappings(updated);
-        }}
-        onCreatePerson={() => {
-          setPersonMappingDialogOpen(false);
-          alert('Please use the "Add New Person" button in the Dashboard view dialogs.');
-        }}
-      />
+
       
       {/* Assign Organizer Dialog */}
       <AssignOrganizerDialog
@@ -3543,10 +3574,15 @@ const MainAppContent: React.FC = () => {
   );
 };
 
-const MainApp: React.FC = () => {
+interface MainAppProps {
+  authUser?: import('../services/auth').AuthUser;
+  onLogout?: () => void;
+}
+
+const MainApp: React.FC<MainAppProps> = ({ authUser, onLogout }) => {
   return (
     <ChapterColorProvider>
-      <MainAppContent />
+      <MainAppContent authUser={authUser} onLogout={onLogout} />
     </ChapterColorProvider>
   );
 };

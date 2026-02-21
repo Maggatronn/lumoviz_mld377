@@ -1,10 +1,14 @@
 const express = require('express');
 const cors = require('cors');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
 const database = require('./database'); // Database abstraction layer (PostgreSQL)
 const pool = require('./db'); // Direct PostgreSQL pool access
 const { listAvailableDatasets, listTablesInDataset } = require('./utils');
 const path = require('path');
 require('dotenv').config();
+
+const JWT_SECRET = process.env.JWT_SECRET || 'lumoviz-dev-secret-change-in-production';
 
 // For backward compatibility, create bigquery alias
 const bigquery = database;
@@ -2311,6 +2315,7 @@ app.get('/api/org-ids-simple', async (req, res) => {
         last_name as lastname,
         NULL as supervisorid,
         COALESCE(type, 'constituent') as type,
+        COALESCE(role, 'student') as role,
         NULL as turf,
         NULL as team_role,
         email,
@@ -2324,6 +2329,42 @@ app.get('/api/org-ids-simple', async (req, res) => {
   } catch (error) {
     console.error('[/api/org-ids-simple] Error:', error.message);
     res.json([]);
+  }
+});
+
+// Get organizer role counts (students, teachers, constituents)
+app.get('/api/organizer-role-counts', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT COALESCE(role, 'student') as role, COUNT(*)::int as count
+      FROM contacts
+      WHERE type = 'organizer'
+      GROUP BY COALESCE(role, 'student')
+    `);
+    const counts = { student: 0, teacher: 0, constituent: 0 };
+    for (const row of result.rows) {
+      counts[row.role] = row.count;
+    }
+    res.json(counts);
+  } catch (error) {
+    console.error('Error fetching role counts:', error.message);
+    res.json({ student: 0, teacher: 0, constituent: 0 });
+  }
+});
+
+// Update contact role
+app.put('/api/contacts/:vanid/role', async (req, res) => {
+  try {
+    const { vanid } = req.params;
+    const { role } = req.body;
+    if (!['student', 'teacher', 'constituent'].includes(role)) {
+      return res.status(400).json({ error: 'Invalid role. Must be student, teacher, or constituent.' });
+    }
+    await pool.query(`UPDATE contacts SET role = $1, updated_at = CURRENT_TIMESTAMP WHERE vanid = $2`, [role, vanid]);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error updating contact role:', error.message);
+    res.status(500).json({ error: error.message });
   }
 });
 
@@ -3946,6 +3987,51 @@ app.patch('/api/actions/:action_id/status', async (req, res) => {
   }
 });
 
+// GET /api/lists/all - Fetch lists across ALL organizers (for barometer rollups)
+app.get('/api/lists/all', async (req, res) => {
+  try {
+    const [rows] = await database.query({
+      query: `
+        SELECT
+          l.list_id,
+          l.organizer_vanid,
+          l.contact_vanid          AS vanid,
+          l.contact_name,
+          l.action,
+          l.action_id,
+          l.campaign_id,
+          l.progress,
+          l.notes,
+          l.desired_change,
+          l.date_added,
+          l.date_pledged,
+          l.last_updated,
+          l.is_completed,
+          l.is_active,
+          COALESCE(c.chapter, '') AS chapter
+        FROM lumoviz_lists l
+        LEFT JOIN contacts c
+          ON l.contact_vanid::TEXT = c.vanid::TEXT
+        WHERE (l.is_active = TRUE OR l.is_active IS NULL)
+        ORDER BY l.date_added DESC
+      `,
+      params: {}
+    });
+
+    const lists = rows.map(row => ({
+      ...row,
+      progress: row.progress && typeof row.progress === 'string'
+        ? JSON.parse(row.progress)
+        : (row.progress || {})
+    }));
+
+    res.json({ success: true, data: lists });
+  } catch (error) {
+    console.error('Error fetching all lists:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 // GET /api/lists - Fetch organizer's turf lists
 app.get('/api/lists', async (req, res) => {
   try {
@@ -5080,6 +5166,7 @@ app.get('/api/campaigns', async (req, res) => {
         startDate: campaign.start_date?.value || campaign.start_date,
         endDate: campaign.end_date?.value || campaign.end_date,
         chapters: campaign.chapters || [],
+        teams: campaign.teams || [],
         parentCampaignId: campaign.parent_campaign_id,
         campaignType: 'parent', // Default
         createdDate: campaign.created_at,
@@ -5127,6 +5214,7 @@ app.post('/api/campaigns', async (req, res) => {
       start_date,
       end_date,
       chapters,
+      teams,
       parent_campaign_id,
       goal_types,
       milestones
@@ -5144,8 +5232,8 @@ app.post('/api/campaigns', async (req, res) => {
     // Insert campaign
     const campaignQuery = `
       INSERT INTO \`${PROJECT_ID}.${DATASET_ID}.lumoviz_campaigns\`
-      (campaign_id, campaign_name, description, start_date, end_date, chapters, parent_campaign_id, status)
-      VALUES (@campaign_id, @campaign_name, @description, @start_date, @end_date, @chapters, @parent_campaign_id, 'active')
+      (campaign_id, campaign_name, description, start_date, end_date, chapters, teams, parent_campaign_id, status)
+      VALUES (@campaign_id, @campaign_name, @description, @start_date, @end_date, @chapters, @teams, @parent_campaign_id, 'active')
     `;
 
     await bigquery.query({
@@ -5157,6 +5245,7 @@ app.post('/api/campaigns', async (req, res) => {
         start_date,
         end_date,
         chapters: chapters || ['All Chapters'],
+        teams: teams || ['All Teams'],
         parent_campaign_id: parent_campaign_id || null
       }
     });
@@ -5255,6 +5344,7 @@ app.put('/api/campaigns/:campaign_id', async (req, res) => {
       start_date,
       end_date,
       chapters,
+      teams,
       parent_campaign_id,
       status
     } = req.body;
@@ -5267,6 +5357,7 @@ app.put('/api/campaigns/:campaign_id', async (req, res) => {
         start_date = @start_date,
         end_date = @end_date,
         chapters = @chapters,
+        teams = @teams,
         parent_campaign_id = @parent_campaign_id,
         status = @status,
         updated_at = CURRENT_TIMESTAMP
@@ -5282,6 +5373,7 @@ app.put('/api/campaigns/:campaign_id', async (req, res) => {
         start_date,
         end_date,
         chapters: chapters || [],
+        teams: teams || [],
         parent_campaign_id: parent_campaign_id || null,
         status: status || 'active'
       }
@@ -5321,6 +5413,204 @@ app.delete('/api/campaigns/:campaign_id', async (req, res) => {
   } catch (error) {
     console.error('Error deleting campaign:', error);
     res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ══════════════════════════════════════════════════════
+//  Authentication Endpoints
+// ══════════════════════════════════════════════════════
+
+// POST /api/auth/register - Create a new account
+app.post('/api/auth/register', async (req, res) => {
+  try {
+    const { email, password, displayName } = req.body;
+    if (!email || !password) {
+      return res.status(400).json({ success: false, error: 'Email and password are required' });
+    }
+
+    const normalizedEmail = email.trim().toLowerCase();
+
+    // Check if email already registered
+    const existing = await pool.query('SELECT id FROM lumoviz_users WHERE email = $1', [normalizedEmail]);
+    if (existing.rows.length > 0) {
+      return res.status(409).json({ success: false, error: 'An account with this email already exists' });
+    }
+
+    // Look up the organizer vanid from contacts/org_ids by email
+    let vanid = null;
+    let resolvedName = displayName || null;
+    const contactLookup = await pool.query(
+      `SELECT vanid, first_name, last_name FROM contacts WHERE LOWER(email) = $1 LIMIT 1`,
+      [normalizedEmail]
+    );
+    if (contactLookup.rows.length > 0) {
+      vanid = contactLookup.rows[0].vanid?.toString();
+      if (!resolvedName) {
+        resolvedName = `${contactLookup.rows[0].first_name || ''} ${contactLookup.rows[0].last_name || ''}`.trim();
+      }
+    } else {
+      // Try org_ids table
+      const orgLookup = await pool.query(
+        `SELECT vanid, first_name, last_name FROM org_ids WHERE LOWER(email) = $1 LIMIT 1`,
+        [normalizedEmail]
+      );
+      if (orgLookup.rows.length > 0) {
+        vanid = orgLookup.rows[0].vanid?.toString();
+        if (!resolvedName) {
+          resolvedName = `${orgLookup.rows[0].first_name || ''} ${orgLookup.rows[0].last_name || ''}`.trim();
+        }
+      }
+    }
+
+    const passwordHash = await bcrypt.hash(password, 10);
+    const isAdmin = ADMIN_EMAILS.some(ae => normalizedEmail.includes(ae));
+
+    const result = await pool.query(
+      `INSERT INTO lumoviz_users (email, password_hash, vanid, display_name, is_admin)
+       VALUES ($1, $2, $3, $4, $5) RETURNING id, email, vanid, display_name, is_admin`,
+      [normalizedEmail, passwordHash, vanid, resolvedName, isAdmin]
+    );
+
+    const user = result.rows[0];
+    const token = jwt.sign(
+      { userId: user.id, email: user.email, vanid: user.vanid, isAdmin: user.is_admin },
+      JWT_SECRET,
+      { expiresIn: '7d' }
+    );
+
+    res.json({
+      success: true,
+      token,
+      user: {
+        id: user.id,
+        email: user.email,
+        vanid: user.vanid,
+        displayName: user.display_name,
+        isAdmin: user.is_admin
+      }
+    });
+  } catch (error) {
+    console.error('Registration error:', error);
+    res.status(500).json({ success: false, error: 'Registration failed' });
+  }
+});
+
+// POST /api/auth/login - Log in with email and password
+app.post('/api/auth/login', async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    if (!email || !password) {
+      return res.status(400).json({ success: false, error: 'Email and password are required' });
+    }
+
+    const normalizedEmail = email.trim().toLowerCase();
+
+    const result = await pool.query(
+      'SELECT id, email, password_hash, vanid, display_name, is_admin FROM lumoviz_users WHERE email = $1',
+      [normalizedEmail]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(401).json({ success: false, error: 'Invalid email or password' });
+    }
+
+    const user = result.rows[0];
+    const passwordValid = await bcrypt.compare(password, user.password_hash);
+    if (!passwordValid) {
+      return res.status(401).json({ success: false, error: 'Invalid email or password' });
+    }
+
+    // If vanid is missing, try to resolve it now from contacts/org_ids
+    if (!user.vanid) {
+      try {
+        let foundVanid = null;
+        const contactLookup = await pool.query(
+          `SELECT vanid FROM contacts WHERE LOWER(email) = $1 LIMIT 1`,
+          [normalizedEmail]
+        );
+        if (contactLookup.rows.length > 0) {
+          foundVanid = contactLookup.rows[0].vanid?.toString();
+        } else {
+          const orgLookup = await pool.query(
+            `SELECT vanid FROM org_ids WHERE LOWER(email) = $1 LIMIT 1`,
+            [normalizedEmail]
+          );
+          if (orgLookup.rows.length > 0) {
+            foundVanid = orgLookup.rows[0].vanid?.toString();
+          }
+        }
+        if (foundVanid) {
+          await pool.query('UPDATE lumoviz_users SET vanid = $1 WHERE id = $2', [foundVanid, user.id]);
+          user.vanid = foundVanid;
+        }
+      } catch (e) {
+        console.warn('Could not resolve vanid on login:', e.message);
+      }
+    }
+
+    // Update last login
+    await pool.query('UPDATE lumoviz_users SET last_login = CURRENT_TIMESTAMP WHERE id = $1', [user.id]);
+
+    const token = jwt.sign(
+      { userId: user.id, email: user.email, vanid: user.vanid, isAdmin: user.is_admin },
+      JWT_SECRET,
+      { expiresIn: '7d' }
+    );
+
+    res.json({
+      success: true,
+      token,
+      user: {
+        id: user.id,
+        email: user.email,
+        vanid: user.vanid,
+        displayName: user.display_name,
+        isAdmin: user.is_admin
+      }
+    });
+  } catch (error) {
+    console.error('Login error:', error);
+    res.status(500).json({ success: false, error: 'Login failed' });
+  }
+});
+
+// GET /api/auth/me - Get current user from token
+app.get('/api/auth/me', async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({ success: false, error: 'Not authenticated' });
+    }
+
+    const token = authHeader.split(' ')[1];
+    const decoded = jwt.verify(token, JWT_SECRET);
+
+    const result = await pool.query(
+      'SELECT id, email, vanid, display_name, is_admin FROM lumoviz_users WHERE id = $1',
+      [decoded.userId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(401).json({ success: false, error: 'User not found' });
+    }
+
+    const user = result.rows[0];
+    res.json({
+      success: true,
+      user: {
+        id: user.id,
+        email: user.email,
+        vanid: user.vanid,
+        displayName: user.display_name,
+        isAdmin: user.is_admin
+      }
+    });
+  } catch (error) {
+    if (error.name === 'JsonWebTokenError' || error.name === 'TokenExpiredError') {
+      return res.status(401).json({ success: false, error: 'Invalid or expired token' });
+    }
+    console.error('Auth check error:', error);
+    res.status(500).json({ success: false, error: 'Auth check failed' });
   }
 });
 
@@ -5512,5 +5802,40 @@ app.listen(port, '0.0.0.0', async () => {
     }
   } catch (e) {
     console.warn('lumoviz_sections migration note:', e.message);
+  }
+
+  // === Add teams column to lumoviz_campaigns ===
+  try {
+    await pool.query(`ALTER TABLE lumoviz_campaigns ADD COLUMN IF NOT EXISTS teams TEXT[]`);
+    console.log('✅ lumoviz_campaigns: teams column ready');
+  } catch (e) {
+    console.warn('lumoviz_campaigns teams column migration note:', e.message);
+  }
+
+  // === Add role column to contacts (student, teacher, constituent) ===
+  try {
+    await pool.query(`ALTER TABLE contacts ADD COLUMN IF NOT EXISTS role VARCHAR(50) DEFAULT 'student'`);
+    console.log('✅ contacts: role column ready');
+  } catch (e) {
+    console.warn('contacts role column migration note:', e.message);
+  }
+
+  // === Create lumoviz_users table for authentication ===
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS lumoviz_users (
+        id SERIAL PRIMARY KEY,
+        email VARCHAR(500) NOT NULL UNIQUE,
+        password_hash VARCHAR(255) NOT NULL,
+        vanid VARCHAR(255),
+        display_name VARCHAR(255),
+        is_admin BOOLEAN DEFAULT FALSE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        last_login TIMESTAMP
+      )
+    `);
+    console.log('✅ lumoviz_users table ready');
+  } catch (e) {
+    console.warn('lumoviz_users migration note:', e.message);
   }
 });
