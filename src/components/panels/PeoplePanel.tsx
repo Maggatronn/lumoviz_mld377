@@ -36,7 +36,9 @@ import {
   ListItemText,
   OutlinedInput,
   Skeleton,
-  CircularProgress
+  CircularProgress,
+  useMediaQuery,
+  useTheme
 } from '@mui/material';
 import { OrganizerChip } from '../ui/OrganizerChip';
 import { PersonChip } from '../ui/PersonChip';
@@ -296,6 +298,9 @@ const PeoplePanel: React.FC<PeoplePanelProps> = ({
   onDeletePerson,
   organizerVanIds: propOrganizerVanIds,
 }) => {
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
+
   // Normalize actions from database format to component format
   const ACTIONS = React.useMemo(() => {
     return actions.map((action: any) => ({
@@ -2502,6 +2507,91 @@ const PeoplePanel: React.FC<PeoplePanelProps> = ({
                 <Typography variant="body1">
                   {filters.searchText ? 'No people match your search' : 'No people found'}
                 </Typography>
+              </Box>
+            ) : isMobile ? (
+              /* ── Mobile card layout ── */
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, px: 0.5, pb: 2 }}>
+                {processedPeople.map((person) => {
+                  const currentLoe = loeOverrides[person.id] ?? person.loeStatus ?? '';
+                  const displayLoe = currentLoe.replace(/^\d+[_.]/, '');
+                  const loeColors = getLOEColor(currentLoe);
+                  const isUnsetLoe = !currentLoe || currentLoe === 'Unknown';
+                  const teams = personToTeams.get(person.id) || [];
+                  const sectionColor = person.chapter && person.chapter !== 'Unknown' ? getCustomChapterColor(person.chapter, customColors) : '#9ca3af';
+
+                  return (
+                    <Box
+                      key={person.id}
+                      onClick={() => handlePersonClick(person)}
+                      sx={{
+                        p: 1.5,
+                        borderRadius: 1.5,
+                        border: '1px solid',
+                        borderColor: 'divider',
+                        bgcolor: '#fff',
+                        cursor: 'pointer',
+                        '&:active': { bgcolor: 'action.hover' },
+                      }}
+                    >
+                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 0.75 }}>
+                        <Typography variant="subtitle2" sx={{ fontWeight: 600, fontSize: '0.9rem', flex: 1 }}>
+                          {person.name}
+                        </Typography>
+                        <span style={{
+                          padding: '2px 8px', borderRadius: 12, fontSize: '0.65rem', fontWeight: 700,
+                          backgroundColor: isUnsetLoe ? '#f3f4f6' : loeColors.backgroundColor,
+                          color: isUnsetLoe ? '#9ca3af' : loeColors.color,
+                          border: `1px solid ${isUnsetLoe ? '#d1d5db' : loeColors.color}`,
+                          whiteSpace: 'nowrap',
+                        }}>
+                          {isUnsetLoe ? '—' : displayLoe}
+                        </span>
+                      </Box>
+                      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.75, alignItems: 'center', mb: 0.5 }}>
+                        {person.chapter && person.chapter !== 'Unknown' && (
+                          <span style={{
+                            padding: '1px 7px', borderRadius: 10, fontSize: '0.6rem', fontWeight: 600,
+                            backgroundColor: `${sectionColor}18`, color: sectionColor,
+                            border: `1px solid ${sectionColor}55`,
+                          }}>
+                            {person.chapter}
+                          </span>
+                        )}
+                        {teams.map(t => (
+                          <span key={t} style={{
+                            padding: '1px 7px', borderRadius: 10, fontSize: '0.6rem', fontWeight: 600,
+                            backgroundColor: '#f0f4ff', color: '#3b5bdb', border: '1px solid #c5d0fc',
+                          }}>
+                            {t}
+                          </span>
+                        ))}
+                      </Box>
+                      <Box sx={{ display: 'flex', gap: 2, mt: 0.5, color: 'text.secondary', fontSize: '0.7rem' }}>
+                        <span>
+                          {person.mostRecentContactAllTime || person.mostRecentContact
+                            ? `Last: ${format(person.mostRecentContactAllTime || person.mostRecentContact!, 'M/d/yy')}`
+                            : 'No contact'}
+                        </span>
+                        <span>{person.totalMeetingsAllTime || person.totalMeetings || 0} meetings</span>
+                      </Box>
+                      {person.latestNotes && (() => {
+                        const latestMeeting = [...(person.allMeetings || [])].sort((a, b) => {
+                          const aD = (typeof a.date_contacted === 'object' ? a.date_contacted?.value : a.date_contacted) || '';
+                          const bD = (typeof b.date_contacted === 'object' ? b.date_contacted?.value : b.date_contacted) || '';
+                          return bD.localeCompare(aD);
+                        })[0];
+                        if (latestMeeting && !canSeeNotesForOrganizer(latestMeeting.organizer_vanid)) {
+                          return <Typography variant="caption" sx={{ mt: 0.5, fontStyle: 'italic', color: '#9e9e9e' }}>Team only</Typography>;
+                        }
+                        return (
+                          <Typography variant="caption" sx={{ mt: 0.5, color: 'text.secondary', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                            {person.latestNotes}
+                          </Typography>
+                        );
+                      })()}
+                    </Box>
+                  );
+                })}
               </Box>
             ) : (
               <div style={{ overflowX: 'auto', width: '100%' }}>
