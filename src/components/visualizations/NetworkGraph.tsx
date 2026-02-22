@@ -108,13 +108,13 @@ const getLOEShadeOfTeamColor = (baseColor: string, loeStatus: string): string =>
     shadeMultiplier = 1.0; // Full color for staff
   } else if (loeStatus.includes('1.') || loeStatus.toLowerCase().includes('leader')) {
     shadeMultiplier = 0.85; // 85% for leaders
-  } else if (loeStatus.includes('2.') || loeStatus.toLowerCase().includes('activist')) {
-    shadeMultiplier = 0.7; // 70% for activists
-  } else if (loeStatus.includes('3.') || loeStatus.toLowerCase().includes('member')) {
+  // } else if (loeStatus.includes('2.') || loeStatus.toLowerCase().includes('potential leader')) {
+  //   shadeMultiplier = 0.7; // 70% for activists
+  } else if (loeStatus.includes('3.') || loeStatus.toLowerCase().includes('potential leader')) {
     shadeMultiplier = 0.55; // 55% for members
-  } else if (loeStatus.includes('4.') || loeStatus.toLowerCase().includes('supporter')) {
+  // } else if (loeStatus.includes('4.') || loeStatus.toLowerCase().includes('supporter')) {
     shadeMultiplier = 0.4; // 40% for supporters
-  } else if (loeStatus.includes('5.') || loeStatus.toLowerCase().includes('prospect')) {
+  } else if (loeStatus.includes('5.') || loeStatus.toLowerCase().includes('supporter')) {
     shadeMultiplier = 0.25; // 25% for prospects (very light)
   }
   
@@ -422,27 +422,26 @@ const NetworkGraph: React.FC<NetworkGraphProps> = ({
       
       if (isConstituent) {
         const chapterColor = getCustomChapterColor(node.chapter, customColors);
-        const loe = (node.loeStatus || '').toLowerCase();
+        const loe = (node.loeStatus || '').toLowerCase().trim();
         
-        if (loe.includes('teamleader') || loe.includes('1_')) {
-          // Leaders: full chapter color
+        const isLeader = loe === 'leader' || loe.includes('teamleader') || loe.includes('1_');
+        const isPotentialLeader = loe === 'potential leader' || loe === 'member' || loe === 'teammember'
+          || loe.includes('2_') || loe.includes('3_');
+        const isSupporter = loe === 'supporter' || loe.includes('4_');
+        
+        if (isLeader) {
           nodeColor = chapterColor;
           nodeStrokeColor = isSelected ? '#ff6b35' : chapterColor;
-        } else if (loe.includes('teammember') || loe.includes('member') || loe.includes('2_') || loe.includes('3_')) {
-          // Potential Leaders (TeamMember/Member): 40% opacity via alpha blend with white
+        } else if (isPotentialLeader) {
           const r = parseInt(chapterColor.slice(1, 3), 16);
           const g = parseInt(chapterColor.slice(3, 5), 16);
           const b = parseInt(chapterColor.slice(5, 7), 16);
           nodeColor = `rgba(${r}, ${g}, ${b}, 0.4)`;
           nodeStrokeColor = isSelected ? '#ff6b35' : chapterColor;
-          nodeStrokeWidth = isSelected ? 3 : 1.5;
-        } else if (loe.includes('supporter') || loe.includes('4_')) {
-          // Supporters: white fill with chapter color stroke
+        } else if (isSupporter) {
           nodeColor = '#ffffff';
           nodeStrokeColor = isSelected ? '#ff6b35' : chapterColor;
-          nodeStrokeWidth = isSelected ? 3 : 1.5;
         } else {
-          // Unknown / null: grey
           nodeColor = '#cccccc';
           nodeStrokeColor = isSelected ? '#ff6b35' : '#999999';
         }
