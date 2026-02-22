@@ -486,14 +486,36 @@ const LeaderTableRow: React.FC<{
           // Render personal columns
           let personalColumns;
           if (!hasAction) {
-            // Leader doesn't have this action
-            personalColumns = (
-              <TableCell>
-                <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.7rem', textAlign: 'center', display: 'block' }}>
-                  —
-                </Typography>
-              </TableCell>
-            );
+            if (actionHasGoal) {
+              personalColumns = (
+                <TableCell>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <LinearProgress
+                      variant="determinate"
+                      value={0}
+                      sx={{
+                        flex: 1,
+                        height: 8,
+                        borderRadius: 1,
+                        backgroundColor: '#e0e0e0',
+                        '& .MuiLinearProgress-bar': { backgroundColor: '#1976d2' }
+                      }}
+                    />
+                    <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 600, fontSize: '0.75rem', minWidth: 40, whiteSpace: 'nowrap' }}>
+                      0/{goal}
+                    </Typography>
+                  </Box>
+                </TableCell>
+              );
+            } else {
+              personalColumns = (
+                <TableCell>
+                  <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.7rem', textAlign: 'center', display: 'block' }}>
+                    —
+                  </Typography>
+                </TableCell>
+              );
+            }
           } else if (!actionHasGoal) {
             // Action doesn't have a goal - just show count
             personalColumns = (
@@ -1225,22 +1247,66 @@ export const LeaderMetricsTable: React.FC<LeaderMetricsTableProps> = ({
             break;
           
           default:
-            // Check if sorting by conversion rate (format: conversion-{actionId}-{fromKey}-{toKey})
-            if (sortColumn && sortColumn.startsWith('conversion-')) {
-              const parts = sortColumn.split('-');
-              if (parts.length >= 4) {
-                // conversion-actionId-fromKey-toKey
+            if (sortColumn && sortColumn.startsWith('conversion::')) {
+              const parts = sortColumn.split('::');
+              if (parts.length === 4) {
                 const actionId = parts[1];
                 const fromFieldKey = parts[2];
                 const toFieldKey = parts[3];
-                aValue = calculateCheckpointConversion(a.id, actionId, fromFieldKey, toFieldKey);
-                bValue = calculateCheckpointConversion(b.id, actionId, fromFieldKey, toFieldKey);
+                const getConvRate = (leader: LeaderProgress) => {
+                  if (fromFieldKey === 'named') {
+                    const namedCount = (leader.actionProgress?.[actionId] as any)?.namedCount ?? leader.actionProgress?.[actionId]?.count ?? 0;
+                    const toCount = calculateCheckpointCount(leader.id, actionId, toFieldKey);
+                    return namedCount > 0 ? (toCount / namedCount) * 100 : 0;
+                  }
+                  return calculateCheckpointConversion(leader.id, actionId, fromFieldKey, toFieldKey);
+                };
+                aValue = getConvRate(a);
+                bValue = getConvRate(b);
               } else {
                 aValue = 0;
                 bValue = 0;
               }
             }
-            // Sorting by specific action
+            else if (sortColumn && sortColumn.startsWith('count::')) {
+              const parts = sortColumn.split('::');
+              if (parts.length === 3) {
+                const actionId = parts[1];
+                const fieldKey = parts[2];
+                if (fieldKey === 'named') {
+                  aValue = (a.actionProgress?.[actionId] as any)?.namedCount ?? a.actionProgress?.[actionId]?.count ?? 0;
+                  bValue = (b.actionProgress?.[actionId] as any)?.namedCount ?? b.actionProgress?.[actionId]?.count ?? 0;
+                } else {
+                  aValue = calculateCheckpointCount(a.id, actionId, fieldKey);
+                  bValue = calculateCheckpointCount(b.id, actionId, fieldKey);
+                }
+              } else {
+                aValue = 0;
+                bValue = 0;
+              }
+            }
+            // Legacy format support (conversion-{actionId}-{fromKey}-{toKey})
+            else if (sortColumn && sortColumn.startsWith('conversion-')) {
+              const match = sortColumn.match(/^conversion-(.+)-([^-]+)-([^-]+)$/);
+              if (match) {
+                const actionId = match[1];
+                const fromFieldKey = match[2];
+                const toFieldKey = match[3];
+                const getConvRate = (leader: LeaderProgress) => {
+                  if (fromFieldKey === 'named') {
+                    const namedCount = (leader.actionProgress?.[actionId] as any)?.namedCount ?? leader.actionProgress?.[actionId]?.count ?? 0;
+                    const toCount = calculateCheckpointCount(leader.id, actionId, toFieldKey);
+                    return namedCount > 0 ? (toCount / namedCount) * 100 : 0;
+                  }
+                  return calculateCheckpointConversion(leader.id, actionId, fromFieldKey, toFieldKey);
+                };
+                aValue = getConvRate(a);
+                bValue = getConvRate(b);
+              } else {
+                aValue = 0;
+                bValue = 0;
+              }
+            }
             else if (sortColumn) {
               aValue = a.actionProgress?.[sortColumn]?.count || 0;
               bValue = b.actionProgress?.[sortColumn]?.count || 0;
@@ -1388,8 +1454,12 @@ export const LeaderMetricsTable: React.FC<LeaderMetricsTableProps> = ({
                       const headers: React.ReactNode[] = [];
                       headers.push(
                         <TableCell key={`prog-header-${actionId}-named`} align="center"
-                          sx={{ fontWeight: 600, py: 1, minWidth: 60, bgcolor: '#f0f4ff' }}>
-                          <Typography variant="caption" sx={{ fontSize: '0.65rem' }}>Named</Typography>
+                          sx={{ fontWeight: 600, py: 1, minWidth: 60, bgcolor: '#f0f4ff', cursor: 'pointer', userSelect: 'none', '&:hover': { bgcolor: '#e3eafc' } }}
+                          onClick={() => handleSort(`count::${actionId}::named`)}>
+                          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                            <Typography variant="caption" sx={{ fontSize: '0.65rem' }}>Named</Typography>
+                            <SortIndicator column={`count::${actionId}::named`} />
+                          </Box>
                         </TableCell>
                       );
                       fields.forEach((field: any, idx: number) => {
@@ -1398,19 +1468,23 @@ export const LeaderMetricsTable: React.FC<LeaderMetricsTableProps> = ({
                         headers.push(
                           <TableCell key={`prog-header-${actionId}-conv-${fromKey}-${field.key}`} align="center"
                             sx={{ fontWeight: 600, py: 1, minWidth: 70, bgcolor: '#fffef0', cursor: 'pointer', userSelect: 'none', '&:hover': { bgcolor: '#fff9c4' } }}
-                            onClick={() => handleSort(`conversion-${actionId}-${fromKey}-${field.key}`)}>
+                            onClick={() => handleSort(`conversion::${actionId}::${fromKey}::${field.key}`)}>
                             <Tooltip title={`${fromLabel} → ${field.label}`}>
                               <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column' }}>
                                 <Typography variant="caption" sx={{ fontSize: '0.6rem', lineHeight: 1.2 }}>→{field.label}</Typography>
-                                <SortIndicator column={`conversion-${actionId}-${fromKey}-${field.key}`} />
+                                <SortIndicator column={`conversion::${actionId}::${fromKey}::${field.key}`} />
                               </Box>
                             </Tooltip>
                           </TableCell>
                         );
                         headers.push(
                           <TableCell key={`prog-header-${actionId}-cnt-${field.key}`} align="center"
-                            sx={{ fontWeight: 600, py: 1, minWidth: 60, bgcolor: '#f0f4ff' }}>
-                            <Typography variant="caption" sx={{ fontSize: '0.65rem' }}>{field.label}</Typography>
+                            sx={{ fontWeight: 600, py: 1, minWidth: 60, bgcolor: '#f0f4ff', cursor: 'pointer', userSelect: 'none', '&:hover': { bgcolor: '#e3eafc' } }}
+                            onClick={() => handleSort(`count::${actionId}::${field.key}`)}>
+                            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                              <Typography variant="caption" sx={{ fontSize: '0.65rem' }}>{field.label}</Typography>
+                              <SortIndicator column={`count::${actionId}::${field.key}`} />
+                            </Box>
                           </TableCell>
                         );
                       });
@@ -1447,8 +1521,12 @@ export const LeaderMetricsTable: React.FC<LeaderMetricsTableProps> = ({
                     const headers: React.ReactNode[] = [];
                     headers.push(
                       <TableCell key={`prog-hdr2-${actionId}-named`} align="center"
-                        sx={{ fontWeight: 600, py: 1, minWidth: 60, bgcolor: '#f0f4ff' }}>
-                        <Typography variant="caption" sx={{ fontSize: '0.65rem' }}>Named</Typography>
+                        sx={{ fontWeight: 600, py: 1, minWidth: 60, bgcolor: '#f0f4ff', cursor: 'pointer', userSelect: 'none', '&:hover': { bgcolor: '#e3eafc' } }}
+                        onClick={() => handleSort(`count::${actionId}::named`)}>
+                        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                          <Typography variant="caption" sx={{ fontSize: '0.65rem' }}>Named</Typography>
+                          <SortIndicator column={`count::${actionId}::named`} />
+                        </Box>
                       </TableCell>
                     );
                     fields.forEach((field: any, idx: number) => {
@@ -1457,19 +1535,23 @@ export const LeaderMetricsTable: React.FC<LeaderMetricsTableProps> = ({
                       headers.push(
                         <TableCell key={`prog-hdr2-${actionId}-conv-${fromKey}-${field.key}`} align="center"
                           sx={{ fontWeight: 600, py: 1, minWidth: 70, bgcolor: '#fffef0', cursor: 'pointer', userSelect: 'none', '&:hover': { bgcolor: '#fff9c4' } }}
-                          onClick={() => handleSort(`conversion-${actionId}-${fromKey}-${field.key}`)}>
+                          onClick={() => handleSort(`conversion::${actionId}::${fromKey}::${field.key}`)}>
                           <Tooltip title={`${fromLabel} → ${field.label}`}>
                             <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column' }}>
                               <Typography variant="caption" sx={{ fontSize: '0.6rem', lineHeight: 1.2 }}>→{field.label}</Typography>
-                              <SortIndicator column={`conversion-${actionId}-${fromKey}-${field.key}`} />
+                              <SortIndicator column={`conversion::${actionId}::${fromKey}::${field.key}`} />
                             </Box>
                           </Tooltip>
                         </TableCell>
                       );
                       headers.push(
                         <TableCell key={`prog-hdr2-${actionId}-cnt-${field.key}`} align="center"
-                          sx={{ fontWeight: 600, py: 1, minWidth: 60, bgcolor: '#f0f4ff' }}>
-                          <Typography variant="caption" sx={{ fontSize: '0.65rem' }}>{field.label}</Typography>
+                          sx={{ fontWeight: 600, py: 1, minWidth: 60, bgcolor: '#f0f4ff', cursor: 'pointer', userSelect: 'none', '&:hover': { bgcolor: '#e3eafc' } }}
+                          onClick={() => handleSort(`count::${actionId}::${field.key}`)}>
+                          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                            <Typography variant="caption" sx={{ fontSize: '0.65rem' }}>{field.label}</Typography>
+                            <SortIndicator column={`count::${actionId}::${field.key}`} />
+                          </Box>
                         </TableCell>
                       );
                     });
@@ -1556,10 +1638,11 @@ export const LeaderMetricsTable: React.FC<LeaderMetricsTableProps> = ({
               
               allLeaders.forEach(leader => {
                 const progress = leader.actionProgress?.[actionId];
+                const leaderGoal = getGoalForAction(leader.id, actionId);
+                totalGoal += leaderGoal;
                 if (progress) {
                   leadersWithAction++;
                   totalCount += progress.count || 0;
-                  totalGoal += progress.goal || 5;
                   if (progress.hasMetGoal) {
                     leadersAtGoalForAction++;
                   }

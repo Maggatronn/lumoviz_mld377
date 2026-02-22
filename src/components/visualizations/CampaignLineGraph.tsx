@@ -2411,6 +2411,16 @@ const CampaignLineGraph: React.FC<CampaignLineGraphProps> = ({
                   else if (teamSortCol === 'count') { const md = metricDefs[0]; aVal = aInfo[md?.metricFilter]?.count ?? 0; bVal = bInfo[md?.metricFilter]?.count ?? 0; }
                   else if (teamSortCol.startsWith('named_')) { const mf = teamSortCol.replace('named_', ''); aVal = aInfo[mf]?.namedCount ?? 0; bVal = bInfo[mf]?.namedCount ?? 0; }
                   else if (teamSortCol.startsWith('field_')) { const parts = teamSortCol.split('_'); const mf = parts[1]; const fk = parts.slice(2).join('_'); aVal = aInfo[mf]?.fieldCounts?.[fk] ?? 0; bVal = bInfo[mf]?.fieldCounts?.[fk] ?? 0; }
+                  else if (teamSortCol.startsWith('conv_')) {
+                    const parts = teamSortCol.split('_');
+                    const mf = parts[1]; const fromKey = parts[2]; const toKey = parts.slice(3).join('_');
+                    const getRate = (info: any) => {
+                      const fromC = fromKey === 'named' ? (info[mf]?.namedCount ?? 0) : (info[mf]?.fieldCounts?.[fromKey] ?? 0);
+                      const toC = info[mf]?.fieldCounts?.[toKey] ?? 0;
+                      return fromC > 0 ? (toC / fromC) * 100 : 0;
+                    };
+                    aVal = getRate(aInfo); bVal = getRate(bInfo);
+                  }
                   else { aVal = aInfo[teamSortCol]?.count ?? 0; bVal = bInfo[teamSortCol]?.count ?? 0; }
                   return teamSortDir === 'asc' ? aVal - bVal : bVal - aVal;
                 });
@@ -2444,21 +2454,27 @@ const CampaignLineGraph: React.FC<CampaignLineGraphProps> = ({
                   return cells;
                 };
 
-                const renderExtraHeaders = (actionFields: Array<{ key: string; label: string }>) => {
+                const renderExtraHeaders = (actionFields: Array<{ key: string; label: string }>, metricFilter: string) => {
                   if (displayMode !== 'conversions' || actionFields.length < 2) return null;
                   const headers: React.ReactNode[] = [];
                   headers.push(
-                    <TableCell key="prog-hdr-named" align="center" sx={{ fontWeight: 600, py: 1, minWidth: 50, bgcolor: '#f0f4ff', fontSize: '0.65rem' }}>Named</TableCell>
+                    <TableCell key="prog-hdr-named" align="center" sx={{ fontWeight: 600, py: 1, minWidth: 50, bgcolor: '#f0f4ff', fontSize: '0.65rem', cursor: 'pointer', userSelect: 'none', '&:hover': { bgcolor: '#e3eafc' } }} onClick={() => toggleTeamSort(`named_${metricFilter}`)}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>Named{teamSortIndicator(`named_${metricFilter}`)}</Box>
+                    </TableCell>
                   );
                   actionFields.forEach((f, i) => {
+                    const fromLabel = i === 0 ? 'Named' : actionFields[i - 1].label;
+                    const fromKey = i === 0 ? 'named' : actionFields[i - 1].key;
                     headers.push(
-                      <TableCell key={`prog-hdr-conv-${f.key}`} align="center" sx={{ fontWeight: 600, py: 1, minWidth: 50, bgcolor: '#fffef0', fontSize: '0.6rem' }}>
-                        →{f.label}
+                      <TableCell key={`prog-hdr-conv-${f.key}`} align="center" sx={{ fontWeight: 600, py: 1, minWidth: 50, bgcolor: '#fffef0', fontSize: '0.6rem', cursor: 'pointer', userSelect: 'none', '&:hover': { bgcolor: '#fff9c4' } }} onClick={() => toggleTeamSort(`conv_${metricFilter}_${fromKey}_${f.key}`)}>
+                        <Tooltip title={`${fromLabel} → ${f.label}`}>
+                          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>→{f.label}{teamSortIndicator(`conv_${metricFilter}_${fromKey}_${f.key}`)}</Box>
+                        </Tooltip>
                       </TableCell>
                     );
                     headers.push(
-                      <TableCell key={`prog-hdr-cnt-${f.key}`} align="center" sx={{ fontWeight: 600, py: 1, minWidth: 50, bgcolor: '#f0f4ff', fontSize: '0.65rem' }}>
-                        {f.label}
+                      <TableCell key={`prog-hdr-cnt-${f.key}`} align="center" sx={{ fontWeight: 600, py: 1, minWidth: 50, bgcolor: '#f0f4ff', fontSize: '0.65rem', cursor: 'pointer', userSelect: 'none', '&:hover': { bgcolor: '#e3eafc' } }} onClick={() => toggleTeamSort(`field_${metricFilter}_${f.key}`)}>
+                        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{f.label}{teamSortIndicator(`field_${metricFilter}_${f.key}`)}</Box>
                       </TableCell>
                     );
                   });
@@ -2481,7 +2497,7 @@ const CampaignLineGraph: React.FC<CampaignLineGraphProps> = ({
                               <TableCell align="center" sx={{ fontWeight: 600, py: 1, minWidth: 140, cursor: 'pointer', userSelect: 'none', '&:hover': { bgcolor: 'action.hover' } }} onClick={() => toggleTeamSort(md.metricFilter)}>
                                 <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{md.metricLabel}{teamSortIndicator(md.metricFilter)}</Box>
                               </TableCell>
-                              {renderExtraHeaders(md.actionFields)}
+                              {renderExtraHeaders(md.actionFields, md.metricFilter)}
                             </React.Fragment>
                           ))}
                         </TableRow>
@@ -2703,13 +2719,62 @@ const CampaignLineGraph: React.FC<CampaignLineGraphProps> = ({
                   return cells;
                 };
 
-                const renderExtraHeaders = (actionFields: Array<{ key: string; label: string }>) => {
+                const toggleSectionSort = (col: string) => {
+                  if (sectionSortCol === col) setSectionSortDir(d => d === 'asc' ? 'desc' : 'asc');
+                  else { setSectionSortCol(col); setSectionSortDir('desc'); }
+                };
+                const sectionSortIndicator = (col: string) => {
+                  if (sectionSortCol !== col) return null;
+                  return sectionSortDir === 'asc' ? <ArrowUpwardIcon sx={{ fontSize: '0.8rem', ml: 0.3 }} /> : <ArrowDownwardIcon sx={{ fontSize: '0.8rem', ml: 0.3 }} />;
+                };
+
+                // Sort sections
+                sortedChapters.sort((a, b) => {
+                  const aData = chapterDataMap.get(a);
+                  const bData = chapterDataMap.get(b);
+                  if (!aData || !bData) return 0;
+                  let aVal: any = 0, bVal: any = 0;
+                  if (sectionSortCol === 'section') { return sectionSortDir === 'asc' ? a.localeCompare(b) : b.localeCompare(a); }
+                  if (sectionSortCol === 'count') { const md = metricDefs[0]; aVal = aData[md?.metricFilter]?.count ?? 0; bVal = bData[md?.metricFilter]?.count ?? 0; }
+                  else if (sectionSortCol.startsWith('named_')) { const mf = sectionSortCol.replace('named_', ''); aVal = aData[mf]?.namedCount ?? 0; bVal = bData[mf]?.namedCount ?? 0; }
+                  else if (sectionSortCol.startsWith('field_')) { const parts = sectionSortCol.split('_'); const mf = parts[1]; const fk = parts.slice(2).join('_'); aVal = aData[mf]?.fieldCounts?.[fk] ?? 0; bVal = bData[mf]?.fieldCounts?.[fk] ?? 0; }
+                  else if (sectionSortCol.startsWith('conv_')) {
+                    const parts = sectionSortCol.split('_');
+                    const mf = parts[1]; const fromKey = parts[2]; const toKey = parts.slice(3).join('_');
+                    const getRate = (info: any) => {
+                      const fromC = fromKey === 'named' ? (info[mf]?.namedCount ?? 0) : (info[mf]?.fieldCounts?.[fromKey] ?? 0);
+                      const toC = info[mf]?.fieldCounts?.[toKey] ?? 0;
+                      return fromC > 0 ? (toC / fromC) * 100 : 0;
+                    };
+                    aVal = getRate(aData); bVal = getRate(bData);
+                  }
+                  else { const md = metricDefs[0]; aVal = aData[md?.metricFilter]?.count ?? 0; bVal = bData[md?.metricFilter]?.count ?? 0; }
+                  return sectionSortDir === 'asc' ? aVal - bVal : bVal - aVal;
+                });
+
+                const renderSectionExtraHeaders = (actionFields: Array<{ key: string; label: string }>, metricFilter: string) => {
                   if (displayMode !== 'conversions' || actionFields.length < 2) return null;
                   const headers: React.ReactNode[] = [];
-                  headers.push(<TableCell key="prog-hdr-named" align="center" sx={{ fontWeight: 600, py: 1, minWidth: 50, bgcolor: '#f0f4ff', fontSize: '0.65rem' }}>Named</TableCell>);
+                  headers.push(
+                    <TableCell key="prog-hdr-named" align="center" sx={{ fontWeight: 600, py: 1, minWidth: 50, bgcolor: '#f0f4ff', fontSize: '0.65rem', cursor: 'pointer', userSelect: 'none', '&:hover': { bgcolor: '#e3eafc' } }} onClick={() => toggleSectionSort(`named_${metricFilter}`)}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>Named{sectionSortIndicator(`named_${metricFilter}`)}</Box>
+                    </TableCell>
+                  );
                   actionFields.forEach((f, i) => {
-                    headers.push(<TableCell key={`prog-hdr-conv-${f.key}`} align="center" sx={{ fontWeight: 600, py: 1, minWidth: 50, bgcolor: '#fffef0', fontSize: '0.6rem' }}>→{f.label}</TableCell>);
-                    headers.push(<TableCell key={`prog-hdr-cnt-${f.key}`} align="center" sx={{ fontWeight: 600, py: 1, minWidth: 50, bgcolor: '#f0f4ff', fontSize: '0.65rem' }}>{f.label}</TableCell>);
+                    const fromKey = i === 0 ? 'named' : actionFields[i - 1].key;
+                    const fromLabel = i === 0 ? 'Named' : actionFields[i - 1].label;
+                    headers.push(
+                      <TableCell key={`prog-hdr-conv-${f.key}`} align="center" sx={{ fontWeight: 600, py: 1, minWidth: 50, bgcolor: '#fffef0', fontSize: '0.6rem', cursor: 'pointer', userSelect: 'none', '&:hover': { bgcolor: '#fff9c4' } }} onClick={() => toggleSectionSort(`conv_${metricFilter}_${fromKey}_${f.key}`)}>
+                        <Tooltip title={`${fromLabel} → ${f.label}`}>
+                          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>→{f.label}{sectionSortIndicator(`conv_${metricFilter}_${fromKey}_${f.key}`)}</Box>
+                        </Tooltip>
+                      </TableCell>
+                    );
+                    headers.push(
+                      <TableCell key={`prog-hdr-cnt-${f.key}`} align="center" sx={{ fontWeight: 600, py: 1, minWidth: 50, bgcolor: '#f0f4ff', fontSize: '0.65rem', cursor: 'pointer', userSelect: 'none', '&:hover': { bgcolor: '#e3eafc' } }} onClick={() => toggleSectionSort(`field_${metricFilter}_${f.key}`)}>
+                        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{f.label}{sectionSortIndicator(`field_${metricFilter}_${f.key}`)}</Box>
+                      </TableCell>
+                    );
                   });
                   return headers;
                 };
@@ -2719,11 +2784,15 @@ const CampaignLineGraph: React.FC<CampaignLineGraphProps> = ({
                     <Table size="small" stickyHeader>
                       <TableHead>
                         <TableRow>
-                          <TableCell sx={{ fontWeight: 600, py: 1, minWidth: 150 }}>Section</TableCell>
+                          <TableCell sx={{ fontWeight: 600, py: 1, minWidth: 150, cursor: 'pointer', userSelect: 'none', '&:hover': { bgcolor: 'action.hover' } }} onClick={() => toggleSectionSort('section')}>
+                            <Box sx={{ display: 'flex', alignItems: 'center' }}>Section{sectionSortIndicator('section')}</Box>
+                          </TableCell>
                           {metricDefs.map(md => (
                             <React.Fragment key={md.metricFilter}>
-                              <TableCell colSpan={2} align="center" sx={{ fontWeight: 600, py: 1, minWidth: 140 }}>{md.metricLabel}</TableCell>
-                              {renderExtraHeaders(md.actionFields)}
+                              <TableCell colSpan={2} align="center" sx={{ fontWeight: 600, py: 1, minWidth: 140, cursor: 'pointer', userSelect: 'none', '&:hover': { bgcolor: 'action.hover' } }} onClick={() => toggleSectionSort(md.metricFilter)}>
+                                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{md.metricLabel}{sectionSortIndicator(md.metricFilter)}</Box>
+                              </TableCell>
+                              {renderSectionExtraHeaders(md.actionFields, md.metricFilter)}
                             </React.Fragment>
                           ))}
                         </TableRow>
