@@ -3301,6 +3301,11 @@ const Dashboard: React.FC<DashboardProps> = ({
 
   // Show empty state if no organizer selected (only for teaching team who can browse)
   if (!selectedOrganizerId) {
+    // Non-teaching-team users should auto-select themselves rather than seeing this empty state
+    if (!isTeachingTeamOrSectionLead && currentUserId) {
+      // This will trigger a re-render with the user's own ID
+      setTimeout(() => setSelectedOrganizerId(currentUserId), 0);
+    }
     return (
       <Box sx={{ p: 2, height: '100%', overflow: 'auto', bgcolor: '#fafafa' }}>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
@@ -3310,6 +3315,7 @@ const Dashboard: React.FC<DashboardProps> = ({
             </Typography>
             
             {/* Organizer Selector - only for teaching team */}
+            {isTeachingTeamOrSectionLead && (
             <FormControl size="small" sx={{ minWidth: 200 }}>
               <Select
                 value={selectedOrganizerId}
@@ -3339,6 +3345,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                 ))}
               </Select>
             </FormControl>
+            )}
           </Box>
         </Box>
         
@@ -3352,11 +3359,13 @@ const Dashboard: React.FC<DashboardProps> = ({
           textAlign: 'center'
         }}>
           <Typography variant="h6" color="text.secondary" sx={{ mb: 1 }}>
-            Select your name from the dropdown above
+            {isTeachingTeamOrSectionLead ? 'Select your name from the dropdown above' : 'Loading your dashboard...'}
           </Typography>
+          {isTeachingTeamOrSectionLead && (
           <Typography variant="body2" color="text.secondary">
             Your selection will be saved for next time
           </Typography>
+          )}
         </Box>
       </Box>
     );

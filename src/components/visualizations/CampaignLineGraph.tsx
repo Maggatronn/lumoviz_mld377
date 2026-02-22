@@ -122,8 +122,9 @@ const CampaignLineGraph: React.FC<CampaignLineGraphProps> = ({
   const [sectionSortCol, setSectionSortCol] = useState<string>('count');
   const [sectionSortDir, setSectionSortDir] = useState<'asc' | 'desc'>('desc');
 
-  // Group-by option for By Person view
+  // Group-by options
   const [personGroupBy, setPersonGroupBy] = useState<'none' | 'team' | 'section'>('none');
+  const [teamGroupBy, setTeamGroupBy] = useState<'none' | 'section'>('none');
   
   // State for organizer goals: Map<organizer_vanid, Map<action_id, goal_value>>
   const [organizerGoalsMap, setOrganizerGoalsMap] = useState<Map<string, Map<string, number>>>(new Map());
@@ -171,6 +172,17 @@ const CampaignLineGraph: React.FC<CampaignLineGraphProps> = ({
     () => actionsFromDB.length > 0 ? actionsFromDB : localFetchedActions,
     [actionsFromDB, localFetchedActions]
   );
+
+  // Canonical deduplicated set of all organizer vanids (from teamsData)
+  const allOrganizerVanIds = useMemo(() => {
+    const ids = new Set<string>();
+    (teamsData || []).forEach((team: any) => {
+      (team.organizers || []).forEach((o: any) => { const vid = o.id || o.vanId; if (vid) ids.add(vid.toString()); });
+      if (team.lead?.id) ids.add(team.lead.id.toString());
+      (team.bigQueryData?.teamMembersWithRoles || []).forEach((m: any) => { if (m.id) ids.add(m.id.toString()); });
+    });
+    return ids;
+  }, [teamsData]);
   
   // Fetch organizer goals for all unique organizers
   useEffect(() => {
@@ -386,6 +398,18 @@ const CampaignLineGraph: React.FC<CampaignLineGraphProps> = ({
     return Array.from(personMap.values())
       .sort((a, b) => b.count - a.count);
   }, [meetingsData, barometerGoalTypeFilter, userMap]);
+
+  // Compute canonical total goal for a given custom action using deduplicated organizer set
+  const computeTotalGoalForAction = (actionId: string): number => {
+    const actionDef = effectiveActionsDB.find((a: any) => a.action_id === actionId);
+    const defaultGoal = Number(actionDef?.default_individual_goal) || 5;
+    let total = 0;
+    allOrganizerVanIds.forEach(vid => {
+      const memberGoals = organizerGoalsMap.get(vid);
+      total += memberGoals?.get(actionId) || defaultGoal;
+    });
+    return total;
+  };
 
   const entryMeetsGoal = (entry: any, goalFieldKey: string | null): boolean => {
     if (!goalFieldKey) return true;
@@ -2152,6 +2176,35 @@ const CampaignLineGraph: React.FC<CampaignLineGraphProps> = ({
                     Conversions
                   </ToggleButton>
                 </ToggleButtonGroup>
+
+                {/* Group-by dropdown for By Person and By Team views */}
+                {(barometerView === 'people' || barometerView === 'leadership') && (
+                  <FormControl size="small" sx={{ minWidth: 130 }}>
+                    <InputLabel>Group By</InputLabel>
+                    <Select
+                      value={personGroupBy}
+                      onChange={(e) => setPersonGroupBy(e.target.value as any)}
+                      label="Group By"
+                    >
+                      <MenuItem value="none">None</MenuItem>
+                      <MenuItem value="team">Team</MenuItem>
+                      <MenuItem value="section">Section</MenuItem>
+                    </Select>
+                  </FormControl>
+                )}
+                {barometerView === 'teams' && (
+                  <FormControl size="small" sx={{ minWidth: 130 }}>
+                    <InputLabel>Group By</InputLabel>
+                    <Select
+                      value={teamGroupBy}
+                      onChange={(e) => setTeamGroupBy(e.target.value as any)}
+                      label="Group By"
+                    >
+                      <MenuItem value="none">None</MenuItem>
+                      <MenuItem value="section">Section</MenuItem>
+                    </Select>
+                  </FormControl>
+                )}
               </Box>
             </Box>
           </Box>
@@ -2198,32 +2251,90 @@ const CampaignLineGraph: React.FC<CampaignLineGraphProps> = ({
                     );
                   }
                   
+                  const canonicalGoals: Record<string, number> = {};
+                  unifiedActionIds.forEach(actionId => {
+                    canonicalGoals[actionId] = computeTotalGoalForAction(actionId);
+                  });
+
+                  const commonProps = {
+                    leaderActionsMap: leadersForTable.leaderActionsMap,
+                    leaderGoalsMap: leadersForTable.leaderGoalsMap,
+                    unifiedActionIds,
+                    ACTIONS: actionsForTable,
+                    availableActions: effectiveActionsDB,
+                    pledgeSubmissions,
+                    peopleRecords: Array.from(userMap.values()),
+                    listsData,
+                    flatView: true,
+                    onFilterByOrganizer,
+                    onEditOrganizerMapping,
+                    displayMode,
+                    onDisplayModeChange: setDisplayMode,
+                    hideDisplayToggle: true,
+                    initialSortColumn: barometerSortProp || 'total',
+                    initialSortDirection: barometerSortDirProp,
+                    onSortChange: onBarometerSortChange,
+                    parentCampaigns,
+                    useCampaignGoals: false,
+                    selectedChapter,
+                    teamsData,
+                    canonicalTotalGoals: canonicalGoals,
+                  };
+
+                  if (personGroupBy === 'none') {
+                    return (
+                      <LeaderMetricsTable
+                        leaders={leadersForTable.allLeaders}
+                        showSummary={true}
+                        {...commonProps}
+                      />
+                    );
+                  }
+
+                  // Group leaders by team or section
+                  const groups = new Map<string, LeaderProgress[]>();
+                  const allLeaders = leadersForTable.allLeaders;
+
+                  allLeaders.forEach(leader => {
+                    let groupKey = 'Other';
+                    if (personGroupBy === 'section') {
+                      const info = userMap.get(leader.id);
+                      groupKey = info?.chapter || 'Unknown';
+                    } else if (personGroupBy === 'team') {
+                      const team = (teamsData || []).find((t: any) => {
+                        const memberIds = new Set<string>();
+                        (t.organizers || []).forEach((o: any) => { const vid = o.id || o.vanId; if (vid) memberIds.add(vid.toString()); });
+                        if (t.lead?.id) memberIds.add(t.lead.id.toString());
+                        (t.bigQueryData?.teamMembersWithRoles || []).forEach((m: any) => { if (m.id) memberIds.add(m.id.toString()); });
+                        return memberIds.has(leader.id);
+                      });
+                      groupKey = team?.teamName || team?.bigQueryData?.teamName || 'Unassigned';
+                    }
+                    if (!groups.has(groupKey)) groups.set(groupKey, []);
+                    groups.get(groupKey)!.push(leader);
+                  });
+
+                  const sortedGroupKeys = Array.from(groups.keys()).sort((a, b) => {
+                    if (a === 'Other' || a === 'Unassigned' || a === 'Unknown') return 1;
+                    if (b === 'Other' || b === 'Unassigned' || b === 'Unknown') return -1;
+                    return a.localeCompare(b);
+                  });
+
                   return (
-                    <LeaderMetricsTable
-                      leaders={leadersForTable.allLeaders}
-                      leaderActionsMap={leadersForTable.leaderActionsMap}
-                      leaderGoalsMap={leadersForTable.leaderGoalsMap}
-                      unifiedActionIds={unifiedActionIds}
-                      ACTIONS={actionsForTable}
-                      availableActions={effectiveActionsDB}
-                      pledgeSubmissions={pledgeSubmissions}
-                      peopleRecords={Array.from(userMap.values())}
-                      listsData={listsData}
-                      showSummary={true}
-                      flatView={true}
-                      onFilterByOrganizer={onFilterByOrganizer}
-                      onEditOrganizerMapping={onEditOrganizerMapping}
-                      displayMode={displayMode}
-                      onDisplayModeChange={setDisplayMode}
-                      hideDisplayToggle={true}
-                      initialSortColumn={barometerSortProp || 'total'}
-                      initialSortDirection={barometerSortDirProp}
-                      onSortChange={onBarometerSortChange}
-                      parentCampaigns={parentCampaigns}
-                      useCampaignGoals={false}
-                      selectedChapter={selectedChapter}
-                      teamsData={teamsData}
-                    />
+                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                      {sortedGroupKeys.map(groupKey => (
+                        <Box key={groupKey}>
+                          <Typography variant="subtitle1" sx={{ fontWeight: 700, color: 'primary.main', mb: 0.5, px: 1, py: 0.5, bgcolor: '#e3f2fd', borderRadius: 1 }}>
+                            {groupKey} ({groups.get(groupKey)!.length})
+                          </Typography>
+                          <LeaderMetricsTable
+                            leaders={groups.get(groupKey)!}
+                            showSummary={sortedGroupKeys.length > 1}
+                            {...commonProps}
+                          />
+                        </Box>
+                      ))}
+                    </Box>
                   );
                 })()}
                 
@@ -2266,31 +2377,87 @@ const CampaignLineGraph: React.FC<CampaignLineGraphProps> = ({
                     );
                   }
                   
+                  const canonicalGoals: Record<string, number> = {};
+                  unifiedActionIds.forEach(actionId => {
+                    canonicalGoals[actionId] = computeTotalGoalForAction(actionId);
+                  });
+
+                  const leadershipCommonProps = {
+                    leaderActionsMap: leadersForTable.leaderActionsMap,
+                    leaderGoalsMap: leadersForTable.leaderGoalsMap,
+                    unifiedActionIds,
+                    ACTIONS: actionsForTable,
+                    availableActions: effectiveActionsDB,
+                    pledgeSubmissions,
+                    peopleRecords: Array.from(userMap.values()),
+                    listsData,
+                    onFilterByOrganizer,
+                    onEditOrganizerMapping,
+                    displayMode,
+                    onDisplayModeChange: setDisplayMode,
+                    hideDisplayToggle: true,
+                    initialSortColumn: barometerSortProp || 'total',
+                    initialSortDirection: barometerSortDirProp,
+                    onSortChange: onBarometerSortChange,
+                    parentCampaigns,
+                    useCampaignGoals: false,
+                    selectedChapter,
+                    teamsData,
+                    canonicalTotalGoals: canonicalGoals,
+                  };
+
+                  if (personGroupBy === 'none') {
+                    return (
+                      <LeaderMetricsTable
+                        leaders={leadersToDisplay}
+                        showSummary={true}
+                        {...leadershipCommonProps}
+                      />
+                    );
+                  }
+
+                  // Group leaders by team or section
+                  const groups = new Map<string, LeaderProgress[]>();
+                  leadersToDisplay.forEach(leader => {
+                    let groupKey = 'Other';
+                    if (personGroupBy === 'section') {
+                      const info = userMap.get(leader.id);
+                      groupKey = info?.chapter || 'Unknown';
+                    } else if (personGroupBy === 'team') {
+                      const team = (teamsData || []).find((t: any) => {
+                        const memberIds = new Set<string>();
+                        (t.organizers || []).forEach((o: any) => { const vid = o.id || o.vanId; if (vid) memberIds.add(vid.toString()); });
+                        if (t.lead?.id) memberIds.add(t.lead.id.toString());
+                        (t.bigQueryData?.teamMembersWithRoles || []).forEach((m: any) => { if (m.id) memberIds.add(m.id.toString()); });
+                        return memberIds.has(leader.id);
+                      });
+                      groupKey = team?.teamName || team?.bigQueryData?.teamName || 'Unassigned';
+                    }
+                    if (!groups.has(groupKey)) groups.set(groupKey, []);
+                    groups.get(groupKey)!.push(leader);
+                  });
+
+                  const sortedGroupKeys = Array.from(groups.keys()).sort((a, b) => {
+                    if (a === 'Other' || a === 'Unassigned' || a === 'Unknown') return 1;
+                    if (b === 'Other' || b === 'Unassigned' || b === 'Unknown') return -1;
+                    return a.localeCompare(b);
+                  });
+
                   return (
-                    <LeaderMetricsTable
-                      leaders={leadersToDisplay}
-                      leaderActionsMap={leadersForTable.leaderActionsMap}
-                      leaderGoalsMap={leadersForTable.leaderGoalsMap}
-                      unifiedActionIds={unifiedActionIds}
-                      ACTIONS={actionsForTable}
-                      availableActions={effectiveActionsDB}
-                      pledgeSubmissions={pledgeSubmissions}
-                      peopleRecords={Array.from(userMap.values())}
-                      listsData={listsData}
-                      showSummary={true}
-                      onFilterByOrganizer={onFilterByOrganizer}
-                      onEditOrganizerMapping={onEditOrganizerMapping}
-                      displayMode={displayMode}
-                      onDisplayModeChange={setDisplayMode}
-                      hideDisplayToggle={true}
-                      initialSortColumn={barometerSortProp || 'total'}
-                      initialSortDirection={barometerSortDirProp}
-                      onSortChange={onBarometerSortChange}
-                      parentCampaigns={parentCampaigns}
-                      useCampaignGoals={false}
-                      selectedChapter={selectedChapter}
-                      teamsData={teamsData}
-                    />
+                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                      {sortedGroupKeys.map(groupKey => (
+                        <Box key={groupKey}>
+                          <Typography variant="subtitle1" sx={{ fontWeight: 700, color: 'primary.main', mb: 0.5, px: 1, py: 0.5, bgcolor: '#e3f2fd', borderRadius: 1 }}>
+                            {groupKey} ({groups.get(groupKey)!.length})
+                          </Typography>
+                          <LeaderMetricsTable
+                            leaders={groups.get(groupKey)!}
+                            showSummary={sortedGroupKeys.length > 1}
+                            {...leadershipCommonProps}
+                          />
+                        </Box>
+                      ))}
+                    </Box>
                   );
                 })()}
               </>
@@ -2408,10 +2575,22 @@ const CampaignLineGraph: React.FC<CampaignLineGraphProps> = ({
                   let aVal: any = 0, bVal: any = 0;
                   if (teamSortCol === 'team') { aVal = (aInfo.teamName || '').toLowerCase(); bVal = (bInfo.teamName || '').toLowerCase(); return teamSortDir === 'asc' ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal); }
                   if (teamSortCol === 'members') { aVal = aInfo.memberCount || 0; bVal = bInfo.memberCount || 0; }
-                  else if (teamSortCol === 'count') { const md = metricDefs[0]; aVal = aInfo[md?.metricFilter]?.count ?? 0; bVal = bInfo[md?.metricFilter]?.count ?? 0; }
-                  else if (teamSortCol.startsWith('named_')) { const mf = teamSortCol.replace('named_', ''); aVal = aInfo[mf]?.namedCount ?? 0; bVal = bInfo[mf]?.namedCount ?? 0; }
-                  else if (teamSortCol.startsWith('field_')) { const parts = teamSortCol.split('_'); const mf = parts[1]; const fk = parts.slice(2).join('_'); aVal = aInfo[mf]?.fieldCounts?.[fk] ?? 0; bVal = bInfo[mf]?.fieldCounts?.[fk] ?? 0; }
-                  else { aVal = aInfo[teamSortCol]?.count ?? 0; bVal = bInfo[teamSortCol]?.count ?? 0; }
+                  else if (teamSortCol.startsWith('named::')) { const mf = teamSortCol.replace('named::', ''); aVal = aInfo[mf]?.namedCount ?? 0; bVal = bInfo[mf]?.namedCount ?? 0; }
+                  else if (teamSortCol.startsWith('field::')) { const parts = teamSortCol.split('::'); const mf = parts[1]; const fk = parts[2]; aVal = aInfo[mf]?.fieldCounts?.[fk] ?? 0; bVal = bInfo[mf]?.fieldCounts?.[fk] ?? 0; }
+                  else if (teamSortCol.startsWith('conv::')) {
+                    const parts = teamSortCol.split('::');
+                    const mf = parts[1]; const fromKey = parts[2]; const toKey = parts[3];
+                    const getRate = (info: any) => {
+                      const fromC = fromKey === 'named' ? (info[mf]?.namedCount ?? 0) : (info[mf]?.fieldCounts?.[fromKey] ?? 0);
+                      const toC = info[mf]?.fieldCounts?.[toKey] ?? 0;
+                      return fromC > 0 ? (toC / fromC) * 100 : 0;
+                    };
+                    aVal = getRate(aInfo); bVal = getRate(bInfo);
+                  }
+                  else {
+                    const mf = aInfo[teamSortCol] ? teamSortCol : metricDefs[0]?.metricFilter;
+                    aVal = aInfo[mf]?.count ?? 0; bVal = bInfo[mf]?.count ?? 0;
+                  }
                   return teamSortDir === 'asc' ? aVal - bVal : bVal - aVal;
                 });
 
@@ -2444,21 +2623,66 @@ const CampaignLineGraph: React.FC<CampaignLineGraphProps> = ({
                   return cells;
                 };
 
-                const renderExtraHeaders = (actionFields: Array<{ key: string; label: string }>) => {
+                const renderTeamRow = (teamId: string, teamInfo: any, mDefs: typeof metricDefs, extraCells: typeof renderExtraCells) => (
+                  <TableRow key={teamId} hover>
+                    <TableCell>
+                      <Typography variant="body2" sx={{ fontWeight: 500, fontSize: '0.8rem' }}>{teamInfo.teamName}</Typography>
+                      {teamInfo.chapter && (
+                        <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.65rem', display: 'block' }}>
+                          {teamInfo.chapter}
+                        </Typography>
+                      )}
+                    </TableCell>
+                    <TableCell align="center">
+                      <Typography variant="body2" sx={{ fontSize: '0.8rem' }}>{teamInfo.memberCount}</Typography>
+                    </TableCell>
+                    {mDefs.map(md => {
+                      const teamData = teamInfo[md.metricFilter];
+                      const count = teamData?.count ?? 0;
+                      const goal = teamData?.goal ?? 0;
+                      const namedCount = teamData?.namedCount ?? 0;
+                      const fieldCounts = teamData?.fieldCounts ?? {};
+                      const pct = goal > 0 ? Math.min((count / goal) * 100, 100) : 0;
+                      return (
+                        <React.Fragment key={md.metricFilter}>
+                          <TableCell>
+                            {goal > 0 ? (
+                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                                <LinearProgress variant="determinate" value={pct} sx={{ flex: 1, height: 6, borderRadius: 1, bgcolor: '#e0e0e0', '& .MuiLinearProgress-bar': { bgcolor: count >= goal ? '#4caf50' : '#1976d2' } }} />
+                                <Typography variant="body2" sx={{ fontWeight: 600, fontSize: '0.75rem', minWidth: 40, whiteSpace: 'nowrap' }}>{count}/{goal}</Typography>
+                              </Box>
+                            ) : (
+                              <Typography variant="body2" sx={{ fontWeight: 600, fontSize: '0.8rem', textAlign: 'center' }}>{count}</Typography>
+                            )}
+                          </TableCell>
+                          {md.actionFields.length >= 2 && extraCells(md.actionFields, namedCount, fieldCounts)}
+                        </React.Fragment>
+                      );
+                    })}
+                  </TableRow>
+                );
+
+                const renderExtraHeaders = (actionFields: Array<{ key: string; label: string }>, metricFilter: string) => {
                   if (displayMode !== 'conversions' || actionFields.length < 2) return null;
                   const headers: React.ReactNode[] = [];
                   headers.push(
-                    <TableCell key="prog-hdr-named" align="center" sx={{ fontWeight: 600, py: 1, minWidth: 50, bgcolor: '#f0f4ff', fontSize: '0.65rem' }}>Named</TableCell>
+                    <TableCell key="prog-hdr-named" align="center" sx={{ fontWeight: 600, py: 1, minWidth: 50, bgcolor: '#f0f4ff', fontSize: '0.65rem', cursor: 'pointer', userSelect: 'none', '&:hover': { bgcolor: '#e3eafc' } }} onClick={() => toggleTeamSort(`named::${metricFilter}`)}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>Named{teamSortIndicator(`named::${metricFilter}`)}</Box>
+                    </TableCell>
                   );
                   actionFields.forEach((f, i) => {
+                    const fromLabel = i === 0 ? 'Named' : actionFields[i - 1].label;
+                    const fromKey = i === 0 ? 'named' : actionFields[i - 1].key;
                     headers.push(
-                      <TableCell key={`prog-hdr-conv-${f.key}`} align="center" sx={{ fontWeight: 600, py: 1, minWidth: 50, bgcolor: '#fffef0', fontSize: '0.6rem' }}>
-                        →{f.label}
+                      <TableCell key={`prog-hdr-conv-${f.key}`} align="center" sx={{ fontWeight: 600, py: 1, minWidth: 50, bgcolor: '#fffef0', fontSize: '0.6rem', cursor: 'pointer', userSelect: 'none', '&:hover': { bgcolor: '#fff9c4' } }} onClick={() => toggleTeamSort(`conv::${metricFilter}::${fromKey}::${f.key}`)}>
+                        <Tooltip title={`${fromLabel} → ${f.label}`}>
+                          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>→{f.label}{teamSortIndicator(`conv::${metricFilter}::${fromKey}::${f.key}`)}</Box>
+                        </Tooltip>
                       </TableCell>
                     );
                     headers.push(
-                      <TableCell key={`prog-hdr-cnt-${f.key}`} align="center" sx={{ fontWeight: 600, py: 1, minWidth: 50, bgcolor: '#f0f4ff', fontSize: '0.65rem' }}>
-                        {f.label}
+                      <TableCell key={`prog-hdr-cnt-${f.key}`} align="center" sx={{ fontWeight: 600, py: 1, minWidth: 50, bgcolor: '#f0f4ff', fontSize: '0.65rem', cursor: 'pointer', userSelect: 'none', '&:hover': { bgcolor: '#e3eafc' } }} onClick={() => toggleTeamSort(`field::${metricFilter}::${f.key}`)}>
+                        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{f.label}{teamSortIndicator(`field::${metricFilter}::${f.key}`)}</Box>
                       </TableCell>
                     );
                   });
@@ -2481,7 +2705,7 @@ const CampaignLineGraph: React.FC<CampaignLineGraphProps> = ({
                               <TableCell align="center" sx={{ fontWeight: 600, py: 1, minWidth: 140, cursor: 'pointer', userSelect: 'none', '&:hover': { bgcolor: 'action.hover' } }} onClick={() => toggleTeamSort(md.metricFilter)}>
                                 <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{md.metricLabel}{teamSortIndicator(md.metricFilter)}</Box>
                               </TableCell>
-                              {renderExtraHeaders(md.actionFields)}
+                              {renderExtraHeaders(md.actionFields, md.metricFilter)}
                             </React.Fragment>
                           ))}
                         </TableRow>
@@ -2497,7 +2721,9 @@ const CampaignLineGraph: React.FC<CampaignLineGraphProps> = ({
                           </TableCell>
                           {metricDefs.map(md => {
                             const totalCount = md.teamLeaderboard.reduce((s, t) => s + t.count, 0);
-                            const totalGoal = md.teamLeaderboard.reduce((s, t) => s + (t.goal || 0), 0);
+                            const isCustomMetric = md.metricFilter.startsWith('action_');
+                            const customActionId = isCustomMetric ? md.metricFilter.replace('action_', '') : null;
+                            const totalGoal = customActionId ? computeTotalGoalForAction(customActionId) : 0;
                             const totalNamed = md.teamLeaderboard.reduce((s, t) => s + t.namedCount, 0);
                             const totalFieldCounts: Record<string, number> = {};
                             md.actionFields.forEach(f => {
@@ -2521,49 +2747,45 @@ const CampaignLineGraph: React.FC<CampaignLineGraphProps> = ({
                             );
                           })}
                         </TableRow>
-                        {/* Team rows */}
-                        {sortedTeamIds.map((teamId) => {
-                          const teamInfo = teamDataMap.get(teamId);
-                          if (!teamInfo) return null;
-                          return (
-                            <TableRow key={teamId} hover>
-                              <TableCell>
-                                <Typography variant="body2" sx={{ fontWeight: 500, fontSize: '0.8rem' }}>{teamInfo.teamName}</Typography>
-                                {teamInfo.chapter && (
-                                  <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.65rem', display: 'block' }}>
-                                    {teamInfo.chapter}
-                                  </Typography>
-                                )}
-                              </TableCell>
-                              <TableCell align="center">
-                                <Typography variant="body2" sx={{ fontSize: '0.8rem' }}>{teamInfo.memberCount}</Typography>
-                              </TableCell>
-                              {metricDefs.map(md => {
-                                const teamData = teamInfo[md.metricFilter];
-                                const count = teamData?.count ?? 0;
-                                const goal = teamData?.goal ?? 0;
-                                const namedCount = teamData?.namedCount ?? 0;
-                                const fieldCounts = teamData?.fieldCounts ?? {};
-                                const pct = goal > 0 ? Math.min((count / goal) * 100, 100) : 0;
-                                return (
-                                  <React.Fragment key={md.metricFilter}>
-                                    <TableCell>
-                                      {goal > 0 ? (
-                                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                                          <LinearProgress variant="determinate" value={pct} sx={{ flex: 1, height: 6, borderRadius: 1, bgcolor: '#e0e0e0', '& .MuiLinearProgress-bar': { bgcolor: count >= goal ? '#4caf50' : '#1976d2' } }} />
-                                          <Typography variant="body2" sx={{ fontWeight: 600, fontSize: '0.75rem', minWidth: 40, whiteSpace: 'nowrap' }}>{count}/{goal}</Typography>
-                                        </Box>
-                                      ) : (
-                                        <Typography variant="body2" sx={{ fontWeight: 600, fontSize: '0.8rem', textAlign: 'center' }}>{count}</Typography>
-                                      )}
-                                    </TableCell>
-                                    {md.actionFields.length >= 2 && renderExtraCells(md.actionFields, namedCount, fieldCounts)}
-                                  </React.Fragment>
-                                );
-                              })}
-                            </TableRow>
-                          );
-                        })}
+                        {/* Team rows, optionally grouped by section */}
+                        {(() => {
+                          if (teamGroupBy === 'section') {
+                            const sectionGroups = new Map<string, string[]>();
+                            sortedTeamIds.forEach(teamId => {
+                              const info = teamDataMap.get(teamId);
+                              const section = info?.chapter || 'Unknown';
+                              if (!sectionGroups.has(section)) sectionGroups.set(section, []);
+                              sectionGroups.get(section)!.push(teamId);
+                            });
+                            const totalColSpan = 2 + metricDefs.reduce((acc, md) => acc + 1 + (md.actionFields.length >= 2 ? md.actionFields.length + (md.actionFields.length - 1) : 0), 0);
+                            const sortedSections = Array.from(sectionGroups.keys()).sort((a, b) => {
+                              if (a === 'Unknown') return 1;
+                              if (b === 'Unknown') return -1;
+                              return a.localeCompare(b);
+                            });
+                            return sortedSections.map(section => (
+                              <React.Fragment key={`section-${section}`}>
+                                <TableRow>
+                                  <TableCell colSpan={totalColSpan} sx={{ bgcolor: '#e3f2fd', py: 0.5, px: 1 }}>
+                                    <Typography variant="subtitle2" sx={{ fontWeight: 700, color: 'primary.main', fontSize: '0.8rem' }}>
+                                      {section} ({sectionGroups.get(section)!.length})
+                                    </Typography>
+                                  </TableCell>
+                                </TableRow>
+                                {sectionGroups.get(section)!.map(teamId => {
+                                  const teamInfo = teamDataMap.get(teamId);
+                                  if (!teamInfo) return null;
+                                  return renderTeamRow(teamId, teamInfo, metricDefs, renderExtraCells);
+                                })}
+                              </React.Fragment>
+                            ));
+                          }
+                          return sortedTeamIds.map(teamId => {
+                            const teamInfo = teamDataMap.get(teamId);
+                            if (!teamInfo) return null;
+                            return renderTeamRow(teamId, teamInfo, metricDefs, renderExtraCells);
+                          });
+                        })()}
                       </TableBody>
                     </Table>
                   </TableContainer>
@@ -2612,8 +2834,16 @@ const CampaignLineGraph: React.FC<CampaignLineGraphProps> = ({
                     }
 
                     // Track which organizers belong to each section (for goal inference)
-                    userMap.forEach((info, vid) => {
-                      const chapter = info.chapter || 'Unknown';
+                    // Only include actual organizers (from teamsData), not all contacts
+                    const organizerVanIds = new Set<string>();
+                    (teamsData || []).forEach((team: any) => {
+                      (team.organizers || []).forEach((o: any) => { const vid = o.id || o.vanId; if (vid) organizerVanIds.add(vid.toString()); });
+                      if (team.lead?.id) organizerVanIds.add(team.lead.id.toString());
+                      (team.bigQueryData?.teamMembersWithRoles || []).forEach((m: any) => { if (m.id) organizerVanIds.add(m.id.toString()); });
+                    });
+                    organizerVanIds.forEach(vid => {
+                      const info = userMap.get(vid);
+                      const chapter = info?.chapter || 'Unknown';
                       if (!chapterMap.has(chapter)) chapterMap.set(chapter, mkCh());
                       chapterMap.get(chapter)!.memberVanIds.add(vid);
                     });
@@ -2703,13 +2933,65 @@ const CampaignLineGraph: React.FC<CampaignLineGraphProps> = ({
                   return cells;
                 };
 
-                const renderExtraHeaders = (actionFields: Array<{ key: string; label: string }>) => {
+                const toggleSectionSort = (col: string) => {
+                  if (sectionSortCol === col) setSectionSortDir(d => d === 'asc' ? 'desc' : 'asc');
+                  else { setSectionSortCol(col); setSectionSortDir('desc'); }
+                };
+                const sectionSortIndicator = (col: string) => {
+                  if (sectionSortCol !== col) return null;
+                  return sectionSortDir === 'asc' ? <ArrowUpwardIcon sx={{ fontSize: '0.8rem', ml: 0.3 }} /> : <ArrowDownwardIcon sx={{ fontSize: '0.8rem', ml: 0.3 }} />;
+                };
+
+                // Sort sections
+                sortedChapters.sort((a, b) => {
+                  const aData = chapterDataMap.get(a);
+                  const bData = chapterDataMap.get(b);
+                  if (!aData || !bData) return 0;
+                  let aVal: any = 0, bVal: any = 0;
+                  if (sectionSortCol === 'section') { return sectionSortDir === 'asc' ? a.localeCompare(b) : b.localeCompare(a); }
+                  if (sectionSortCol.startsWith('named::')) { const mf = sectionSortCol.replace('named::', ''); aVal = aData[mf]?.namedCount ?? 0; bVal = bData[mf]?.namedCount ?? 0; }
+                  else if (sectionSortCol.startsWith('field::')) { const parts = sectionSortCol.split('::'); const mf = parts[1]; const fk = parts[2]; aVal = aData[mf]?.fieldCounts?.[fk] ?? 0; bVal = bData[mf]?.fieldCounts?.[fk] ?? 0; }
+                  else if (sectionSortCol.startsWith('conv::')) {
+                    const parts = sectionSortCol.split('::');
+                    const mf = parts[1]; const fromKey = parts[2]; const toKey = parts[3];
+                    const getRate = (info: any) => {
+                      const fromC = fromKey === 'named' ? (info[mf]?.namedCount ?? 0) : (info[mf]?.fieldCounts?.[fromKey] ?? 0);
+                      const toC = info[mf]?.fieldCounts?.[toKey] ?? 0;
+                      return fromC > 0 ? (toC / fromC) * 100 : 0;
+                    };
+                    aVal = getRate(aData); bVal = getRate(bData);
+                  }
+                  else {
+                    // Sort by metric count — use the clicked metricFilter or default to first metric
+                    const mf = aData[sectionSortCol] ? sectionSortCol : metricDefs[0]?.metricFilter;
+                    aVal = aData[mf]?.count ?? 0; bVal = bData[mf]?.count ?? 0;
+                  }
+                  return sectionSortDir === 'asc' ? aVal - bVal : bVal - aVal;
+                });
+
+                const renderSectionExtraHeaders = (actionFields: Array<{ key: string; label: string }>, metricFilter: string) => {
                   if (displayMode !== 'conversions' || actionFields.length < 2) return null;
                   const headers: React.ReactNode[] = [];
-                  headers.push(<TableCell key="prog-hdr-named" align="center" sx={{ fontWeight: 600, py: 1, minWidth: 50, bgcolor: '#f0f4ff', fontSize: '0.65rem' }}>Named</TableCell>);
+                  headers.push(
+                    <TableCell key="prog-hdr-named" align="center" sx={{ fontWeight: 600, py: 1, minWidth: 50, bgcolor: '#f0f4ff', fontSize: '0.65rem', cursor: 'pointer', userSelect: 'none', '&:hover': { bgcolor: '#e3eafc' } }} onClick={() => toggleSectionSort(`named::${metricFilter}`)}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>Named{sectionSortIndicator(`named::${metricFilter}`)}</Box>
+                    </TableCell>
+                  );
                   actionFields.forEach((f, i) => {
-                    headers.push(<TableCell key={`prog-hdr-conv-${f.key}`} align="center" sx={{ fontWeight: 600, py: 1, minWidth: 50, bgcolor: '#fffef0', fontSize: '0.6rem' }}>→{f.label}</TableCell>);
-                    headers.push(<TableCell key={`prog-hdr-cnt-${f.key}`} align="center" sx={{ fontWeight: 600, py: 1, minWidth: 50, bgcolor: '#f0f4ff', fontSize: '0.65rem' }}>{f.label}</TableCell>);
+                    const fromKey = i === 0 ? 'named' : actionFields[i - 1].key;
+                    const fromLabel = i === 0 ? 'Named' : actionFields[i - 1].label;
+                    headers.push(
+                      <TableCell key={`prog-hdr-conv-${f.key}`} align="center" sx={{ fontWeight: 600, py: 1, minWidth: 50, bgcolor: '#fffef0', fontSize: '0.6rem', cursor: 'pointer', userSelect: 'none', '&:hover': { bgcolor: '#fff9c4' } }} onClick={() => toggleSectionSort(`conv::${metricFilter}::${fromKey}::${f.key}`)}>
+                        <Tooltip title={`${fromLabel} → ${f.label}`}>
+                          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>→{f.label}{sectionSortIndicator(`conv::${metricFilter}::${fromKey}::${f.key}`)}</Box>
+                        </Tooltip>
+                      </TableCell>
+                    );
+                    headers.push(
+                      <TableCell key={`prog-hdr-cnt-${f.key}`} align="center" sx={{ fontWeight: 600, py: 1, minWidth: 50, bgcolor: '#f0f4ff', fontSize: '0.65rem', cursor: 'pointer', userSelect: 'none', '&:hover': { bgcolor: '#e3eafc' } }} onClick={() => toggleSectionSort(`field::${metricFilter}::${f.key}`)}>
+                        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{f.label}{sectionSortIndicator(`field::${metricFilter}::${f.key}`)}</Box>
+                      </TableCell>
+                    );
                   });
                   return headers;
                 };
@@ -2719,11 +3001,15 @@ const CampaignLineGraph: React.FC<CampaignLineGraphProps> = ({
                     <Table size="small" stickyHeader>
                       <TableHead>
                         <TableRow>
-                          <TableCell sx={{ fontWeight: 600, py: 1, minWidth: 150 }}>Section</TableCell>
+                          <TableCell sx={{ fontWeight: 600, py: 1, minWidth: 150, cursor: 'pointer', userSelect: 'none', '&:hover': { bgcolor: 'action.hover' } }} onClick={() => toggleSectionSort('section')}>
+                            <Box sx={{ display: 'flex', alignItems: 'center' }}>Section{sectionSortIndicator('section')}</Box>
+                          </TableCell>
                           {metricDefs.map(md => (
                             <React.Fragment key={md.metricFilter}>
-                              <TableCell colSpan={2} align="center" sx={{ fontWeight: 600, py: 1, minWidth: 140 }}>{md.metricLabel}</TableCell>
-                              {renderExtraHeaders(md.actionFields)}
+                              <TableCell colSpan={2} align="center" sx={{ fontWeight: 600, py: 1, minWidth: 140, cursor: 'pointer', userSelect: 'none', '&:hover': { bgcolor: 'action.hover' } }} onClick={() => toggleSectionSort(md.metricFilter)}>
+                                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{md.metricLabel}{sectionSortIndicator(md.metricFilter)}</Box>
+                              </TableCell>
+                              {renderSectionExtraHeaders(md.actionFields, md.metricFilter)}
                             </React.Fragment>
                           ))}
                         </TableRow>
@@ -2734,7 +3020,9 @@ const CampaignLineGraph: React.FC<CampaignLineGraphProps> = ({
                           <TableCell sx={{ py: 1, fontWeight: 700, color: 'primary.main' }}>Total</TableCell>
                           {metricDefs.map(md => {
                             const totalCount = md.chapterRows.reduce((s, r) => s + r.count, 0);
-                            const totalGoal = md.chapterRows.reduce((s, r) => s + r.goal, 0);
+                            const isCustomMetricS = md.metricFilter.startsWith('action_');
+                            const customActionIdS = isCustomMetricS ? md.metricFilter.replace('action_', '') : null;
+                            const totalGoal = customActionIdS ? computeTotalGoalForAction(customActionIdS) : md.chapterRows.reduce((s, r) => s + r.goal, 0);
                             const totalNamed = md.chapterRows.reduce((s, r) => s + r.namedCount, 0);
                             const totalFieldCounts: Record<string, number> = {};
                             md.actionFields.forEach(f => {
@@ -2882,7 +3170,7 @@ const CampaignLineGraph: React.FC<CampaignLineGraphProps> = ({
                   totalNamed = totalCount;
                 }
                 
-                // Determine goal: campaign goal first, then default_individual_goal
+                // Determine goal: campaign goal first, then sum individual goals
                 let totalGoal = 0;
                 if (isCustomMetric && customActionId && effectiveActionsDB.length > 0) {
                   const ad = effectiveActionsDB.find((a: any) => a.action_id === customActionId);
@@ -2894,20 +3182,8 @@ const CampaignLineGraph: React.FC<CampaignLineGraphProps> = ({
                       }
                     }
                   }
-                  // Fallback: sum individual goals across all organizers
                   if (totalGoal === 0 && customActionId) {
-                    const defaultGoal = Number(ad?.default_individual_goal) || 5;
-                    // Sum goals for every organizer who has a goal set, or use default
-                    const allOrganizerVanIds = new Set<string>();
-                    (teamsData || []).forEach((team: any) => {
-                      (team.organizers || []).forEach((o: any) => { const vid = o.id || o.vanId; if (vid) allOrganizerVanIds.add(vid.toString()); });
-                      if (team.lead?.id) allOrganizerVanIds.add(team.lead.id.toString());
-                      (team.bigQueryData?.teamMembersWithRoles || []).forEach((m: any) => { if (m.id) allOrganizerVanIds.add(m.id.toString()); });
-                    });
-                    allOrganizerVanIds.forEach(vid => {
-                      const memberGoals = organizerGoalsMap.get(vid);
-                      totalGoal += memberGoals?.get(customActionId!) || defaultGoal;
-                    });
+                    totalGoal = computeTotalGoalForAction(customActionId);
                   }
                 } else {
                   for (const campaign of selectedCampaignObjs) {
