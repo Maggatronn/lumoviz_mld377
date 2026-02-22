@@ -341,8 +341,13 @@ const NetworkGraph: React.FC<NetworkGraphProps> = ({
         ctx.globalAlpha = 1;
         ctx.setLineDash([]);
       } else if (type === 'section_leader' || linkSource === 'section_leader') {
-        // Section leader → team representative: purple dashed line
-        ctx.strokeStyle = '#7c4dff';
+        // Section leader → team representative: dashed line in receiving team's color
+        const sectionChapter = target.chapter || source.chapter;
+        let sectionColor = '#7c4dff';
+        if (sectionChapter && customColors) {
+          sectionColor = getCustomChapterColor(sectionChapter, customColors);
+        }
+        ctx.strokeStyle = sectionColor;
         ctx.lineWidth = 2.5;
         ctx.globalAlpha = 0.75;
         ctx.setLineDash([10, 5]);
@@ -357,7 +362,6 @@ const NetworkGraph: React.FC<NetworkGraphProps> = ({
         let teamColor = '#1976d2'; // Default blue
         
         if (teamName) {
-          // Try to get team color from source or target node's chapter
           const nodeChapter = source.chapter || target.chapter;
           if (nodeChapter && customColors) {
             teamColor = getCustomChapterColor(nodeChapter, customColors);
@@ -367,7 +371,18 @@ const NetworkGraph: React.FC<NetworkGraphProps> = ({
         ctx.strokeStyle = teamColor;
         ctx.lineWidth = Math.max(edgeWidth, 1.5);
         ctx.globalAlpha = 0.7;
-        ctx.setLineDash([]); // Solid line
+        ctx.setLineDash([]);
+      } else if (type === 'constituent') {
+        // Constituent → organizer: thin, light line in organizer's chapter color
+        const orgChapter = source.chapter || target.chapter;
+        let constituentColor = '#bbb';
+        if (orgChapter && customColors) {
+          constituentColor = getCustomChapterColor(orgChapter, customColors);
+        }
+        ctx.strokeStyle = constituentColor;
+        ctx.lineWidth = 0.8;
+        ctx.globalAlpha = 0.25;
+        ctx.setLineDash([]);
       } else {
         // Default style
         ctx.strokeStyle = '#999';
@@ -388,26 +403,54 @@ const NetworkGraph: React.FC<NetworkGraphProps> = ({
       const isMultiTeam = node.type === 'multi_team_member';
       const isLead = node.type === 'team_lead';
       const isSectionLeader = node.type === 'section_leader';
+      const isConstituent = node.type === 'constituent';
       
       // Calculate base node size from degree (centrality), with bonuses for special types
-      // More connections = larger node (more pronounced scaling)
       let nodeSize = Math.min(25, Math.max(5, 5 + Math.log2(node.degree || 1) * 3));
-      if (isMultiTeam) nodeSize += 3; // Larger for multi-team members
-      if (isLead) nodeSize += 2; // Larger for team leads
-      if (isSectionLeader) nodeSize = Math.max(nodeSize + 10, 18); // Section leaders always prominent
+      if (isMultiTeam) nodeSize += 3;
+      if (isLead) nodeSize += 2;
+      if (isSectionLeader) nodeSize = Math.max(nodeSize + 10, 18);
+      if (isConstituent) nodeSize = Math.max(4, nodeSize - 2);
 
       ctx.beginPath();
       ctx.arc(node.x, node.y, nodeSize, 0, 2 * Math.PI);
       
-      // Node fill - determine color based on colorMode
+      // Node fill - determine color based on type and LOE
       let nodeColor: string;
-      if (colorMode === 'loe') {
-        // Use team colors with LOE-based shading
+      let nodeStrokeColor: string = isSelected ? '#ff6b35' : '#fff';
+      let nodeStrokeWidth: number = isSelected ? 3 : 1.5;
+      
+      if (isConstituent) {
+        const chapterColor = getCustomChapterColor(node.chapter, customColors);
+        const loe = (node.loeStatus || '').toLowerCase();
+        
+        if (loe.includes('teamleader') || loe.includes('1_')) {
+          // Leaders: full chapter color
+          nodeColor = chapterColor;
+          nodeStrokeColor = isSelected ? '#ff6b35' : chapterColor;
+        } else if (loe.includes('teammember') || loe.includes('member') || loe.includes('2_') || loe.includes('3_')) {
+          // Potential Leaders (TeamMember/Member): 40% opacity via alpha blend with white
+          const r = parseInt(chapterColor.slice(1, 3), 16);
+          const g = parseInt(chapterColor.slice(3, 5), 16);
+          const b = parseInt(chapterColor.slice(5, 7), 16);
+          nodeColor = `rgba(${r}, ${g}, ${b}, 0.4)`;
+          nodeStrokeColor = isSelected ? '#ff6b35' : chapterColor;
+          nodeStrokeWidth = isSelected ? 3 : 1.5;
+        } else if (loe.includes('supporter') || loe.includes('4_')) {
+          // Supporters: white fill with chapter color stroke
+          nodeColor = '#ffffff';
+          nodeStrokeColor = isSelected ? '#ff6b35' : chapterColor;
+          nodeStrokeWidth = isSelected ? 3 : 1.5;
+        } else {
+          // Unknown / null: grey
+          nodeColor = '#cccccc';
+          nodeStrokeColor = isSelected ? '#ff6b35' : '#999999';
+        }
+      } else if (colorMode === 'loe') {
         const baseTeamColor = getCustomChapterColor(node.chapter, customColors);
         const loeStatus = (node as any).loeStatus || 'Unknown';
         nodeColor = getLOEShadeOfTeamColor(baseTeamColor, loeStatus);
       } else {
-        // Use chapter-based coloring (default)
         nodeColor = getCustomChapterColor(node.chapter, customColors);
       }
       
@@ -424,8 +467,8 @@ const NetworkGraph: React.FC<NetworkGraphProps> = ({
       }
       
       // Regular node border
-      ctx.strokeStyle = isSelected ? '#ff6b35' : '#fff';
-      ctx.lineWidth = isSelected ? 3 : 1.5;
+      ctx.strokeStyle = nodeStrokeColor;
+      ctx.lineWidth = nodeStrokeWidth;
       ctx.setLineDash([]);
       ctx.stroke();
 
@@ -610,19 +653,35 @@ const NetworkGraph: React.FC<NetworkGraphProps> = ({
   }, [nodes, allLinks, selectedNodeId, hoveredMeetingId, teamCenters, customColors, searchText, dataSource]);
 
   // Setup D3 force simulation
+  // Track whether canvas was hidden so we can re-initialize on becoming visible
+  const wasHiddenRef = useRef(false);
+  const [visibilityTrigger, setVisibilityTrigger] = useState(0);
+
   // Resize observer to handle container size changes
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
     const resizeObserver = new ResizeObserver(() => {
-      // Trigger a re-render when container size changes
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
 
       const devicePixelRatio = window.devicePixelRatio || 1;
       const rect = canvas.getBoundingClientRect();
       
+      // Skip if container is hidden (display:none gives 0x0) — don't corrupt the canvas
+      if (rect.width === 0 || rect.height === 0) {
+        wasHiddenRef.current = true;
+        return;
+      }
+
+      // If we were hidden and now visible, trigger re-initialization
+      if (wasHiddenRef.current) {
+        wasHiddenRef.current = false;
+        setVisibilityTrigger(v => v + 1);
+        return;
+      }
+
       // Only update if size actually changed
       if (canvas.width !== rect.width * devicePixelRatio || canvas.height !== rect.height * devicePixelRatio) {
         canvas.width = rect.width * devicePixelRatio;
@@ -675,6 +734,11 @@ const NetworkGraph: React.FC<NetworkGraphProps> = ({
     // Prevent high-DPI scaling issues
     const devicePixelRatio = window.devicePixelRatio || 1;
     const rect = canvas.getBoundingClientRect();
+    // Skip setup if container is hidden (0x0 dimensions)
+    if (rect.width === 0 || rect.height === 0) {
+      return;
+    }
+    
     canvas.width = rect.width * devicePixelRatio;
     canvas.height = rect.height * devicePixelRatio;
     canvas.style.width = `${rect.width}px`;
@@ -851,11 +915,17 @@ const NetworkGraph: React.FC<NetworkGraphProps> = ({
       .force('collision', d3.forceCollide().radius(40))
       // REMOVED boundary force - this was creating the square constraint!;
 
-    // Set simulation parameters for faster stopping
-    simulation.alphaDecay(0.02) // Much faster decay to stop sooner
+    // If nodes already have positions (e.g. returning to this tab), start nearly settled
+    const hasPreExistingPositions = nodes.some(n => typeof n.x === 'number' && n.x !== 0 && typeof n.y === 'number' && n.y !== 0);
+
+    simulation.alphaDecay(0.02)
              .alphaTarget(0.0)
-             .alphaMin(0.05) // Stop when alpha reaches this threshold
-             .velocityDecay(0.4); // More velocity decay to settle faster
+             .alphaMin(0.05)
+             .velocityDecay(0.4);
+
+    if (hasPreExistingPositions) {
+      simulation.alpha(0.05);
+    }
 
     // Create render function
     const render = () => {
@@ -956,16 +1026,30 @@ const NetworkGraph: React.FC<NetworkGraphProps> = ({
     transformRef.current = initialTransform;
     d3.select(canvas).call(zoom).call(zoom.transform, initialTransform);
 
-    // Cleanup function
+    // Cleanup function — save positions before unmounting
     return () => {
       canvas.removeEventListener('mousemove', handleMouseMove);
       canvas.removeEventListener('click', handleClick);
+      
+      // Save current positions before stopping so they persist across tab switches
+      if (onNodesChange) {
+        const simulationNodes = simulation.nodes();
+        const updatedNodes = nodes.map(node => {
+          const simNode = simulationNodes.find(sn => sn.id === node.id);
+          if (simNode && typeof simNode.x === 'number' && typeof simNode.y === 'number') {
+            return { ...node, x: simNode.x, y: simNode.y, degree: simNode.degree || node.degree };
+          }
+          return node;
+        });
+        onNodesChange(updatedNodes);
+      }
+      
       simulation.stop();
       if (animationFrameRef.current) {
         cancelAnimationFrame(animationFrameRef.current);
       }
     };
-  }, [nodes, allLinks, selectedChapter, currentDateRange, meetingsData, userMap, adminUserIds, dataSource, renderCanvas, onNodeClick, onNodeHover, onNodesChange]);
+  }, [nodes, allLinks, selectedChapter, currentDateRange, meetingsData, userMap, adminUserIds, dataSource, renderCanvas, onNodeClick, onNodeHover, onNodesChange, visibilityTrigger]);
 
 
   return (

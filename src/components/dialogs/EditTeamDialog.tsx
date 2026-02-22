@@ -554,7 +554,7 @@ const EditTeamDialog: React.FC<EditTeamDialogProps> = ({
           {chapter && (
             <Box>
               <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 'bold' }}>
-                Chapter Color
+                Section Color
               </Typography>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
                 <Box
@@ -606,7 +606,7 @@ const EditTeamDialog: React.FC<EditTeamDialogProps> = ({
                 </Box>
               </Box>
               <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
-                Changing this color will update the entire chapter's color throughout the application
+                Changing this color will update the entire section's color throughout the application
               </Typography>
             </Box>
           )}

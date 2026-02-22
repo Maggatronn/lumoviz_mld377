@@ -25,7 +25,7 @@ import {
   Tooltip
 } from '@mui/material';
 import { 
-  Refresh as RefreshIcon,
+
   Timeline as TimelineIcon,
   AccountTree as SnowflakeIcon,
   Flag as GoalsIcon,
@@ -365,6 +365,12 @@ const MainAppContent: React.FC<{ authUser?: import('../services/auth').AuthUser;
   
   // Network LOE filter state - Initialize with all LOE levels checked
   const [networkLOEFilter, setNetworkLOEFilter] = useState<string[]>([]);
+  
+  // Network mode: 'teams' (organizers only) or 'constituents' (organizers + their contacts)
+  const [networkMode, setNetworkMode] = useState<'teams' | 'constituents'>('teams');
+  
+  // Persist node positions so the graph survives tab switches
+  const networkNodePositionsRef = useRef<Map<string, { x: number; y: number }>>(new Map());
   
   // Extract dynamic LOE levels from meetings data when it loads
   useEffect(() => {
@@ -1534,11 +1540,6 @@ const MainAppContent: React.FC<{ authUser?: import('../services/auth').AuthUser;
     setSelectedNodeId(null);
   };
 
-  // Handle refresh
-  const handleRefresh = () => {
-    hasFetchedDataRef.current = false;
-    reloadSharedContacts(true);
-  };
 
   // Handler for opening person details dialog from Kanban
   const handlePersonDetailsOpen = (personId: string) => {
@@ -2672,27 +2673,60 @@ const MainAppContent: React.FC<{ authUser?: import('../services/auth').AuthUser;
       filteredNodes = [...filteredNodes, ...sectionLeaderNewNodes];
     }
 
+    // ── Constituent nodes + edges (when constituents mode is active) ──────
+    const constituentNodes: any[] = [];
+    const constituentLinks: any[] = [];
+    if (networkMode === 'constituents' && sharedAllContacts.length > 0) {
+      const existingNodeIds = new Set(filteredNodes.map(n => n.id));
+
+      sharedAllContacts.forEach((contact: any) => {
+        const contactId = contact.vanid?.toString();
+        const organizerId = contact.primary_organizer_vanid?.toString();
+        if (!contactId || !organizerId) return;
+        if (existingNodeIds.has(contactId)) return; // skip people already in the network (organizers)
+        if (!existingNodeIds.has(organizerId)) return; // skip if their organizer isn't visible
+
+        const contactName = `${contact.firstname || ''} ${contact.lastname || ''}`.trim() || `Contact ${contactId}`;
+        const loeStatus = contact.loe || getLOEStatus(contactId);
+
+        constituentNodes.push({
+          id: contactId,
+          name: contactName,
+          chapter: contact.chapter || 'Unknown',
+          type: 'constituent',
+          loeStatus,
+          color: '#999',
+          x: 0,
+          y: 0,
+          degree: 0,
+        });
+        existingNodeIds.add(contactId);
+
+        constituentLinks.push({
+          source: organizerId,
+          target: contactId,
+          type: 'constituent',
+          linkSource: 'contacts',
+        });
+      });
+
+      filteredNodes = [...filteredNodes, ...constituentNodes];
+    }
+
     // Combine all links
-    const allLinks = [...filteredLinks, ...leadershipLinks, ...sectionLeaderLinks];
+    const allLinks = [...filteredLinks, ...leadershipLinks, ...sectionLeaderLinks, ...constituentLinks];
     
-    // Debug: Count nodes by LOE category
-    const loeBreakdown = new Map<string, number>();
-    allNetworkNodes.forEach(node => {
-      const category = getNodeLOECategory(node);
-      loeBreakdown.set(category, (loeBreakdown.get(category) || 0) + 1);
+    // Restore saved positions so graph survives tab switches
+    const positionedNodes = filteredNodes.map(node => {
+      const saved = networkNodePositionsRef.current.get(node.id);
+      if (saved) {
+        return { ...node, x: saved.x, y: saved.y };
+      }
+      return node;
     });
-    
-    // Removed excessive logging - this runs on every filter change
-    // console.log('[MainApp] Client-side network filter:', 
-    //   `${filteredNodes.length}/${allNetworkNodes.length} nodes`,
-    //   `${allLinks.length} links (${leadershipLinks.length} leadership)`,
-    //   selectedChapter !== `All ${TERMS.chapters}` ? `chapter: ${selectedChapter}` : '',
-    //   `LOE: ${networkLOEFilter.length} levels selected (${networkLOEFilter.join(', ')})`,
-    //   '\nLOE breakdown:', Object.fromEntries(loeBreakdown)
-    // );
-    
-    return { networkNodes: filteredNodes, networkLinks: allLinks };
-  }, [allNetworkNodes, allNetworkLinks, selectedChapter, networkLOEFilter, leaderHierarchy, getNodeLOECategory, teamsData, orgIds, unifiedFilters.teamType]);
+
+    return { networkNodes: positionedNodes, networkLinks: allLinks };
+  }, [allNetworkNodes, allNetworkLinks, selectedChapter, networkLOEFilter, leaderHierarchy, getNodeLOECategory, teamsData, orgIds, unifiedFilters.teamType, networkMode, sharedAllContacts, getLOEStatus]);
 
 
   const selectedNodeName = React.useMemo(() => {
@@ -2915,17 +2949,29 @@ const MainAppContent: React.FC<{ authUser?: import('../services/auth').AuthUser;
             )}
 
             
-            {/* Refresh Button */}
-            <IconButton 
-              onClick={handleRefresh} 
-              disabled={loading}
-              sx={{ 
-                bgcolor: loading ? 'transparent' : 'action.hover',
-                '&:hover': { bgcolor: 'action.selected' }
-              }}
-            >
-              {loading ? <CircularProgress size={20} /> : <RefreshIcon />}
-            </IconButton>
+            {/* Bug Report Button */}
+            <Tooltip title="Report a bug">
+              <Box
+                component="a"
+                href="https://docs.google.com/forms/d/e/1FAIpQLSe8DDcNQYZV-qw_SECCBIWUZSGipK-S-tCcoDcierrsNxCHkw/viewform?usp=publish-editor"
+                target="_blank"
+                rel="noopener noreferrer"
+                sx={{
+                  fontSize: '1.35rem',
+                  cursor: 'pointer',
+                  lineHeight: 1,
+                  display: 'flex',
+                  alignItems: 'center',
+                  textDecoration: 'none',
+                  borderRadius: '50%',
+                  p: 0.5,
+                  transition: 'filter 0.2s ease',
+                  '&:hover': { filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.3))' }
+                }}
+              >
+                🐞
+              </Box>
+            </Tooltip>
 
             {/* User info & Logout */}
             {authUser && onLogout && (
@@ -3173,8 +3219,20 @@ const MainAppContent: React.FC<{ authUser?: import('../services/auth').AuthUser;
                   InputLabelProps={{ shrink: true }}
                   sx={{ width: 180 }}
                 />
-                
               </Box>
+              <Typography variant="caption" sx={{ fontWeight: 600, display: 'block', mt: 1.5, mb: 0.5, color: 'text.secondary' }}>
+                View
+              </Typography>
+              <ToggleButtonGroup
+                value={networkMode}
+                exclusive
+                onChange={(_, val) => { if (val) { networkNodePositionsRef.current.clear(); setNetworkMode(val); } }}
+                size="small"
+                sx={{ width: '100%' }}
+              >
+                <ToggleButton value="teams" sx={{ flex: 1, fontSize: '0.7rem', py: 0.5 }}>Teams</ToggleButton>
+                <ToggleButton value="constituents" sx={{ flex: 1, fontSize: '0.7rem', py: 0.5 }}>Constituents</ToggleButton>
+              </ToggleButtonGroup>
             </Box>
             
             {/* Floating Team Cards - Compact & Transparent */}
@@ -3244,7 +3302,13 @@ const MainAppContent: React.FC<{ authUser?: import('../services/auth').AuthUser;
                 onNodeHover={() => {}}
                 hoveredMeetingId={null}
                 nodeFilters={{}}
-                onNodesChange={() => {}}
+                onNodesChange={(updatedNodes) => {
+                  updatedNodes.forEach(n => {
+                    if (typeof n.x === 'number' && typeof n.y === 'number') {
+                      networkNodePositionsRef.current.set(n.id, { x: n.x, y: n.y });
+                    }
+                  });
+                }}
                 teamCenters={networkTeamCenters}
                 customColors={customColors}
                 searchText={unifiedFilters.searchText}
