@@ -102,6 +102,7 @@ interface LeaderMetricsTableProps {
   selectedChapter?: string; // Selected chapter for filtering summary
   teamsData?: any[]; // Teams data to get chapter info
   currentDateRange?: { start: Date; end: Date } | null; // Date range for rate-based goal adjustments
+  canonicalTotalGoals?: Record<string, number>; // Pre-computed canonical total goals per action (overrides sum of leaders)
 }
 
 const EMPTY_RELOAD_TRIGGERS: {[key: string]: number} = {};
@@ -998,7 +999,8 @@ export const LeaderMetricsTable: React.FC<LeaderMetricsTableProps> = ({
   useCampaignGoals = false,
   selectedChapter = 'All Chapters',
   teamsData = [],
-  currentDateRange = null
+  currentDateRange = null,
+  canonicalTotalGoals
 }) => {
   // Sorting state
   const [sortColumn, setSortColumn] = useState<string | null>(initialSortColumn); // 'name', 'leaders', 'status', 'total', 'conversion-{actionId}', or actionId
@@ -1638,8 +1640,9 @@ export const LeaderMetricsTable: React.FC<LeaderMetricsTableProps> = ({
               
               allLeaders.forEach(leader => {
                 const progress = leader.actionProgress?.[actionId];
-                const leaderGoal = getGoalForAction(leader.id, actionId);
-                totalGoal += leaderGoal;
+                if (!canonicalTotalGoals) {
+                  totalGoal += getGoalForAction(leader.id, actionId);
+                }
                 if (progress) {
                   leadersWithAction++;
                   totalCount += progress.count || 0;
@@ -1648,6 +1651,10 @@ export const LeaderMetricsTable: React.FC<LeaderMetricsTableProps> = ({
                   }
                 }
               });
+
+              if (canonicalTotalGoals && canonicalTotalGoals[actionId] !== undefined) {
+                totalGoal = canonicalTotalGoals[actionId];
+              }
               
               totalStats[actionId] = {
                 leadersAtGoal: leadersAtGoalForAction,
