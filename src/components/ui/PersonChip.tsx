@@ -5,13 +5,11 @@ import {
   MenuItem,
   ListItemIcon,
   ListItemText,
-  Tooltip,
-  Box
+  Tooltip
 } from '@mui/material';
 import {
   FilterList as FilterListIcon,
-  Info as InfoIcon,
-  WarningAmber as WarningIcon
+  Info as InfoIcon
 } from '@mui/icons-material';
 import { OrganizerMapping } from '../../services/organizerMappingService';
 
@@ -49,18 +47,7 @@ export const PersonChip: React.FC<PersonChipProps> = ({
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
   const menuOpen = Boolean(anchorEl);
 
-  // Check if person is pending (not in VAN yet)
-  const isPending = vanId?.startsWith('pending_') || false;
-  const mapping = allMappings.find(m => 
-    m.primary_vanid === vanId || 
-    m.preferred_name.toLowerCase() === name.toLowerCase()
-  );
-  const isNotInVan = mapping && (
-    (mapping as any).in_van === false || 
-    (mapping as any).van_sync_status !== 'synced'
-  );
-
-  const showWarning = isPending || isNotInVan;
+  const showWarning = false;
 
   const handleClick = (event: React.MouseEvent<HTMLDivElement>) => {
     event.stopPropagation();
@@ -89,25 +76,13 @@ export const PersonChip: React.FC<PersonChipProps> = ({
     handleClose();
   };
 
-  const chipLabel = (
-    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-      {name}
-      {showWarning && (
-        <WarningIcon 
-          sx={{ 
-            fontSize: size === 'small' ? '0.875rem' : '1rem',
-            color: 'warning.main'
-          }} 
-        />
-      )}
-    </Box>
-  );
+  const chipLabel = name;
 
   const chipElement = (
     <Chip
       label={chipLabel}
       size={size}
-      color={color || (showWarning ? 'warning' : undefined)}
+      color={color}
       variant={variant}
       onClick={handleClick}
       sx={{
@@ -120,9 +95,7 @@ export const PersonChip: React.FC<PersonChipProps> = ({
     />
   );
 
-  const tooltipTitle = showWarning 
-    ? "Not in VAN - needs to be added"
-    : showMenu && (onFilterBy || onViewDetails)
+  const tooltipTitle = showMenu && (onFilterBy || onViewDetails)
     ? "Click for options"
     : "";
 

@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import * as d3 from 'd3';
 import { Box, Typography, Paper, Chip, Button, LinearProgress, FormControl, InputLabel, Select, MenuItem, Collapse, IconButton, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Tooltip, ToggleButton, ToggleButtonGroup } from '@mui/material';
-import { Star as StarIcon, Person as PersonIcon, Business as BusinessIcon, Public as PublicIcon, Groups as GroupsIcon, KeyboardArrowRight, KeyboardArrowDown } from '@mui/icons-material';
+import { Star as StarIcon, Person as PersonIcon, Business as BusinessIcon, Public as PublicIcon, Groups as GroupsIcon, KeyboardArrowRight, KeyboardArrowDown, ArrowUpward as ArrowUpwardIcon, ArrowDownward as ArrowDownwardIcon } from '@mui/icons-material';
 import { CampaignEvent } from '../../types';
 import { ParentCampaign, CampaignGoalType, GoalDataSource } from '../dialogs/ParentCampaignDialog';
 import { useChapterColors } from '../../contexts/ChapterColorContext';
@@ -115,6 +115,15 @@ const CampaignLineGraph: React.FC<CampaignLineGraphProps> = ({
   // 2-way display mode for LeaderMetricsTable
   const [displayMode, setDisplayMode] = useState<'progress' | 'conversions'>('progress');
   const showConversions = displayMode === 'conversions';
+
+  // Sort state for By Team / By Section tables
+  const [teamSortCol, setTeamSortCol] = useState<string>('count');
+  const [teamSortDir, setTeamSortDir] = useState<'asc' | 'desc'>('desc');
+  const [sectionSortCol, setSectionSortCol] = useState<string>('count');
+  const [sectionSortDir, setSectionSortDir] = useState<'asc' | 'desc'>('desc');
+
+  // Group-by option for By Person view
+  const [personGroupBy, setPersonGroupBy] = useState<'none' | 'team' | 'section'>('none');
   
   // State for organizer goals: Map<organizer_vanid, Map<action_id, goal_value>>
   const [organizerGoalsMap, setOrganizerGoalsMap] = useState<Map<string, Map<string, number>>>(new Map());
@@ -2379,8 +2388,32 @@ const CampaignLineGraph: React.FC<CampaignLineGraphProps> = ({
                     teamDataMap.get(t.teamId)![md.metricFilter] = t;
                   });
                 });
-                const sortedTeamIds = metricDefs[0]?.teamLeaderboard.map(t => t.teamId) || [];
+                let sortedTeamIds = metricDefs[0]?.teamLeaderboard.map(t => t.teamId) || [];
                 allTeamIds.forEach(id => { if (!sortedTeamIds.includes(id)) sortedTeamIds.push(id); });
+
+                // Apply user sort
+                const toggleTeamSort = (col: string) => {
+                  if (teamSortCol === col) setTeamSortDir(d => d === 'asc' ? 'desc' : 'asc');
+                  else { setTeamSortCol(col); setTeamSortDir('desc'); }
+                };
+                const teamSortIndicator = (col: string) => {
+                  if (teamSortCol !== col) return null;
+                  return teamSortDir === 'asc' ? <ArrowUpwardIcon sx={{ fontSize: '0.8rem', ml: 0.3 }} /> : <ArrowDownwardIcon sx={{ fontSize: '0.8rem', ml: 0.3 }} />;
+                };
+
+                sortedTeamIds = [...sortedTeamIds].sort((a, b) => {
+                  const aInfo = teamDataMap.get(a);
+                  const bInfo = teamDataMap.get(b);
+                  if (!aInfo || !bInfo) return 0;
+                  let aVal: any = 0, bVal: any = 0;
+                  if (teamSortCol === 'team') { aVal = (aInfo.teamName || '').toLowerCase(); bVal = (bInfo.teamName || '').toLowerCase(); return teamSortDir === 'asc' ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal); }
+                  if (teamSortCol === 'members') { aVal = aInfo.memberCount || 0; bVal = bInfo.memberCount || 0; }
+                  else if (teamSortCol === 'count') { const md = metricDefs[0]; aVal = aInfo[md?.metricFilter]?.count ?? 0; bVal = bInfo[md?.metricFilter]?.count ?? 0; }
+                  else if (teamSortCol.startsWith('named_')) { const mf = teamSortCol.replace('named_', ''); aVal = aInfo[mf]?.namedCount ?? 0; bVal = bInfo[mf]?.namedCount ?? 0; }
+                  else if (teamSortCol.startsWith('field_')) { const parts = teamSortCol.split('_'); const mf = parts[1]; const fk = parts.slice(2).join('_'); aVal = aInfo[mf]?.fieldCounts?.[fk] ?? 0; bVal = bInfo[mf]?.fieldCounts?.[fk] ?? 0; }
+                  else { aVal = aInfo[teamSortCol]?.count ?? 0; bVal = bInfo[teamSortCol]?.count ?? 0; }
+                  return teamSortDir === 'asc' ? aVal - bVal : bVal - aVal;
+                });
 
                 // Render extra columns helper
                 const renderExtraCells = (actionFields: Array<{ key: string; label: string }>, namedCount: number, fieldCounts: Record<string, number>) => {
@@ -2437,11 +2470,17 @@ const CampaignLineGraph: React.FC<CampaignLineGraphProps> = ({
                     <Table size="small" stickyHeader>
                       <TableHead>
                         <TableRow>
-                          <TableCell sx={{ fontWeight: 600, py: 1, minWidth: 150 }}>Team</TableCell>
-                          <TableCell align="center" sx={{ fontWeight: 600, py: 1, minWidth: 70 }}>Members</TableCell>
+                          <TableCell sx={{ fontWeight: 600, py: 1, minWidth: 150, cursor: 'pointer', userSelect: 'none', '&:hover': { bgcolor: 'action.hover' } }} onClick={() => toggleTeamSort('team')}>
+                            <Box sx={{ display: 'flex', alignItems: 'center' }}>Team{teamSortIndicator('team')}</Box>
+                          </TableCell>
+                          <TableCell align="center" sx={{ fontWeight: 600, py: 1, minWidth: 70, cursor: 'pointer', userSelect: 'none', '&:hover': { bgcolor: 'action.hover' } }} onClick={() => toggleTeamSort('members')}>
+                            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>Members{teamSortIndicator('members')}</Box>
+                          </TableCell>
                           {metricDefs.map(md => (
                             <React.Fragment key={md.metricFilter}>
-                              <TableCell align="center" sx={{ fontWeight: 600, py: 1, minWidth: 140 }}>{md.metricLabel}</TableCell>
+                              <TableCell align="center" sx={{ fontWeight: 600, py: 1, minWidth: 140, cursor: 'pointer', userSelect: 'none', '&:hover': { bgcolor: 'action.hover' } }} onClick={() => toggleTeamSort(md.metricFilter)}>
+                                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{md.metricLabel}{teamSortIndicator(md.metricFilter)}</Box>
+                              </TableCell>
                               {renderExtraHeaders(md.actionFields)}
                             </React.Fragment>
                           ))}
@@ -2855,9 +2894,20 @@ const CampaignLineGraph: React.FC<CampaignLineGraphProps> = ({
                       }
                     }
                   }
-                  // Fallback to default_individual_goal if no campaign goal
-                  if (totalGoal === 0 && ad?.default_individual_goal) {
-                    totalGoal = Number(ad.default_individual_goal);
+                  // Fallback: sum individual goals across all organizers
+                  if (totalGoal === 0 && customActionId) {
+                    const defaultGoal = Number(ad?.default_individual_goal) || 5;
+                    // Sum goals for every organizer who has a goal set, or use default
+                    const allOrganizerVanIds = new Set<string>();
+                    (teamsData || []).forEach((team: any) => {
+                      (team.organizers || []).forEach((o: any) => { const vid = o.id || o.vanId; if (vid) allOrganizerVanIds.add(vid.toString()); });
+                      if (team.lead?.id) allOrganizerVanIds.add(team.lead.id.toString());
+                      (team.bigQueryData?.teamMembersWithRoles || []).forEach((m: any) => { if (m.id) allOrganizerVanIds.add(m.id.toString()); });
+                    });
+                    allOrganizerVanIds.forEach(vid => {
+                      const memberGoals = organizerGoalsMap.get(vid);
+                      totalGoal += memberGoals?.get(customActionId!) || defaultGoal;
+                    });
                   }
                 } else {
                   for (const campaign of selectedCampaignObjs) {
